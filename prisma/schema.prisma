@@ -432,6 +432,7 @@ model PickupSettlementRevision {
   tenantId             String                     @db.Uuid
   outletId             String                     @db.Uuid
   masterPickupId       String                     @db.Uuid
+  requestKey           String?                    @db.Uuid
   revision             Int
   recordStatus         FinancialRecordStatus      @default(VALID)
   supersedesRevisionId String?                    @db.Uuid
@@ -454,6 +455,7 @@ model PickupSettlementRevision {
   voidedBy             User?                      @relation("PickupSettlementVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
 
   @@unique([masterPickupId, revision])
+  @@unique([tenantId, outletId, requestKey])
   @@index([tenantId, outletId, masterPickupId, recordStatus])
 }
 

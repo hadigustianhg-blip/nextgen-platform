@@ -237,7 +237,7 @@ export async function syncPickup(
     await auditRun(context, run.id, "MASTER_PICKUP_NORMALIZED", "UPDATE", {
       normalized: created + updated + duplicate,
     });
-    await auditRun(context, run.id, "SYNC_COMPLETED", "UPDATE", {
+    await auditRun(context, run.id, "PICKUP_SYNC_COMPLETED", "UPDATE", {
       status,
       ...counts,
     });
