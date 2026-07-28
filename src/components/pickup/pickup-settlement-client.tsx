@@ -23,6 +23,29 @@ type SettlementRow = {
 };
 
 type Account = { id: string; label: string };
+type SettlementSummary = {
+  nominalTotalPickup: string;
+  totalPickupCount: number;
+  unpaidCount: number;
+  paidCount: number;
+  overpaidCount: number;
+  totalCash: string;
+  cashPickupCount: number;
+  totalTransfer: string;
+  transferPickupCount: number;
+};
+
+const emptySummary: SettlementSummary = {
+  nominalTotalPickup: "0",
+  totalPickupCount: 0,
+  unpaidCount: 0,
+  paidCount: 0,
+  overpaidCount: 0,
+  totalCash: "0",
+  cashPickupCount: 0,
+  totalTransfer: "0",
+  transferPickupCount: 0,
+};
 
 const statusLabels = {
   BELUM_BAYAR: "Belum Bayar",
@@ -32,6 +55,7 @@ const statusLabels = {
 
 export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
   const [rows, setRows] = useState<SettlementRow[]>([]);
+  const [summary, setSummary] = useState<SettlementSummary>(emptySummary);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 25, total: 0, totalPages: 1 });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -42,7 +66,7 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [notice, setNotice] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
   const [selected, setSelected] = useState<SettlementRow | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [requestId, setRequestId] = useState("");
@@ -52,6 +76,15 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
   const [accountId, setAccountId] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState<Map<string, SettlementRow>>(new Map());
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
+  const [bulkRequestId, setBulkRequestId] = useState("");
+  const [bulkDiscount, setBulkDiscount] = useState("0");
+  const [bulkStatus, setBulkStatus] = useState<"BELUM_BAYAR" | "SUDAH_BAYAR">("BELUM_BAYAR");
+  const [bulkMethod, setBulkMethod] = useState<"" | "TUNAI" | "TRANSFER">("");
+  const [bulkAccountId, setBulkAccountId] = useState("");
+  const [bulkNote, setBulkNote] = useState("");
 
   const query = useMemo(() => new URLSearchParams({
     page: String(page),
@@ -66,7 +99,7 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
     setLoading(true);
     try {
       const [listResponse, runResponse] = await Promise.all([
-        fetch(`/api/pickup/settlements?${query}`, { cache: "no-store" }),
+        fetch(`/api/pickup/settlement?${query}`, { cache: "no-store" }),
         fetch("/api/pickup/runs/latest", { cache: "no-store" }),
       ]);
       if (!listResponse.ok || !runResponse.ok) throw new Error();
@@ -74,6 +107,7 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
       const runBody = await runResponse.json();
       setRows(listBody.data.rows);
       setPagination(listBody.data.pagination);
+      setSummary(listBody.data.summary ?? emptySummary);
       setLastSyncAt(runBody.data?.completedAt ?? null);
     } catch {
       setNotice({ tone: "error", text: "Data Pickup Settlement belum dapat dimuat." });
@@ -96,6 +130,96 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
       }
     });
   }, []);
+
+  function resetBulkSelectionForFilter() {
+    if (bulkSelected.size > 0) {
+      setNotice({ tone: "info", text: "Pilihan massal direset karena filter berubah." });
+    }
+    setBulkSelected(new Map());
+  }
+
+  function cancelBulkMode() {
+    setBulkMode(false);
+    setBulkSelected(new Map());
+    setBulkModalOpen(false);
+  }
+
+  function toggleBulkRow(row: SettlementRow) {
+    setBulkSelected((current) => {
+      const next = new Map(current);
+      if (next.has(row.id)) next.delete(row.id);
+      else next.set(row.id, row);
+      return next;
+    });
+  }
+
+  function toggleCurrentPage() {
+    setBulkSelected((current) => {
+      const next = new Map(current);
+      const allSelected = rows.length > 0 && rows.every((row) => next.has(row.id));
+      for (const row of rows) {
+        if (allSelected) next.delete(row.id);
+        else next.set(row.id, row);
+      }
+      return next;
+    });
+  }
+
+  function openBulkAdjustment() {
+    if (!bulkMode) {
+      setBulkMode(true);
+      return;
+    }
+    if (bulkSelected.size === 0) return;
+    setBulkRequestId(crypto.randomUUID());
+    setBulkDiscount("0");
+    setBulkStatus("BELUM_BAYAR");
+    setBulkMethod("");
+    setBulkAccountId("");
+    setBulkNote("");
+    setBulkModalOpen(true);
+  }
+
+  async function saveBulkAdjustment() {
+    if (bulkSelected.size === 0 || saving) return;
+    setSaving(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/pickup/settlement/bulk-adjustment", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          batchRequestId: bulkRequestId,
+          masterPickupIds: [...bulkSelected.keys()],
+          discountAmount: bulkDiscount,
+          status: bulkStatus,
+          paymentMethod: bulkStatus === "SUDAH_BAYAR" ? bulkMethod || null : null,
+          transferAccountId:
+            bulkStatus === "SUDAH_BAYAR" && bulkMethod === "TRANSFER"
+              ? bulkAccountId || null
+              : null,
+          note: bulkNote || null,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message);
+      const adjustedCount = body.data.adjustedCount;
+      setBulkModalOpen(false);
+      setBulkMode(false);
+      setBulkSelected(new Map());
+      setNotice({ tone: "success", text: `${adjustedCount} pickup berhasil disesuaikan.` });
+      await loadData();
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        text: error instanceof Error
+          ? error.message
+          : "Penyesuaian massal gagal. Tidak ada data yang diubah.",
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function syncPickup() {
     setSyncing(true);
@@ -183,6 +307,17 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
   const previewReceived = selected
     ? Math.max(0, Number(selected.freightAmount) - Number(discount || 0))
     : 0;
+  const selectedRows = [...bulkSelected.values()];
+  const bulkFreightTotal = selectedRows.reduce(
+    (total, row) => total + Number(row.freightAmount),
+    0,
+  );
+  const bulkCurrentObligation = selectedRows.reduce(
+    (total, row) => total + Number(row.finalObligation),
+    0,
+  );
+  const allCurrentPageSelected =
+    rows.length > 0 && rows.every((row) => bulkSelected.has(row.id));
 
   return (
     <div className="mx-auto max-w-[1700px]">
@@ -204,22 +339,44 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
         </div>
       </div>
 
-      {notice && <div className={`mt-5 rounded-xl border px-4 py-3 text-sm ${notice.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>{notice.text}</div>}
+      {notice && <div className={`mt-5 rounded-xl border px-4 py-3 text-sm ${notice.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : notice.tone === "info" ? "border-blue-200 bg-blue-50 text-blue-800" : "border-red-200 bg-red-50 text-red-800"}`}>{notice.text}</div>}
+
+      <section className="mt-6 grid gap-4 lg:grid-cols-3" aria-label="Ringkasan Pickup Settlement">
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Nominal Total Pickup</p>
+          <p className="mt-3 text-2xl font-extrabold text-slate-900">{formatMoney(summary.nominalTotalPickup)}</p>
+          <p className="mt-2 text-sm font-semibold text-slate-700">{summary.totalPickupCount} Resi</p>
+          <p className="mt-1 text-xs text-slate-500">
+            {summary.unpaidCount} Belum Bayar • {summary.paidCount} Sudah Bayar
+            {summary.overpaidCount > 0 ? ` • ${summary.overpaidCount} Lebih Bayar` : ""}
+          </p>
+        </article>
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Total Tunai</p>
+          <p className="mt-3 text-2xl font-extrabold text-slate-900">{formatMoney(summary.totalCash)}</p>
+          <p className="mt-2 text-sm font-semibold text-slate-700">{summary.cashPickupCount} Resi</p>
+        </article>
+        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Total Transfer</p>
+          <p className="mt-3 text-2xl font-extrabold text-slate-900">{formatMoney(summary.totalTransfer)}</p>
+          <p className="mt-2 text-sm font-semibold text-slate-700">{summary.transferPickupCount} Resi</p>
+        </article>
+      </section>
 
       <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="grid gap-3 border-b border-slate-100 p-4 md:grid-cols-2 xl:grid-cols-6">
+        <div className="grid gap-3 border-b border-slate-100 p-4 md:grid-cols-2 xl:grid-cols-7">
           <label className="relative xl:col-span-2">
             <Search className="absolute left-3 top-3 text-slate-400" size={16} />
-            <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Cari waybill…" className="h-10 w-full rounded-xl border border-slate-200 pl-9 pr-3 text-sm" />
+            <input value={search} onChange={(event) => { resetBulkSelectionForFilter(); setSearch(event.target.value); setPage(1); }} placeholder="Cari waybill…" className="h-10 w-full rounded-xl border border-slate-200 pl-9 pr-3 text-sm" />
           </label>
-          <input value={staff} onChange={(event) => { setStaff(event.target.value); setPage(1); }} placeholder="Filter staff" className="h-10 rounded-xl border border-slate-200 px-3 text-sm" />
-          <select value={paymentStatus} onChange={(event) => { setPaymentStatus(event.target.value); setPage(1); }} className="h-10 rounded-xl border border-slate-200 px-3 text-sm">
+          <input value={staff} onChange={(event) => { resetBulkSelectionForFilter(); setStaff(event.target.value); setPage(1); }} placeholder="Filter staff" className="h-10 rounded-xl border border-slate-200 px-3 text-sm" />
+          <select value={paymentStatus} onChange={(event) => { resetBulkSelectionForFilter(); setPaymentStatus(event.target.value); setPage(1); }} className="h-10 rounded-xl border border-slate-200 px-3 text-sm">
             <option value="">Semua status</option>
             <option value="BELUM_BAYAR">Belum Bayar</option>
             <option value="SUDAH_BAYAR">Sudah Bayar</option>
             <option value="LEBIH_BAYAR">Lebih Bayar</option>
           </select>
-          <select value={paymentMethod} onChange={(event) => { setPaymentMethod(event.target.value); setPage(1); }} className="h-10 rounded-xl border border-slate-200 px-3 text-sm">
+          <select value={paymentMethod} onChange={(event) => { resetBulkSelectionForFilter(); setPaymentMethod(event.target.value); setPage(1); }} className="h-10 rounded-xl border border-slate-200 px-3 text-sm">
             <option value="">Semua metode</option>
             <option value="TUNAI">Tunai</option>
             <option value="TRANSFER">Transfer</option>
@@ -227,15 +384,25 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
           <select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }} className="h-10 rounded-xl border border-slate-200 px-3 text-sm">
             {[10, 25, 50, 100].map((size) => <option key={size} value={size}>{size} baris</option>)}
           </select>
+          <div className="flex gap-2">
+            <button onClick={openBulkAdjustment} className="h-10 flex-1 rounded-xl bg-slate-900 px-3 text-sm font-bold text-white">
+              {bulkMode && bulkSelected.size > 0 ? `Sesuaikan (${bulkSelected.size})` : "Penyesuaian Massal"}
+            </button>
+            {bulkMode && <button onClick={cancelBulkMode} className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600">Batal</button>}
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1450px] text-left text-sm">
             <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
-              <tr>{["Waktu Diperbarui", "Waybill", "Staff", "Pengirim", "Ongkir", "Status Pembayaran", "Metode Bayar", "Rekening Transfer", "Keterangan", "Aksi"].map((column) => <th key={column} className="px-4 py-3 font-bold">{column}</th>)}</tr>
+              <tr>
+                {bulkMode && <th className="px-4 py-3"><input aria-label="Pilih semua data halaman ini" type="checkbox" checked={allCurrentPageSelected} onChange={toggleCurrentPage} /></th>}
+                {["Waktu Diperbarui", "Waybill", "Staff", "Pengirim", "Ongkir", "Status Pembayaran", "Metode Bayar", "Rekening Transfer", "Keterangan", "Aksi"].map((column) => <th key={column} className="px-4 py-3 font-bold">{column}</th>)}
+              </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {loading ? <tr><td colSpan={10} className="py-16 text-center text-slate-500"><LoaderCircle className="mx-auto mb-2 animate-spin" />Memuat data…</td></tr> : rows.length === 0 ? <tr><td colSpan={10} className="py-16 text-center text-slate-500">Belum ada pickup Tunai.</td></tr> : rows.map((row) => (
+              {loading ? <tr><td colSpan={bulkMode ? 11 : 10} className="py-16 text-center text-slate-500"><LoaderCircle className="mx-auto mb-2 animate-spin" />Memuat data…</td></tr> : rows.length === 0 ? <tr><td colSpan={bulkMode ? 11 : 10} className="py-16 text-center text-slate-500">Belum ada pickup Tunai.</td></tr> : rows.map((row) => (
                 <tr key={row.id} className="hover:bg-blue-50/30">
+                  {bulkMode && <td className="px-4 py-3"><input aria-label={`Pilih ${row.waybillNo}`} type="checkbox" checked={bulkSelected.has(row.id)} onChange={() => toggleBulkRow(row)} /></td>}
                   <td className="whitespace-nowrap px-4 py-3">{formatDateTime(row.updatedAt)}</td>
                   <td className="px-4 py-3 font-bold text-blue-700">{row.waybillNo}</td>
                   <td className="px-4 py-3">{row.staff ?? "—"}</td>
@@ -301,6 +468,55 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
               <button onClick={closeModal} disabled={saving} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-50">Batal</button>
               <button onClick={() => void saveAdjustment()} disabled={saving} className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">
                 {saving && <LoaderCircle size={16} className="animate-spin" />} Simpan Penyesuaian
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {bulkModalOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-label="Penyesuaian Massal">
+          <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+              <div><h2 className="text-xl font-extrabold text-slate-900">Penyesuaian Massal</h2><p className="mt-1 text-xs text-slate-500">Perubahan diterapkan per resi dalam satu transaksi.</p></div>
+              <button onClick={() => !saving && setBulkModalOpen(false)} disabled={saving} aria-label="Tutup modal massal" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={20} /></button>
+            </div>
+            <div className="grid gap-3 bg-slate-50 p-6 sm:grid-cols-3">
+              <div className="rounded-xl bg-white p-3"><p className="text-[10px] font-bold uppercase text-slate-400">Jumlah resi</p><p className="mt-1 font-bold">{bulkSelected.size}</p></div>
+              <div className="rounded-xl bg-white p-3"><p className="text-[10px] font-bold uppercase text-slate-400">Total ongkir</p><p className="mt-1 font-bold">{formatMoney(bulkFreightTotal)}</p></div>
+              <div className="rounded-xl bg-white p-3"><p className="text-[10px] font-bold uppercase text-slate-400">Kewajiban saat ini</p><p className="mt-1 font-bold">{formatMoney(bulkCurrentObligation)}</p></div>
+              <div className="rounded-xl bg-white p-3 text-sm sm:col-span-3">
+                {selectedRows.slice(0, 5).map((row) => row.waybillNo).join(", ")}
+                {selectedRows.length > 5 ? ` + ${selectedRows.length - 5} resi lainnya` : ""}
+              </div>
+            </div>
+            <div className="grid gap-4 p-6 sm:grid-cols-2">
+              <label className="text-sm font-semibold text-slate-700">Diskon per resi
+                <input type="number" min="0" step="0.01" value={bulkDiscount} onChange={(event) => setBulkDiscount(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 font-normal" />
+              </label>
+              <label className="text-sm font-semibold text-slate-700">Status
+                <select value={bulkStatus} onChange={(event) => { const status = event.target.value as "BELUM_BAYAR" | "SUDAH_BAYAR"; setBulkStatus(status); if (status === "BELUM_BAYAR") { setBulkMethod(""); setBulkAccountId(""); } }} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 font-normal">
+                  <option value="BELUM_BAYAR">Belum Bayar</option><option value="SUDAH_BAYAR">Sudah Bayar</option>
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-slate-700">Metode Bayar
+                <select disabled={bulkStatus === "BELUM_BAYAR"} value={bulkMethod} onChange={(event) => { const method = event.target.value as "" | "TUNAI" | "TRANSFER"; setBulkMethod(method); if (method !== "TRANSFER") setBulkAccountId(""); }} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 font-normal disabled:bg-slate-100">
+                  <option value="">Pilih metode</option><option value="TUNAI">Tunai</option><option value="TRANSFER">Transfer</option>
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-slate-700">Rekening Transfer
+                <select disabled={bulkStatus !== "SUDAH_BAYAR" || bulkMethod !== "TRANSFER"} value={bulkAccountId} onChange={(event) => setBulkAccountId(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 font-normal disabled:bg-slate-100">
+                  <option value="">Pilih rekening</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.label}</option>)}
+                </select>
+              </label>
+              <label className="text-sm font-semibold text-slate-700 sm:col-span-2">Keterangan
+                <textarea value={bulkNote} onChange={(event) => setBulkNote(event.target.value)} rows={3} className="mt-1.5 w-full rounded-xl border border-slate-200 p-3 font-normal" />
+              </label>
+            </div>
+            <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4">
+              <button onClick={() => setBulkModalOpen(false)} disabled={saving} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-50">Batal</button>
+              <button onClick={() => void saveBulkAdjustment()} disabled={saving} className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+                {saving && <LoaderCircle size={16} className="animate-spin" />} Simpan Penyesuaian Massal
               </button>
             </div>
           </div>

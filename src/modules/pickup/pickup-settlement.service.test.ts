@@ -35,6 +35,15 @@ function hydrate(master: Record<string, any>) {
 
 const transactionClient = {
   pickupSettlementRevision: {
+    findMany: vi.fn(async ({ where }: any) =>
+      state.revisions
+        .filter((revision) =>
+          revision.tenantId === where.tenantId &&
+          revision.outletId === where.outletId &&
+          where.requestKey.in.includes(revision.requestKey),
+        )
+        .map(({ requestKey }) => ({ requestKey })),
+    ),
     findUnique: vi.fn(async ({ where }: any) => {
       const key = where.tenantId_outletId_requestKey;
       return state.revisions.find((revision) =>
@@ -63,6 +72,15 @@ const transactionClient = {
     }),
   },
   masterPickup: {
+    findMany: vi.fn(async ({ where }: any) =>
+      state.masters
+        .filter((master) =>
+          where.id.in.includes(master.id) &&
+          master.tenantId === where.tenantId &&
+          master.outletId === where.outletId,
+        )
+        .map(hydrate),
+    ),
     findFirst: vi.fn(async ({ where }: any) => {
       const master = scopedMaster(where);
       return master ? hydrate(master) : null;
@@ -105,12 +123,37 @@ vi.mock("@/lib/db/prisma", () => ({
         return master ? hydrate(master) : null;
       }),
     },
-    $transaction: vi.fn(async (callback: any) => callback(transactionClient)),
+    auditLog: {
+      create: vi.fn(async ({ data }: any) => {
+        state.audits.push(data);
+        return data;
+      }),
+    },
+    $transaction: vi.fn(async (callback: any) => {
+      const snapshot = {
+        revisions: state.revisions.map((revision) => ({ ...revision })),
+        payments: state.payments.map((payment) => ({ ...payment })),
+        audits: state.audits.map((audit) => ({ ...audit })),
+        revisionSequence: state.revisionSequence,
+        paymentSequence: state.paymentSequence,
+      };
+      try {
+        return await callback(transactionClient);
+      } catch (error) {
+        state.revisions.splice(0, state.revisions.length, ...snapshot.revisions);
+        state.payments.splice(0, state.payments.length, ...snapshot.payments);
+        state.audits.splice(0, state.audits.length, ...snapshot.audits);
+        state.revisionSequence = snapshot.revisionSequence;
+        state.paymentSequence = snapshot.paymentSequence;
+        throw error;
+      }
+    }),
   },
 }));
 
 import {
   adjustPickupSettlement,
+  bulkAdjustPickupSettlements,
   calculatePickupFinancials,
   listPickupSettlements,
 } from "./pickup-settlement.service";
@@ -168,6 +211,105 @@ describe("Pickup Settlement service", () => {
     });
     expect(result.paymentStatus).toBe("SUDAH_BAYAR");
     expect(result.finalObligation.toString()).toBe("9000");
+  });
+
+  it("returns summary for the full filtered result independent of pagination", async () => {
+    addMaster("one", "WB-ONE", "Tunai");
+    addMaster("two", "WB-TWO", "Tunai");
+    state.revisions.push({
+      id: "revision-one",
+      tenantId: "tenant-a",
+      outletId: "outlet-a",
+      masterPickupId: "one",
+      requestKey: "10000000-0000-4000-8000-000000000101",
+      revision: 1,
+      recordStatus: "VALID",
+      discountAmount: new Prisma.Decimal(1000),
+      reason: null,
+    });
+    state.payments.push(
+      {
+        id: "payment-one",
+        tenantId: "tenant-a",
+        outletId: "outlet-a",
+        masterPickupId: "one",
+        transactionKey: "10000000-0000-4000-8000-000000000201",
+        revision: 1,
+        recordStatus: "VALID",
+        receivedAmount: new Prisma.Decimal(9000),
+        paymentMethodRaw: "TUNAI",
+        transferAccount: null,
+        note: null,
+      },
+      {
+        id: "payment-two",
+        tenantId: "tenant-a",
+        outletId: "outlet-a",
+        masterPickupId: "two",
+        transactionKey: "10000000-0000-4000-8000-000000000202",
+        revision: 1,
+        recordStatus: "VALID",
+        receivedAmount: new Prisma.Decimal(10000),
+        paymentMethodRaw: "TRANSFER",
+        transferAccount: "bank-ops",
+        note: null,
+      },
+    );
+
+    const firstPage = await listPickupSettlements({
+      ...context,
+      page: 1,
+      pageSize: 1,
+    });
+    const secondPage = await listPickupSettlements({
+      ...context,
+      page: 2,
+      pageSize: 1,
+    });
+    expect(firstPage.summary).toEqual({
+      nominalTotalPickup: "19000",
+      totalPickupCount: 2,
+      unpaidCount: 0,
+      paidCount: 2,
+      overpaidCount: 0,
+      totalCash: "9000",
+      cashPickupCount: 1,
+      totalTransfer: "10000",
+      transferPickupCount: 1,
+    });
+    expect(secondPage.summary).toEqual(firstPage.summary);
+  });
+
+  it("applies staff, status, method, search, tenant and outlet filters to summary", async () => {
+    addMaster("one", "WB-ONE", "Tunai");
+    addMaster("two", "WB-TWO", "Tunai");
+    addMaster("other", "WB-OTHER", "Tunai", "tenant-b", "outlet-b");
+    state.masters.find((master) => master.id === "two")!.staffName = "Siti";
+    state.payments.push({
+      id: "payment-one",
+      tenantId: "tenant-a",
+      outletId: "outlet-a",
+      masterPickupId: "one",
+      transactionKey: "10000000-0000-4000-8000-000000000203",
+      revision: 1,
+      recordStatus: "VALID",
+      receivedAmount: new Prisma.Decimal(10000),
+      paymentMethodRaw: "TUNAI",
+      transferAccount: null,
+      note: null,
+    });
+    const filtered = await listPickupSettlements({
+      ...context,
+      page: 1,
+      pageSize: 25,
+      search: "ONE",
+      staff: "Rid",
+      paymentStatus: "SUDAH_BAYAR",
+      paymentMethod: "TUNAI",
+    });
+    expect(filtered.summary.totalPickupCount).toBe(1);
+    expect(filtered.summary.totalCash).toBe("10000");
+    expect(filtered.rows.map((row) => row.waybillNo)).toEqual(["WB-ONE"]);
   });
 
   it("does not create a VALID payment for Belum Bayar", async () => {
@@ -241,6 +383,9 @@ describe("Pickup Settlement service", () => {
     expect(result.rows.filter((row) => row.paymentStatus === "SUDAH_BAYAR")).toHaveLength(2);
     expect(result.rows.filter((row) => row.paymentStatus === "BELUM_BAYAR")).toHaveLength(3);
     expect(state.payments).toHaveLength(paymentCountBeforeReplay);
+    expect(result.summary.totalPickupCount).toBe(5);
+    expect(result.summary.paidCount).toBe(2);
+    expect(result.summary.unpaidCount).toBe(3);
   });
 
   it("isolates tenant and outlet reads", async () => {
@@ -248,5 +393,98 @@ describe("Pickup Settlement service", () => {
     addMaster("b", "WB-B", "Tunai", "tenant-b", "outlet-b");
     const result = await listPickupSettlements({ ...context, page: 1, pageSize: 25 });
     expect(result.rows.map((row) => row.waybillNo)).toEqual(["WB-A"]);
+  });
+
+  it("creates one VALID cash payment per pickup and applies discount per resi", async () => {
+    addMaster("one", "WB-ONE", "Tunai");
+    addMaster("two", "WB-TWO", "Tunai");
+    const result = await bulkAdjustPickupSettlements(context, {
+      batchRequestId: "20000000-0000-4000-8000-000000000001",
+      masterPickupIds: ["one", "two"],
+      discountAmount: 1000,
+      status: "SUDAH_BAYAR",
+      paymentMethod: "TUNAI",
+    });
+    expect(result.adjustedCount).toBe(2);
+    expect(state.revisions).toHaveLength(2);
+    expect(state.payments).toHaveLength(2);
+    expect(state.payments.every((payment) => payment.receivedAmount.toString() === "9000")).toBe(true);
+  });
+
+  it("requires a transfer account and voids active payments for Belum Bayar", async () => {
+    addMaster("one", "WB-ONE", "Tunai");
+    await expect(bulkAdjustPickupSettlements(context, {
+      batchRequestId: "20000000-0000-4000-8000-000000000002",
+      masterPickupIds: ["one"],
+      discountAmount: 0,
+      status: "SUDAH_BAYAR",
+      paymentMethod: "TRANSFER",
+    })).rejects.toThrow("TRANSFER_ACCOUNT_REQUIRED");
+
+    state.payments.push({
+      id: "existing-payment",
+      tenantId: "tenant-a",
+      outletId: "outlet-a",
+      masterPickupId: "one",
+      transactionKey: "20000000-0000-4000-8000-000000000102",
+      revision: 1,
+      recordStatus: "VALID",
+      receivedAmount: new Prisma.Decimal(10000),
+      paymentMethodRaw: "TUNAI",
+      transferAccount: null,
+      note: null,
+    });
+    await bulkAdjustPickupSettlements(context, {
+      batchRequestId: "20000000-0000-4000-8000-000000000003",
+      masterPickupIds: ["one"],
+      discountAmount: 0,
+      status: "BELUM_BAYAR",
+    });
+    expect(state.payments[0].recordStatus).toBe("VOID");
+  });
+
+  it("rolls back every pickup if one discount is invalid", async () => {
+    addMaster("one", "WB-ONE", "Tunai");
+    addMaster("two", "WB-TWO", "Tunai");
+    state.masters.find((master) => master.id === "two")!.freightAmount =
+      new Prisma.Decimal(500);
+    await expect(bulkAdjustPickupSettlements(context, {
+      batchRequestId: "20000000-0000-4000-8000-000000000004",
+      masterPickupIds: ["one", "two"],
+      discountAmount: 1000,
+      status: "BELUM_BAYAR",
+    })).rejects.toThrow("INVALID_DISCOUNT");
+    expect(state.revisions).toHaveLength(0);
+    expect(state.payments).toHaveLength(0);
+    expect(state.audits.some((audit) => audit.entityType === "PICKUP_BULK_ADJUSTMENT_FAILED")).toBe(true);
+  });
+
+  it("rejects another tenant, non-Tunai pickup, and remains idempotent", async () => {
+    addMaster("one", "WB-ONE", "Tunai");
+    addMaster("other", "WB-OTHER", "Tunai", "tenant-b", "outlet-b");
+    await expect(bulkAdjustPickupSettlements(context, {
+      batchRequestId: "20000000-0000-4000-8000-000000000005",
+      masterPickupIds: ["one", "other"],
+      discountAmount: 0,
+      status: "BELUM_BAYAR",
+    })).rejects.toThrow("PICKUP_NOT_FOUND");
+
+    addMaster("monthly", "WB-MONTHLY", "Bulanan");
+    await expect(bulkAdjustPickupSettlements(context, {
+      batchRequestId: "20000000-0000-4000-8000-000000000006",
+      masterPickupIds: ["monthly"],
+      discountAmount: 0,
+      status: "BELUM_BAYAR",
+    })).rejects.toThrow("PICKUP_NOT_FOUND");
+
+    const input = {
+      batchRequestId: "20000000-0000-4000-8000-000000000007",
+      masterPickupIds: ["one"],
+      discountAmount: 0,
+      status: "BELUM_BAYAR" as const,
+    };
+    await bulkAdjustPickupSettlements(context, input);
+    await bulkAdjustPickupSettlements(context, input);
+    expect(state.revisions.filter((revision) => revision.masterPickupId === "one")).toHaveLength(1);
   });
 });
