@@ -1,0 +1,167 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  CREATE
+  UPDATE
+  DELETE
+}
+
+model Tenant {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  name                   String
+  slug                   String                  @unique
+  status                 TenantStatus            @default(ACTIVE)
+  timezone               String                  @default("Asia/Jakarta")
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  outlets                Outlet[]
+  users                  User[]
+  roles                  Role[]
+  sessions               UserSession[]
+  auditLogs              AuditLog[]
+  integrationCredentials IntegrationCredential[]
+}
+
+model Outlet {
+  id        String        @id @default(uuid()) @db.Uuid
+  tenantId  String        @db.Uuid
+  code      String
+  name      String
+  isActive  Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users     User[]
+  sessions  UserSession[]
+  auditLogs AuditLog[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+}
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  tenantId     String        @db.Uuid
+  outletId     String?       @db.Uuid
+  email        String
+  name         String
+  passwordHash String
+  status       UserStatus    @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outlet       Outlet?       @relation(fields: [outletId], references: [id], onDelete: SetNull)
+  roles        UserRole[]
+  sessions     UserSession[]
+  auditLogs    AuditLog[]    @relation("AuditActor")
+
+  @@unique([tenantId, email])
+  @@index([tenantId, status])
+  @@index([tenantId, outletId])
+}
+
+model Role {
+  id          String     @id @default(uuid()) @db.Uuid
+  tenantId    String     @db.Uuid
+  code        String
+  name        String
+  description String?
+  isSystem    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  tenant      Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users       UserRole[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+model UserRole {
+  userId    String   @db.Uuid
+  roleId    String   @db.Uuid
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+model UserSession {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  userId     String   @db.Uuid
+  outletId   String?  @db.Uuid
+  tokenHash  String   @unique @db.Char(64)
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outlet     Outlet?  @relation(fields: [outletId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, userId])
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id         BigInt      @id @default(autoincrement())
+  tenantId   String      @db.Uuid
+  actorId    String?     @db.Uuid
+  outletId   String?     @db.Uuid
+  action     AuditAction
+  entityType String
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime    @default(now())
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor      User?       @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  outlet     Outlet?     @relation(fields: [outletId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, actorId, createdAt(sort: Desc)])
+}
+
+model IntegrationCredential {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  provider         String
+  label            String
+  encryptedPayload String
+  keyVersion       Int      @default(1)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider, label])
+  @@index([tenantId, provider, isActive])
+}
