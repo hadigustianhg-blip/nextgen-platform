@@ -9,5 +9,6 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    exclude: ["jfs-middleware-refactor/**", "node_modules/**", ".next/**"],
   },
 });

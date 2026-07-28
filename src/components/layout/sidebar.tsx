@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   BarChart3,
   ChevronLeft,
@@ -9,6 +10,8 @@ import {
   CreditCard,
   LogOut,
   Menu,
+  PackageSearch,
+  PackageCheck,
   Settings,
   ShieldCheck,
   UsersRound,
@@ -17,7 +20,9 @@ import {
 } from "lucide-react";
 
 const navigation = [
-  { label: "Dashboard", icon: CircleGauge, href: "/dashboard", active: true },
+  { label: "Dashboard", icon: CircleGauge, href: "/dashboard" },
+  { label: "RAW Pickup", icon: PackageSearch, href: "/dashboard/pickup/raw" },
+  { label: "Master Pickup", icon: PackageCheck, href: "/dashboard/pickup/master" },
   { label: "Settlement Center", icon: WalletCards, href: "#settlement" },
   { label: "Monitoring", icon: BarChart3, href: "#monitoring" },
   { label: "Payment", icon: CreditCard, href: "#payment" },
@@ -28,10 +33,10 @@ const navigation = [
   label: string;
   icon: typeof CircleGauge;
   href: string;
-  active?: boolean;
 }>;
 
 export function Sidebar({ outletCode }: { outletCode: string | null }) {
+  const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -80,21 +85,27 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
         )}
 
         <nav className="mt-5 flex-1 space-y-1 px-3" aria-label="Navigasi utama">
-          {navigation.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              title={collapsed ? item.label : undefined}
-              className={[
-                "flex h-11 items-center rounded-xl px-3 text-sm font-medium transition-colors",
-                item.active ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
-                collapsed ? "justify-center" : "gap-3",
-              ].join(" ")}
-            >
-              <item.icon size={19} />
-              {!collapsed && <span>{item.label}</span>}
-            </Link>
-          ))}
+          {navigation.map((item) => {
+            const active =
+              item.href === "/dashboard"
+                ? pathname === item.href
+                : item.href.startsWith("/") && pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.label}
+                href={item.href}
+                title={collapsed ? item.label : undefined}
+                className={[
+                  "flex h-11 items-center rounded-xl px-3 text-sm font-medium transition-colors",
+                  active ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
+                  collapsed ? "justify-center" : "gap-3",
+                ].join(" ")}
+              >
+                <item.icon size={19} />
+                {!collapsed && <span>{item.label}</span>}
+              </Link>
+            );
+          })}
         </nav>
 
         <form action="/api/auth/logout" method="post" className="border-t border-white/10 p-3">
