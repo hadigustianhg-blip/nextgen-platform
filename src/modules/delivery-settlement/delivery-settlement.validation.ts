@@ -10,7 +10,7 @@ export const deliveryOperationalDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2
 export const deliverySettlementListSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(10).max(100).default(25),
-  operationalDate: deliveryOperationalDateSchema.optional().default(""),
+  operationalDate: z.union([deliveryOperationalDateSchema, z.literal("")]).optional().default(""),
   search: z.string().trim().max(100).optional().default(""),
   paymentStatus: z.enum(["", "UNCLEARED", "CLEAR", "OVERPAID"]).optional().default(""),
   paymentMethod: z.enum(["", "UNPAID", "CASH", "TRANSFER", "CASH_TRANSFER"]).optional().default(""),

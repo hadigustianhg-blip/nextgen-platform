@@ -29,4 +29,9 @@ describe("Delivery Settlement UI contract", () => {
     expect(client).toContain('role="status"');
     expect(client).not.toContain("alert(");
   });
+
+  it("builds list queries with the canonical search parameter", () => {
+    expect(client).toContain("operationalDate, search, paymentStatus, paymentMethod");
+    expect(client).not.toContain("searchch");
+  });
 });
