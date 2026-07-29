@@ -108,7 +108,13 @@ export function voidAutomaticCashMovements(
   sourceId: string,
 ) {
   return tx.cashMovement.updateMany({
-    where: { ...scope, sourceType, sourceId, recordStatus: "VALID" },
+    where: {
+      tenantId: scope.tenantId,
+      outletId: scope.outletId,
+      sourceType,
+      sourceId,
+      recordStatus: "VALID",
+    },
     data: { recordStatus: "VOID" },
   });
 }

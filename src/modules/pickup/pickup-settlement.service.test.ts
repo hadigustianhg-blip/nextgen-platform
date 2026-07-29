@@ -500,6 +500,20 @@ describe("Pickup Settlement service", () => {
     expect(state.movements[0].recordStatus).toBe("VOID");
     expect(state.revisions.filter((revision) => revision.recordStatus === "VALID")).toHaveLength(1);
     expect(state.revisions.filter((revision) => revision.recordStatus === "SUPERSEDED")).toHaveLength(1);
+
+    const repaid = await adjustPickupSettlement(context, "pickup", {
+      requestId: "10000000-0000-4000-8000-000000000023",
+      discountAmount: 1000,
+      status: "SUDAH_BAYAR",
+      paymentMethod: "TUNAI",
+      note: "Koreksi kewajiban final",
+    });
+    expect(repaid?.paymentStatus).toBe("SUDAH_BAYAR");
+    expect(repaid?.finalObligation).toBe("9000");
+    expect(state.payments.filter((payment) => payment.recordStatus === "VALID")).toHaveLength(1);
+    expect(state.payments.find((payment) => payment.recordStatus === "VALID")?.receivedAmount.toString()).toBe("9000");
+    expect(state.movements.filter((movement) => movement.recordStatus === "VALID")).toHaveLength(1);
+    expect(state.movements.find((movement) => movement.recordStatus === "VALID")?.amount.toString()).toBe("9000");
   });
 
   it("is idempotent for double-submit", async () => {

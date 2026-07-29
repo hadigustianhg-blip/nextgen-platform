@@ -4,7 +4,11 @@ import { Prisma } from "@prisma/client";
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/db/prisma", () => ({ prisma: {} }));
 
-import { cashBalance, runningBalances } from "./cash-flow.service";
+import {
+  cashBalance,
+  runningBalances,
+  voidAutomaticCashMovements,
+} from "./cash-flow.service";
 import {
   cashFlowListSchema, manualExpenseSchema, manualIncomeSchema,
 } from "./cash-flow.validation";
@@ -22,6 +26,31 @@ const movement = (
 ) => ({ direction, channel, amount: amount(value), recordStatus });
 
 describe("Cash Flow Payment formulas", () => {
+  it("scopes automatic void queries without leaking actorId into Prisma", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const adjustmentContext = {
+      tenantId: "tenant-a",
+      outletId: "outlet-a",
+      actorId: "actor-a",
+    };
+    await voidAutomaticCashMovements(
+      { cashMovement: { updateMany } } as unknown as Prisma.TransactionClient,
+      adjustmentContext,
+      "PickupPayment",
+      "payment-a",
+    );
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: "tenant-a",
+        outletId: "outlet-a",
+        sourceType: "PickupPayment",
+        sourceId: "payment-a",
+        recordStatus: "VALID",
+      },
+      data: { recordStatus: "VOID" },
+    });
+  });
+
   it("calculates cash on hand and bank balance from valid ledger rows", () => {
     const result = cashBalance([
       movement("IN", "CASH", 1000), movement("OUT", "CASH", 250),

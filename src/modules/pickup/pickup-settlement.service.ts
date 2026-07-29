@@ -417,7 +417,11 @@ export async function adjustPickupSettlement(
         method: input.paymentMethod ?? null,
       }),
     });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 10_000,
+      timeout: 30_000,
+    });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       const existingRequest = await prisma.pickupSettlementRevision.findUnique({
@@ -712,7 +716,11 @@ export async function bulkAdjustPickupSettlements(
         idempotent: false,
         totalNominal: totalNominal.toString(),
       };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 10_000,
+      timeout: 30_000,
+    });
     return result;
   } catch (error) {
     await bulkAudit("PICKUP_BULK_ADJUSTMENT_FAILED", {

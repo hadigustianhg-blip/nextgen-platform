@@ -437,7 +437,11 @@ export async function adjustDeliverySettlement(
     } });
     const row = await tx.masterSetoran.findFirst({ where: { id, tenantId: context.tenantId, outletId: context.outletId }, include: paymentInclude });
     return row ? mapMaster(row) : null;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 10_000,
+      timeout: 30_000,
+    });
   } catch (error) {
     await prisma.auditLog.create({ data: {
       tenantId: context.tenantId, outletId: context.outletId, actorId: context.actorId,
