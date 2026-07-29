@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  CalendarDays,
   ChevronDown,
   ChevronLeft,
   CircleGauge,
@@ -221,6 +222,16 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
                   layoutClass={childLayout}
                   onNavigate={closeMobile}
                   icon={<BarChart3 size={17} />}
+                />
+                <SidebarChild
+                  href="/dashboard/monitoring/monthly"
+                  label="Monitoring Monthly"
+                  active={pathname.startsWith("/dashboard/monitoring/monthly")}
+                  collapsed={collapsed}
+                  labelClass={labelClass}
+                  layoutClass={childLayout}
+                  onNavigate={closeMobile}
+                  icon={<CalendarDays size={17} />}
                 />
               </div>
             )}

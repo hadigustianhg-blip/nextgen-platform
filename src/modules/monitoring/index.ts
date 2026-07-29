@@ -4,3 +4,6 @@ export * from "./monitoring-daily.authorization";
 export * from "./monitoring-daily.calculation";
 export * from "./monitoring-daily.service";
 export * from "./monitoring-daily.validation";
+export * from "./monitoring-monthly.calculation";
+export * from "./monitoring-monthly.service";
+export * from "./monitoring-monthly.validation";

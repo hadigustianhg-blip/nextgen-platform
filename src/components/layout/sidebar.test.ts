@@ -77,5 +77,10 @@ describe("pickup navigation", () => {
     expect(source).toContain(
       'active={pathname.startsWith("/dashboard/monitoring/daily")}',
     );
+    expect(source).toContain('href="/dashboard/monitoring/monthly"');
+    expect(source).toContain('label="Monitoring Monthly"');
+    expect(source).toContain(
+      'active={pathname.startsWith("/dashboard/monitoring/monthly")}',
+    );
   });
 });
