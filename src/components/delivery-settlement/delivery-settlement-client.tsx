@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LoaderCircle, RefreshCw, Search, Truck, X } from "lucide-react";
+import { Banknote, LoaderCircle, PackageCheck, QrCode, RefreshCw, Search, Truck, X } from "lucide-react";
+import { MetricCard } from "@/components/ui";
 import {
   jakartaOperationalDate,
   resolveJakartaOperationalDate,
@@ -27,11 +28,11 @@ type Row = {
 
 type Summary = {
   totalSettlement: string; totalCashReceived: string; totalTransferReceived: string;
-  totalOutstanding: string; totalCodQris: string; courierCount: number;
+  totalOutstanding: string; totalCod: string; totalCodQris: string; totalDfod: string; courierCount: number;
   clearCount: number; unclearedCount: number; overpaidCount: number;
 };
 
-const emptySummary: Summary = { totalSettlement: "0", totalCashReceived: "0", totalTransferReceived: "0", totalOutstanding: "0", totalCodQris: "0", courierCount: 0, clearCount: 0, unclearedCount: 0, overpaidCount: 0 };
+const emptySummary: Summary = { totalSettlement: "0", totalCashReceived: "0", totalTransferReceived: "0", totalOutstanding: "0", totalCod: "0", totalCodQris: "0", totalDfod: "0", courierCount: 0, clearCount: 0, unclearedCount: 0, overpaidCount: 0 };
 const money = (value: string) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Number(value));
 const date = (value: string) => new Intl.DateTimeFormat("id-ID", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value));
 const dateTime = (value: string) => new Intl.DateTimeFormat("id-ID", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Jakarta" }).format(new Date(value));
@@ -174,6 +175,11 @@ export function DeliverySettlementClient({ outletCode }: { outletCode: string })
         ["Total Transfer", summary.totalTransferReceived, `${summary.overpaidCount} lebih bayar`],
         ["Belum Bayar", summary.totalOutstanding, `${summary.unclearedCount} belum clear`],
       ].map(([label, value, info]) => <div key={label} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-sm font-medium text-slate-500">{label}</p><p className="mt-2 text-2xl font-bold text-slate-950">{money(value as string)}</p><p className="mt-1 text-xs text-slate-500">{info}</p></div>)}
+    </div>
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <MetricCard label={<span className="flex items-center gap-2"><Banknote size={17} />Total COD</span>} value={money(summary.totalCod)} />
+      <MetricCard label={<span className="flex items-center gap-2"><QrCode size={17} />Total COD QRIS</span>} value={money(summary.totalCodQris)} />
+      <MetricCard label={<span className="flex items-center gap-2"><PackageCheck size={17} />Total DFOD</span>} value={money(summary.totalDfod)} />
     </div>
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">

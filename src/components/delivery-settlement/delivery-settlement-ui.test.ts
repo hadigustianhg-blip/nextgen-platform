@@ -39,6 +39,13 @@ describe("Delivery Settlement UI contract", () => {
     expect(client).not.toContain("searchch");
   });
 
+  it("renders filtered COD, QRIS, and DFOD summaries with MetricCard", () => {
+    expect(client).toContain("MetricCard");
+    expect(client).toContain("money(summary.totalCod)");
+    expect(client).toContain("money(summary.totalCodQris)");
+    expect(client).toContain("money(summary.totalDfod)");
+  });
+
   it("defaults the date picker and first list request to today in Jakarta", () => {
     expect(client).toContain("useState(jakartaOperationalDate)");
     expect(dates).toContain('timeZone: "Asia/Jakarta"');

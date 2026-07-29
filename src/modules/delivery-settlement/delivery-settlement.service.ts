@@ -310,6 +310,31 @@ function mapMaster(row: Prisma.MasterSetoranGetPayload<{ include: typeof payment
   };
 }
 
+export function summarizeDeliveryRows(rows: Array<{
+  totalSettlement: string;
+  cashPaidAmount: string;
+  transferPaidAmount: string;
+  outstandingAmount: string;
+  codCashAmount: string;
+  codQrisAmount: string;
+  dfodAmount: string;
+  paymentStatus: "UNCLEARED" | "CLEAR" | "OVERPAID";
+}>) {
+  return rows.reduce((sum, row) => {
+    sum.totalSettlement = sum.totalSettlement.plus(row.totalSettlement);
+    sum.totalCashReceived = sum.totalCashReceived.plus(row.cashPaidAmount);
+    sum.totalTransferReceived = sum.totalTransferReceived.plus(row.transferPaidAmount);
+    sum.totalOutstanding = sum.totalOutstanding.plus(row.outstandingAmount);
+    sum.totalCod = sum.totalCod.plus(row.codCashAmount);
+    sum.totalCodQris = sum.totalCodQris.plus(row.codQrisAmount);
+    sum.totalDfod = sum.totalDfod.plus(row.dfodAmount);
+    if (row.paymentStatus === "CLEAR") sum.clearCount += 1;
+    else if (row.paymentStatus === "UNCLEARED") sum.unclearedCount += 1;
+    else sum.overpaidCount += 1;
+    return sum;
+  }, { totalSettlement: zero(), totalCashReceived: zero(), totalTransferReceived: zero(), totalOutstanding: zero(), totalCod: zero(), totalCodQris: zero(), totalDfod: zero(), clearCount: 0, unclearedCount: 0, overpaidCount: 0 });
+}
+
 export async function listDeliverySettlements(input: Scope & {
   page: number; pageSize: number; operationalDate?: string; search?: string;
   paymentStatus?: string; paymentMethod?: string;
@@ -325,17 +350,7 @@ export async function listDeliverySettlements(input: Scope & {
   const filtered = candidates.map(mapMaster)
     .filter((row) => !input.paymentStatus || row.paymentStatus === input.paymentStatus)
     .filter((row) => !input.paymentMethod || row.paymentMethodSummary === input.paymentMethod);
-  const summary = filtered.reduce((sum, row) => {
-    sum.totalSettlement = sum.totalSettlement.plus(row.totalSettlement);
-    sum.totalCashReceived = sum.totalCashReceived.plus(row.cashPaidAmount);
-    sum.totalTransferReceived = sum.totalTransferReceived.plus(row.transferPaidAmount);
-    sum.totalOutstanding = sum.totalOutstanding.plus(row.outstandingAmount);
-    sum.totalCodQris = sum.totalCodQris.plus(row.codQrisAmount);
-    if (row.paymentStatus === "CLEAR") sum.clearCount += 1;
-    else if (row.paymentStatus === "UNCLEARED") sum.unclearedCount += 1;
-    else sum.overpaidCount += 1;
-    return sum;
-  }, { totalSettlement: zero(), totalCashReceived: zero(), totalTransferReceived: zero(), totalOutstanding: zero(), totalCodQris: zero(), clearCount: 0, unclearedCount: 0, overpaidCount: 0 });
+  const summary = summarizeDeliveryRows(filtered);
   const start = (input.page - 1) * input.pageSize;
   return {
     data: filtered.slice(start, start + input.pageSize),
@@ -343,7 +358,8 @@ export async function listDeliverySettlements(input: Scope & {
     summary: {
       totalSettlement: summary.totalSettlement.toString(), totalCashReceived: summary.totalCashReceived.toString(),
       totalTransferReceived: summary.totalTransferReceived.toString(), totalOutstanding: summary.totalOutstanding.toString(),
-      totalCodQris: summary.totalCodQris.toString(), courierCount: filtered.length,
+      totalCod: summary.totalCod.toString(), totalCodQris: summary.totalCodQris.toString(),
+      totalDfod: summary.totalDfod.toString(), courierCount: filtered.length,
       clearCount: summary.clearCount, unclearedCount: summary.unclearedCount, overpaidCount: summary.overpaidCount,
     },
   };

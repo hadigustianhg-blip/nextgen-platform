@@ -9,6 +9,7 @@ import {
   calculateDeliveryFinancials,
   normalizeComparison,
   sourceHash,
+  summarizeDeliveryRows,
 } from "./delivery-settlement.service";
 import {
   codRecordSchema,
@@ -81,6 +82,20 @@ describe("Delivery Settlement aggregation", () => {
 });
 
 describe("Delivery Settlement financial calculation", () => {
+  it("sums COD cash, COD QRIS, and DFOD across all filtered rows", () => {
+    const base = {
+      totalSettlement: "0", cashPaidAmount: "0", transferPaidAmount: "0",
+      outstandingAmount: "0", paymentStatus: "CLEAR" as const,
+    };
+    const summary = summarizeDeliveryRows([
+      { ...base, codCashAmount: "100000", codQrisAmount: "25000", dfodAmount: "50000" },
+      { ...base, codCashAmount: "200000", codQrisAmount: "75000", dfodAmount: "125000" },
+    ]);
+    expect(summary.totalCod.toString()).toBe("300000");
+    expect(summary.totalCodQris.toString()).toBe("100000");
+    expect(summary.totalDfod.toString()).toBe("175000");
+  });
+
   it.each([
     { obligation: 1000000, cash: 400000, transfer: 600000, status: "CLEAR", remaining: "0" },
     { obligation: 1500000, cash: 400000, transfer: 600000, status: "UNCLEARED", remaining: "500000" },
