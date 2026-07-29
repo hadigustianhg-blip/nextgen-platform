@@ -19,7 +19,8 @@ describe("Monitoring Daily UI contract", () => {
     ]) {
       expect(source).toContain(label);
     }
-    expect(source).toContain("xl:grid-cols-2");
+    expect(source).toContain('<section className="space-y-6">');
+    expect(source).not.toContain("xl:grid-cols-2");
   });
 
   it("uses the shared NEXTGEN card system and exact empty states", async () => {
@@ -39,5 +40,29 @@ describe("Monitoring Daily UI contract", () => {
       "Belum ada data Delivery untuk Business Date ini.",
     );
     expect(source).toContain("Belum ada data Pickup untuk Business Date ini.");
+  });
+
+  it("keeps refresh and scraper synchronization as separate actions", async () => {
+    const source = await readFile(
+      new URL("./monitoring-daily-client.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("Refresh");
+    expect(source).toContain("Sinkronkan Data");
+    expect(source).toContain("Menyinkronkan...");
+    expect(source).toContain('fetch("/api/monitoring/daily/sync"');
+    expect(source).toContain("setRefreshKey((value) => value + 1)");
+  });
+
+  it("protects the orchestration API and reuses both existing sync services", async () => {
+    const source = await readFile(
+      new URL("../../app/api/monitoring/daily/sync/route.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("canSyncDelivery(session)");
+    expect(source).toContain("canSyncPickup(session)");
+    expect(source).toContain("syncDeliverySettlement(context");
+    expect(source).toContain("syncPickup(context");
+    expect(source).toContain("resolveMonitoringOutlet");
   });
 });

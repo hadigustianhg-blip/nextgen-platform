@@ -2,6 +2,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { MonitoringDailyClient } from "@/components/monitoring/monitoring-daily-client";
 import { prisma } from "@/lib/db/prisma";
 import { requireSession } from "@/lib/auth/session";
+import { hasAnyRole } from "@/lib/permissions/roles";
 
 export const metadata = { title: "Monitoring Daily" };
 
@@ -23,6 +24,7 @@ export default async function MonitoringDailyPage() {
         outlets={outlets}
         initialOutletId={session.outletId ?? outlets[0]?.id ?? ""}
         outletLocked={Boolean(session.outletId)}
+        canSync={hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL"])}
       />
     </AppShell>
   );

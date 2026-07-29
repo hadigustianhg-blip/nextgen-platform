@@ -5,6 +5,7 @@ import {
   buildPickupRows,
   calculateAchievement,
   DELIVERY_TARGET,
+  orchestrateMonitoringSync,
 } from "./monitoring-daily.calculation";
 import { monitoringDailyQuerySchema } from "./monitoring-daily.validation";
 
@@ -98,5 +99,37 @@ describe("Monitoring Daily", () => {
       pickupPage: 1,
       pageSize: 10,
     });
+  });
+
+  it("reports partial sync failure without a false success", async () => {
+    const result = await orchestrateMonitoringSync(
+      async () => ({ processed: 219 }),
+      async () => {
+        throw new Error("upstream");
+      },
+    );
+    expect(result).toEqual({
+      success: false,
+      dispatch: { success: true, processed: 219 },
+      pickup: {
+        success: false,
+        error: "Sinkronisasi Pickup gagal.",
+      },
+    });
+  });
+
+  it("runs Dispatch before Pickup", async () => {
+    const order: string[] = [];
+    await orchestrateMonitoringSync(
+      async () => {
+        order.push("dispatch");
+        return { processed: 1 };
+      },
+      async () => {
+        order.push("pickup");
+        return { processed: 1 };
+      },
+    );
+    expect(order).toEqual(["dispatch", "pickup"]);
   });
 });

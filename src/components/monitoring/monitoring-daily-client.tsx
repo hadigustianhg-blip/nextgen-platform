@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { CloudDownload, RefreshCw } from "lucide-react";
 import {
   FilterCard,
   MetricCard,
@@ -76,10 +76,12 @@ export function MonitoringDailyClient({
   outlets,
   initialOutletId,
   outletLocked,
+  canSync,
 }: {
   outlets: Array<{ id: string; code: string; name: string }>;
   initialOutletId: string;
   outletLocked: boolean;
+  canSync: boolean;
 }) {
   const [outletId, setOutletId] = useState(initialOutletId);
   const [businessDate, setBusinessDate] = useState("");
@@ -88,7 +90,12 @@ export function MonitoringDailyClient({
   const [refreshKey, setRefreshKey] = useState(0);
   const [result, setResult] = useState<MonitoringResult | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState<{
+    tone: "success" | "error";
+    text: string;
+  } | null>(null);
 
   const load = useCallback(async () => {
     if (!outletId) {
@@ -123,6 +130,54 @@ export function MonitoringDailyClient({
   useEffect(() => {
     queueMicrotask(() => void load());
   }, [load]);
+
+  async function syncData() {
+    if (syncing || !outletId) return;
+    setSyncing(true);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/monitoring/daily/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          outletId,
+          businessDate: businessDate || undefined,
+        }),
+      });
+      const body = (await response.json()) as {
+        success?: boolean;
+        dispatch?: { success: boolean; processed?: number; error?: string };
+        pickup?: { success: boolean; processed?: number; error?: string };
+        error?: { message?: string };
+      };
+      if (!response.ok || !body.success) {
+        const failed = [
+          body.dispatch?.success === false ? "Dispatch" : null,
+          body.pickup?.success === false ? "Pickup" : null,
+        ].filter(Boolean);
+        throw new Error(
+          failed.length
+            ? `Sinkronisasi gagal pada: ${failed.join(" dan ")}. Data lama tetap ditampilkan.`
+            : body.error?.message || "Sinkronisasi data gagal.",
+        );
+      }
+      setNotice({
+        tone: "success",
+        text: `Sinkronisasi selesai. Dispatch ${body.dispatch?.processed ?? 0} data, Pickup ${body.pickup?.processed ?? 0} data.`,
+      });
+      setRefreshKey((value) => value + 1);
+    } catch (syncError) {
+      setNotice({
+        tone: "error",
+        text:
+          syncError instanceof Error
+            ? syncError.message
+            : "Sinkronisasi data gagal.",
+      });
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   const achievement = result?.summary.deliveryAchievement ?? 0;
   const target = result?.target ?? 95;
@@ -168,17 +223,46 @@ export function MonitoringDailyClient({
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          disabled={loading || !outletId}
-          onClick={() => setRefreshKey((value) => value + 1)}
-          className={`${nextgenButtonClass} bg-blue-600 text-white hover:bg-blue-700`}
-        >
-          <RefreshCw size={17} className={loading ? "animate-spin" : ""} />
-          Refresh
-        </button>
+        <div className="flex flex-col gap-3 sm:col-span-2 sm:flex-row lg:col-span-1">
+          <button
+            type="button"
+            disabled={loading || syncing || !outletId}
+            onClick={() => setRefreshKey((value) => value + 1)}
+            className={`${nextgenButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}
+          >
+            <RefreshCw size={17} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+          {canSync && (
+            <button
+              type="button"
+              disabled={loading || syncing || !outletId}
+              onClick={() => void syncData()}
+              className={`${nextgenButtonClass} bg-blue-600 text-white hover:bg-blue-700`}
+            >
+              {syncing ? (
+                <RefreshCw size={17} className="animate-spin" />
+              ) : (
+                <CloudDownload size={17} />
+              )}
+              {syncing ? "Menyinkronkan..." : "Sinkronkan Data"}
+            </button>
+          )}
+        </div>
       </FilterCard>
 
+      {notice && (
+        <div
+          role="status"
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            notice.tone === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-red-200 bg-red-50 text-red-800"
+          }`}
+        >
+          {notice.text}
+        </div>
+      )}
       {error && (
         <div
           role="alert"
@@ -221,7 +305,7 @@ export function MonitoringDailyClient({
         />
       </section>
 
-      <section className="grid items-start gap-6 xl:grid-cols-2">
+      <section className="space-y-6">
         <TableCard
           className="min-w-0"
           footer={
@@ -251,7 +335,14 @@ export function MonitoringDailyClient({
                     "Target",
                     "Status",
                   ].map((label) => (
-                    <th key={label} className="px-4 py-3">
+                    <th
+                      key={label}
+                      className={`px-4 py-3 ${
+                        !["Tanggal", "Nama Team", "Status"].includes(label)
+                          ? "text-right"
+                          : ""
+                      }`}
+                    >
                       {label}
                     </th>
                   ))}
@@ -267,13 +358,21 @@ export function MonitoringDailyClient({
                       <td className="px-4 py-3 font-semibold">
                         {row.teamName}
                       </td>
-                      <td className="px-4 py-3">{number(row.totalDelivery)}</td>
-                      <td className="px-4 py-3">{number(row.totalTtd)}</td>
-                      <td className="px-4 py-3">{number(row.totalPending)}</td>
-                      <td className="px-4 py-3 font-bold">
+                      <td className="px-4 py-3 text-right">
+                        {number(row.totalDelivery)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {number(row.totalTtd)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {number(row.totalPending)}
+                      </td>
+                      <td className="px-4 py-3 text-right font-bold">
                         {percent(row.achievement)}
                       </td>
-                      <td className="px-4 py-3">{percent(row.target)}</td>
+                      <td className="px-4 py-3 text-right">
+                        {percent(row.target)}
+                      </td>
                       <td className="px-4 py-3">
                         <StatusBadge status={row.status} />
                       </td>
@@ -318,7 +417,14 @@ export function MonitoringDailyClient({
                     "Berat Marketplace",
                     "Total Berat",
                   ].map((label) => (
-                    <th key={label} className="px-4 py-3">
+                    <th
+                      key={label}
+                      className={`px-4 py-3 ${
+                        !["Tanggal", "Nama Staff"].includes(label)
+                          ? "text-right"
+                          : ""
+                      }`}
+                    >
                       {label}
                     </th>
                   ))}
@@ -334,15 +440,19 @@ export function MonitoringDailyClient({
                       <td className="px-4 py-3 font-semibold">
                         {row.staffName}
                       </td>
-                      <td className="px-4 py-3">{number(row.totalWaybills)}</td>
-                      <td className="px-4 py-3">{money(row.regularRevenue)}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 text-right">
+                        {number(row.totalWaybills)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {money(row.regularRevenue)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
                         {number(row.regularWeight, 3)} Kg
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 text-right">
                         {number(row.marketplaceWeight, 3)} Kg
                       </td>
-                      <td className="px-4 py-3 font-bold">
+                      <td className="px-4 py-3 text-right font-bold">
                         {number(row.totalWeight, 3)} Kg
                       </td>
                     </tr>

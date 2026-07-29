@@ -103,3 +103,42 @@ export function buildPickupRows(
         Number(right.regularRevenue) - Number(left.regularRevenue),
     );
 }
+
+type SyncSourceResult = {
+  success: boolean;
+  processed?: number;
+  error?: string;
+};
+
+export async function orchestrateMonitoringSync(
+  syncDispatch: () => Promise<{ processed: number }>,
+  syncPickup: () => Promise<{ processed: number }>,
+): Promise<{
+  success: boolean;
+  dispatch: SyncSourceResult;
+  pickup: SyncSourceResult;
+}> {
+  let dispatch: SyncSourceResult;
+  let pickup: SyncSourceResult;
+  try {
+    dispatch = { success: true, ...(await syncDispatch()) };
+  } catch {
+    dispatch = {
+      success: false,
+      error: "Sinkronisasi Dispatch gagal.",
+    };
+  }
+  try {
+    pickup = { success: true, ...(await syncPickup()) };
+  } catch {
+    pickup = {
+      success: false,
+      error: "Sinkronisasi Pickup gagal.",
+    };
+  }
+  return {
+    success: dispatch.success && pickup.success,
+    dispatch,
+    pickup,
+  };
+}
