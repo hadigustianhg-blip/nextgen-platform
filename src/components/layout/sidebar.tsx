@@ -40,6 +40,7 @@ const storageKeys = {
   monitoringOpen: "nextgen.sidebar.monitoring.open",
   settlementOpen: "nextgen.sidebar.settlement.open",
   paymentOpen: "nextgen.sidebar.payment.open",
+  qualityControlOpen: "nextgen.sidebar.quality-control.open",
 } as const;
 
 const readStoredBoolean = (key: string, fallback: boolean) => {
@@ -52,10 +53,12 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
   const monitoringActive = pathname.startsWith("/dashboard/monitoring/");
   const settlementActive = pathname.startsWith("/dashboard/settlement/");
   const paymentActive = pathname.startsWith("/dashboard/payment/");
+  const qualityControlActive = pathname.startsWith("/dashboard/quality-control/");
   const [collapsed, setCollapsed] = useState(false);
   const [monitoringOpen, setMonitoringOpen] = useState(monitoringActive);
   const [settlementOpen, setSettlementOpen] = useState(settlementActive);
   const [paymentOpen, setPaymentOpen] = useState(paymentActive);
+  const [qualityControlOpen, setQualityControlOpen] = useState(qualityControlActive);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
 
@@ -65,6 +68,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
       setMonitoringOpen(readStoredBoolean(storageKeys.monitoringOpen, true));
       setSettlementOpen(readStoredBoolean(storageKeys.settlementOpen, true));
       setPaymentOpen(readStoredBoolean(storageKeys.paymentOpen, true));
+      setQualityControlOpen(readStoredBoolean(storageKeys.qualityControlOpen, true));
       setStorageReady(true);
     });
   }, []);
@@ -99,9 +103,16 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
     }
   }, [paymentOpen, storageReady]);
 
+  useEffect(() => {
+    if (storageReady) {
+      window.localStorage.setItem(storageKeys.qualityControlOpen, String(qualityControlOpen));
+    }
+  }, [qualityControlOpen, storageReady]);
+
   const monitoringVisible = monitoringActive || monitoringOpen;
   const settlementVisible = settlementActive || settlementOpen;
   const paymentVisible = paymentActive || paymentOpen;
+  const qualityControlVisible = qualityControlActive || qualityControlOpen;
   const labelClass = collapsed ? "lg:hidden" : "";
   const closeMobile = () => setMobileOpen(false);
   const itemLayout = collapsed ? "lg:justify-center lg:gap-0" : "";
@@ -349,10 +360,27 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
             )}
           </div>
 
+          <div className="pt-1">
+            <button type="button" title={collapsed ? "Quality Control" : undefined}
+              aria-expanded={qualityControlVisible} aria-controls="quality-control-submenu"
+              onClick={() => setQualityControlOpen((value) => !value)}
+              className={["flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300", itemLayout].join(" ")}>
+              <ShieldCheck size={19} className="shrink-0" />
+              <span className={labelClass}>Quality Control</span>
+              <ChevronDown size={15} className={`${labelClass} ml-auto transition-transform ${qualityControlVisible ? "rotate-180" : ""}`} />
+            </button>
+            {qualityControlVisible && <div id="quality-control-submenu">
+              <SidebarChild href="/dashboard/quality-control/sla-cut-off" label="SLA Cut Off"
+                active={pathname.startsWith("/dashboard/quality-control/sla-cut-off")}
+                collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
+                onNavigate={closeMobile} icon={<ShieldCheck size={17}/>} />
+            </div>}
+          </div>
+
           {navigation
             .slice(1)
             .filter(
-              (item) => item.label !== "Monitoring" && item.label !== "Payment",
+              (item) => item.label !== "Monitoring" && item.label !== "Payment" && item.label !== "Quality Control",
             )
             .map((item) => {
               const active =

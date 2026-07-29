@@ -83,4 +83,23 @@ describe("pickup navigation", () => {
       'active={pathname.startsWith("/dashboard/monitoring/monthly")}',
     );
   });
+
+  it("exposes SLA Cut Off with persistent active Quality Control parent", async () => {
+    const source = await readFile(
+      new URL("./sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain('aria-controls="quality-control-submenu"');
+    expect(source).toContain('"nextgen.sidebar.quality-control.open"');
+    expect(source).toContain(
+      'const qualityControlVisible = qualityControlActive || qualityControlOpen',
+    );
+    expect(source).toContain(
+      'href="/dashboard/quality-control/sla-cut-off"',
+    );
+    expect(source).toContain('label="SLA Cut Off"');
+    expect(source).toContain(
+      'active={pathname.startsWith("/dashboard/quality-control/sla-cut-off")}',
+    );
+  });
 });
