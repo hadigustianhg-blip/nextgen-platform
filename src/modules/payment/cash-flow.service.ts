@@ -15,20 +15,27 @@ const decimal = (value: string | number | Prisma.Decimal) => new Prisma.Decimal(
 const dateValue = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const zero = () => new Prisma.Decimal(0);
 
+export function channelBalances(input: Array<{
+  direction: CashDirection;
+  channel: CashChannel;
+  amount: Prisma.Decimal;
+}>) {
+  let cash = zero(), bank = zero();
+  for (const row of input) {
+    const signed = row.direction === "IN" ? row.amount : row.amount.negated();
+    if (row.channel === "CASH") cash = cash.plus(signed);
+    else bank = bank.plus(signed);
+  }
+  return { cash, bank };
+}
+
 export function cashBalance(input: Array<{
   direction: CashDirection;
   channel: CashChannel;
   amount: Prisma.Decimal;
   recordStatus: CashMovementStatus;
 }>) {
-  let cash = zero(), bank = zero();
-  for (const row of input) {
-    if (row.recordStatus !== "VALID") continue;
-    const signed = row.direction === "IN" ? row.amount : row.amount.negated();
-    if (row.channel === "CASH") cash = cash.plus(signed);
-    else bank = bank.plus(signed);
-  }
-  return { cash, bank };
+  return channelBalances(input.filter((row) => row.recordStatus === "VALID"));
 }
 
 export function runningBalances(input: Array<{

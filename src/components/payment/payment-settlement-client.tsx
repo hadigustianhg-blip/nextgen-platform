@@ -13,7 +13,11 @@ type Daily = {
   cashInBreakdown: Record<string, string>; cashOutBreakdown: Record<string, string>;
 };
 type Result = {
-  summary: { cashOnHand: string; bankBalance: string; pickupOutstanding: string; deliveryOutstanding: string; bankDepositThisMonth: string };
+  summary: {
+    cashOnHand: string; bankBalance: string; operationalCashReceived: string;
+    operationalTransferReceived: string; operationalExpense: string;
+    pickupOutstanding: string; deliveryOutstanding: string; bankDepositThisMonth: string;
+  };
   dailyRows: Daily[];
   period: { month: number; year: number; startDate: string; endDate: string; totalDays: number };
 };
@@ -56,7 +60,10 @@ export function PaymentSettlementClient({ outletId }: { outletId: string }) {
       <select aria-label="Outlet" value={outletId} disabled className="rounded-xl border bg-slate-50 p-2"><option value={outletId}>Outlet Aktif</option></select>
       <select aria-label="Status closing" value={closingStatus} onChange={(e) => setClosingStatus(e.target.value)} className="ml-auto rounded-xl border p-2"><option value="">Semua Closing</option><option value="BELUM_CLOSING">Belum Closing</option><option value="OPEN">Open</option><option value="REOPENED">Reopened</option><option value="CLOSED">Closed</option></select>
     </section>
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">{[
+    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{[
+      ["Cash Operasional", result?.summary.operationalCashReceived, "Total periode terpilih."],
+      ["Transfer Operasional", result?.summary.operationalTransferReceived, "Total periode terpilih."],
+      ["Pengeluaran Operasional", result?.summary.operationalExpense, "Total periode terpilih."],
       ["Cash On Hand", result?.summary.cashOnHand, ""],
       ["Saldo Bank Tercatat", result?.summary.bankBalance, "Saldo berdasarkan mutasi NEXTGEN, bukan saldo realtime bank."],
       ["Pickup Belum Bayar", result?.summary.pickupOutstanding, ""],

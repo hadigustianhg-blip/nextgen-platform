@@ -6,6 +6,7 @@ vi.mock("@/lib/db/prisma", () => ({ prisma: {} }));
 
 import {
   calculateSettlementPeriod, outstandingAsOf, periodBankDeposit, settlementBalances,
+  periodOperationalTotals,
 } from "./payment-settlement.service";
 import { paymentSettlementQuerySchema } from "./payment-settlement.validation";
 import { canReadPaymentSettlement } from "./payment-settlement.authorization";
@@ -102,6 +103,19 @@ describe("Payment Settlement outstanding and period behavior", () => {
       movement("2026-07-21", "IN", "BANK", "BANK_DEPOSIT", 30),
       movement("2026-07-21", "OUT", "CASH", "BANK_DEPOSIT", 100, "VOID"),
     ]).toString()).toBe("50");
+  });
+
+  it("summarizes operational cash, transfer, and expense from the same ledger", () => {
+    const totals = periodOperationalTotals([
+      movement("2026-07-20", "IN", "CASH", "PICKUP_PAYMENT", 100),
+      movement("2026-07-20", "IN", "CASH", "DELIVERY_PAYMENT", 200),
+      movement("2026-07-20", "IN", "BANK", "DELIVERY_PAYMENT", 50),
+      movement("2026-07-20", "OUT", "CASH", "OPERATIONAL_EXPENSE", 25),
+      movement("2026-07-20", "IN", "CASH", "MANUAL_INCOME", 999),
+    ]);
+    expect(totals.cashReceived.toString()).toBe("300");
+    expect(totals.transferReceived.toString()).toBe("50");
+    expect(totals.operationalExpense.toString()).toBe("25");
   });
 
   it("excludes superseded payments and clamps overpayment per obligation", () => {

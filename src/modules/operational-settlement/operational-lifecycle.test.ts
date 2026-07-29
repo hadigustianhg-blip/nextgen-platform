@@ -278,6 +278,13 @@ describe("Operational Settlement lifecycle", () => {
     expect(result.closing?.cashVariance.toString()).toBe("0");
     expect(result.closing?.varianceStatus).toBe("MATCH");
     expect(result.closing?.closedAt).toBeInstanceOf(Date);
+    expect(state.movements.filter((row) =>
+      row.sourceType === "OperationalClosing" &&
+      row.movementType === "BANK_DEPOSIT",
+    )).toMatchObject([
+      { direction: "OUT", channel: "CASH", amount: new Prisma.Decimal(14000000) },
+      { direction: "IN", channel: "BANK", amount: new Prisma.Decimal(14000000) },
+    ]);
   });
 
   it("rolls back closing when bank deposit exceeds server-calculated cash", async () => {

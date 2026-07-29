@@ -60,12 +60,14 @@ import {
   createPickupPayment, pickupReceivableStatus, receivableAgeBucket,
   receivableAgeDays, voidPickupPayment,
 } from "./pickup-payment.service";
+import { cashBalance } from "./cash-flow.service";
 import { pickupPaymentInputSchema, pickupPaymentListSchema } from "./pickup-payment.validation";
 import {
   canCreatePickupPayment, canManagePickupPayment, canReadPickupPayment,
 } from "./pickup-payment.authorization";
 import type { SessionContext } from "@/lib/auth/session";
 
+const d = (value: string | number) => new Prisma.Decimal(value);
 const context = { tenantId: master.tenantId, outletId: master.outletId, actorId: "10000000-0000-4000-8000-000000000013" };
 const input = {
   requestKey: "30000000-0000-4000-8000-000000000001",
@@ -104,6 +106,10 @@ describe("Pickup Payment transaction and cash flow", () => {
       direction: "IN", channel: "CASH", movementType: "PICKUP_PAYMENT",
       reference: "WB-001", sourceType: "PickupPayment",
     }]);
+    const balance = cashBalance(state.movements as Parameters<typeof cashBalance>[0]);
+    expect(balance.cash.toString()).toBe("400");
+    expect(balance.bank.toString()).toBe("0");
+    expect(pickupReceivableStatus(d(1000), state.payments[0].receivedAmount)).toBe("SEBAGIAN");
   });
   it("creates transfer as BANK movement", async () => {
     await createPickupPayment(context, {
@@ -127,6 +133,8 @@ describe("Pickup Payment transaction and cash flow", () => {
     expect(state.payments).toHaveLength(1);
     expect(state.payments[0].recordStatus).toBe("VOID");
     expect(state.movements[0].recordStatus).toBe("VOID");
+    expect(cashBalance(state.movements as Parameters<typeof cashBalance>[0]).cash.toString()).toBe("0");
+    expect(pickupReceivableStatus(d(1000), d(0))).toBe("BELUM_BAYAR");
     expect(state.audits.some((item) => item.entityType === "PICKUP_PAYMENT_VOIDED")).toBe(true);
   });
 });

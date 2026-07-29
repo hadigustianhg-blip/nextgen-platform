@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { channelBalances } from "./cash-flow.service";
 
 type Scope = { tenantId: string; outletId: string };
 const zero = () => new Prisma.Decimal(0);
@@ -24,11 +25,8 @@ type Closing = {
 export function settlementBalances(groups: Array<{
   channel: "CASH" | "BANK"; direction: "IN" | "OUT"; amount: Prisma.Decimal;
 }>) {
-  const balance = (channel: "CASH" | "BANK") => groups.reduce((sum, row) => {
-    if (row.channel !== channel) return sum;
-    return row.direction === "IN" ? sum.plus(row.amount) : sum.minus(row.amount);
-  }, zero());
-  return { cashOnHand: balance("CASH"), bankBalance: balance("BANK") };
+  const balances = channelBalances(groups);
+  return { cashOnHand: balances.cash, bankBalance: balances.bank };
 }
 
 export function periodBankDeposit(movements: Movement[]) {
@@ -36,6 +34,22 @@ export function periodBankDeposit(movements: Movement[]) {
     row.recordStatus === "VALID" && row.channel === "CASH" &&
     row.direction === "OUT" && row.movementType === "BANK_DEPOSIT")
     .reduce((sum, row) => sum.plus(row.amount), zero());
+}
+
+export function periodOperationalTotals(movements: Movement[]) {
+  const valid = movements.filter((row) => row.recordStatus === "VALID");
+  const receivedTypes = ["PICKUP_PAYMENT", "DELIVERY_PAYMENT"];
+  return {
+    cashReceived: valid.filter((row) =>
+      row.direction === "IN" && row.channel === "CASH" && receivedTypes.includes(row.movementType))
+      .reduce((sum, row) => sum.plus(row.amount), zero()),
+    transferReceived: valid.filter((row) =>
+      row.direction === "IN" && row.channel === "BANK" && receivedTypes.includes(row.movementType))
+      .reduce((sum, row) => sum.plus(row.amount), zero()),
+    operationalExpense: valid.filter((row) =>
+      row.direction === "OUT" && row.channel === "CASH" && row.movementType === "OPERATIONAL_EXPENSE")
+      .reduce((sum, row) => sum.plus(row.amount), zero()),
+  };
 }
 
 export function outstandingAsOf(rows: Receivable[], asOf: string) {
@@ -136,7 +150,7 @@ export async function getPaymentSettlement(
   const whereScope = { tenantId: scope.tenantId, outletId: scope.outletId };
   const [globalGroups, opening, movements, pickups, deliveries, closings] = await Promise.all([
     prisma.cashMovement.groupBy({
-      by: ["channel", "direction"],
+      by: ["channel", "direction", "movementType"],
       where: { ...whereScope, recordStatus: "VALID" },
       _sum: { amount: true },
     }),
@@ -184,6 +198,7 @@ export async function getPaymentSettlement(
     payments: row.payments.map((payment) => ({ paymentDate: dateString(payment.paymentDate), amount: payment.paidAmountSnapshot, status: payment.recordStatus })),
   }));
   const movementRows: Movement[] = movements.map((row) => ({ ...row, businessDate: dateString(row.businessDate) }));
+  const operational = periodOperationalTotals(movementRows);
   const openingCash = opening.reduce((sum, row) => {
     const amount = row._sum.amount ?? zero();
     return row.direction === "IN" ? sum.plus(amount) : sum.minus(amount);
@@ -198,6 +213,9 @@ export async function getPaymentSettlement(
     summary: {
       cashOnHand: globalBalance.cashOnHand.toString(),
       bankBalance: globalBalance.bankBalance.toString(),
+      operationalCashReceived: operational.cashReceived.toString(),
+      operationalTransferReceived: operational.transferReceived.toString(),
+      operationalExpense: operational.operationalExpense.toString(),
       pickupOutstanding: outstandingAsOf(pickupRows, today).toString(),
       deliveryOutstanding: outstandingAsOf(deliveryRows, today).toString(),
       bankDepositThisMonth: periodBankDeposit(movementRows).toString(),
