@@ -55,6 +55,7 @@ Never use the default development password in a shared or production environment
 | `SESSION_TTL_HOURS` | No | Server-side session lifetime; defaults to 168 hours |
 | `INTEGRATION_ENCRYPTION_KEY` | Yes for integrations | Base64-encoded 32-byte AES-256-GCM key |
 | `SEED_OWNER_PASSWORD` | Production seed only | Password for the seeded development owner |
+| `SLA_CUT_OFF_OUTLET_IDS` | SLA cron only | UUID outlet aktif yang terhubung ke network middleware, dipisahkan koma |
 
 ## Quality checks
 
@@ -76,6 +77,20 @@ npm run build
 7. Deploy to staging first, seed only if explicitly required, verify login and tenant isolation, then promote.
 
 The app uses Next.js standalone output and Railway's injected `PORT`. Migrations must be forward-compatible. Do not run `prisma migrate dev` in production, and do not expose scraper credentials as public variables.
+
+### Railway cron SLA Cut Off
+
+Cron SLA adalah proses one-shot terpisah dari web server. Tambahkan service
+Railway baru dari repository yang sama dengan nama `nextgen-sla-cron`, gunakan
+environment/database NEXTGEN yang sama, dan isi `SLA_CUT_OFF_OUTLET_IDS`.
+
+- Start command: `npm run cron:sla-cut-off`
+- Cron schedule: `40 16 * * *`
+- Waktu eksekusi: 16:40 UTC = 23:40 Asia/Jakarta
+
+Jalankan service secara manual sekali untuk smoke test dan pastikan log berakhir
+dengan summary `Completed`. Network sumber selalu divalidasi terhadap kode
+outlet sebelum upsert. Service web tetap memakai `npm run start`.
 
 ## Security notes
 
