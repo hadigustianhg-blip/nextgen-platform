@@ -473,6 +473,35 @@ describe("Pickup Settlement service", () => {
     })).rejects.toThrow("TRANSFER_ACCOUNT_REQUIRED");
   });
 
+  it("requires a reason and atomically voids a paid pickup", async () => {
+    addMaster("pickup", "WB-CANCEL", "Tunai");
+    await adjustPickupSettlement(context, "pickup", {
+      requestId: "10000000-0000-4000-8000-000000000020",
+      discountAmount: 0,
+      status: "SUDAH_BAYAR",
+      paymentMethod: "TUNAI",
+    });
+    await expect(
+      adjustPickupSettlement(context, "pickup", {
+        requestId: "10000000-0000-4000-8000-000000000021",
+        discountAmount: 0,
+        status: "BELUM_BAYAR",
+      }),
+    ).rejects.toThrow("CANCELLATION_REASON_REQUIRED");
+
+    await adjustPickupSettlement(context, "pickup", {
+      requestId: "10000000-0000-4000-8000-000000000022",
+      discountAmount: 0,
+      status: "BELUM_BAYAR",
+      note: "Pembayaran belum diterima",
+    });
+
+    expect(state.payments[0].recordStatus).toBe("VOID");
+    expect(state.movements[0].recordStatus).toBe("VOID");
+    expect(state.revisions.filter((revision) => revision.recordStatus === "VALID")).toHaveLength(1);
+    expect(state.revisions.filter((revision) => revision.recordStatus === "SUPERSEDED")).toHaveLength(1);
+  });
+
   it("is idempotent for double-submit", async () => {
     addMaster("pickup", "WB-1", "Tunai");
     const input = {
@@ -562,6 +591,7 @@ describe("Pickup Settlement service", () => {
       masterPickupIds: ["one"],
       discountAmount: 0,
       status: "BELUM_BAYAR",
+      note: "Pembayaran belum diterima",
     });
     expect(state.payments[0].recordStatus).toBe("VOID");
   });

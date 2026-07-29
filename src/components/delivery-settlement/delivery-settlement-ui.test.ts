@@ -23,7 +23,10 @@ describe("Delivery Settlement UI contract", () => {
     expect(client).toContain("Maksimal 8 transfer");
     expect(client).toContain("removeTransfer(index)");
     expect(client).toContain("disabled={saving}");
-    expect(client).toContain("Keterangan Belum Bayar");
+    expect(client).toContain("Keterangan / Alasan Koreksi");
+    expect(client).toContain("Batalkan pembayaran Delivery ini?");
+    expect(client).toContain("Ya, Batalkan Pembayaran");
+    expect(client).toContain('status: adjustmentStatus');
   });
 
   it("uses toast-like inline notices and does not use browser alert", () => {

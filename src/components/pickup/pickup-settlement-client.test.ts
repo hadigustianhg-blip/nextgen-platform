@@ -54,6 +54,14 @@ describe("Pickup Settlement UI", () => {
     expect(source).toContain("await loadData()");
   });
 
+  it("requires a reason and confirmation before cancelling a payment", async () => {
+    const source = await readFile(new URL("./pickup-settlement-client.tsx", import.meta.url), "utf8");
+    expect(source).toContain("Batalkan pembayaran Pickup ini?");
+    expect(source).toContain("Ya, Batalkan Pembayaran");
+    expect(source).toContain("Alasan pembatalan wajib diisi.");
+    expect(source).toContain("Pickup Outstanding");
+  });
+
   it("places an operational date picker before waybill search", async () => {
     const source = await readFile(new URL("./pickup-settlement-client.tsx", import.meta.url), "utf8");
     expect(source.indexOf('aria-label="Tanggal operasional"')).toBeLessThan(source.indexOf('placeholder="Cari waybill'));

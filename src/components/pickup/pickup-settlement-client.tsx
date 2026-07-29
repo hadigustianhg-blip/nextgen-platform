@@ -85,6 +85,8 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
   const [adjustmentMethod, setAdjustmentMethod] = useState<"" | "TUNAI" | "TRANSFER">("");
   const [accountId, setAccountId] = useState("");
   const [accountError, setAccountError] = useState("");
+  const [adjustmentError, setAdjustmentError] = useState("");
+  const [confirmCancellation, setConfirmCancellation] = useState(false);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [bulkMode, setBulkMode] = useState(false);
@@ -282,6 +284,8 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
     setAdjustmentMethod(row.paymentMethod === "TUNAI" || row.paymentMethod === "TRANSFER" ? row.paymentMethod : "");
     setAccountId(row.transferAccountId ?? "");
     setAccountError("");
+    setAdjustmentError("");
+    setConfirmCancellation(false);
     setNote(row.note ?? "");
     try {
       const [detailResponse, accountsResponse] = await Promise.all([fetch(`/api/pickup/settlements/${row.id}`, { cache: "no-store" }), fetch("/api/pickup/transfer-accounts", { cache: "no-store" })]);
@@ -310,6 +314,16 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
 
   async function saveAdjustment() {
     if (!selected || saving) return;
+    const cancellingExistingPayment =
+      adjustmentStatus === "BELUM_BAYAR" && Number(selected.totalPaid) > 0;
+    if (cancellingExistingPayment && !note.trim()) {
+      setAdjustmentError("Alasan pembatalan wajib diisi.");
+      return;
+    }
+    if (cancellingExistingPayment && !confirmCancellation) {
+      setConfirmCancellation(true);
+      return;
+    }
     if (adjustmentStatus === "SUDAH_BAYAR" && adjustmentMethod === "TRANSFER" && !accountId) {
       setAccountError("Pilih rekening transfer terlebih dahulu.");
       return;
@@ -332,9 +346,12 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message);
       setSelected(null);
+      setConfirmCancellation(false);
       setNotice({
         tone: "success",
-        text: `Penyesuaian ${body.data.waybillNo} berhasil disimpan.`,
+        text: cancellingExistingPayment
+          ? "Pembayaran Pickup berhasil dibatalkan. Waybill kembali berstatus Belum Bayar."
+          : `Penyesuaian ${body.data.waybillNo} berhasil disimpan.`,
       });
       await loadData();
     } catch (error) {
@@ -602,6 +619,8 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
                   onChange={(event) => {
                     const status = event.target.value as "BELUM_BAYAR" | "SUDAH_BAYAR";
                     setAdjustmentStatus(status);
+                    setAdjustmentError("");
+                    setConfirmCancellation(false);
                     if (status === "BELUM_BAYAR") {
                       setAdjustmentMethod("");
                       setAccountId("");
@@ -662,12 +681,28 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
               </label>
               <label className="text-sm font-semibold text-slate-700 sm:col-span-2">
                 Keterangan
-                <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} className="mt-1.5 w-full rounded-xl border border-slate-200 p-3 font-normal" />
+                <textarea value={note} onChange={(event) => { setNote(event.target.value); setAdjustmentError(""); }} rows={3} className="mt-1.5 w-full rounded-xl border border-slate-200 p-3 font-normal" />
               </label>
+              {adjustmentStatus === "BELUM_BAYAR" && Number(selected.totalPaid) > 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 sm:col-span-2">
+                  Mengubah status menjadi Belum Bayar akan membatalkan pembayaran sebelumnya dan mengembalikan nominal ke Pickup Outstanding.
+                </div>
+              )}
+              {adjustmentError && <div role="alert" className="text-sm font-medium text-red-600 sm:col-span-2">{adjustmentError}</div>}
               <div className="rounded-xl bg-blue-50 p-4 text-sm text-blue-900 sm:col-span-2">
                 Total setelah diskon: <strong>{formatMoney(previewReceived)}</strong>
               </div>
             </div>
+            {confirmCancellation && (
+              <div className="border-t border-amber-200 bg-amber-50 px-6 py-5">
+                <h3 className="font-bold text-amber-950">Batalkan pembayaran Pickup ini?</h3>
+                <p className="mt-1 text-sm text-amber-900">Pembayaran sebelumnya akan dibatalkan, saldo terkait akan dikoreksi, dan waybill kembali berstatus Belum Bayar. Histori tetap disimpan.</p>
+                <div className="mt-4 flex justify-end gap-3">
+                  <button type="button" onClick={() => setConfirmCancellation(false)} className="rounded-xl border border-amber-300 bg-white px-4 py-2.5 text-sm font-semibold">Kembali</button>
+                  <button type="button" disabled={saving} onClick={() => void saveAdjustment()} className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">Ya, Batalkan Pembayaran</button>
+                </div>
+              </div>
+            )}
             <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4">
               <button onClick={closeModal} disabled={saving} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-50">
                 Batal

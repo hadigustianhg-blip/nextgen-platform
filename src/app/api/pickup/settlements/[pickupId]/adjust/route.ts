@@ -41,6 +41,9 @@ export async function POST(
     if (code === "TRANSFER_ACCOUNT_REQUIRED") {
       return NextResponse.json({ error: { code, message: "Pilih rekening transfer yang tersedia." } }, { status: 400 });
     }
+    if (code === "CANCELLATION_REASON_REQUIRED") {
+      return NextResponse.json({ error: { code, message: "Alasan pembatalan wajib diisi." } }, { status: 400 });
+    }
     if (code === "INVALID_DISCOUNT") {
       return NextResponse.json({ error: { code, message: "Diskon tidak boleh melebihi ongkir." } }, { status: 400 });
     }

@@ -15,7 +15,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const row = await adjustDeliverySettlement({ ...scope, actorId: session.userId }, (await context.params).id, parsed.data);
     return row ? NextResponse.json({ data: row }) : NextResponse.json({ error: { code: "NOT_FOUND", message: "Setoran tidak ditemukan." } }, { status: 404 });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === "CANCELLATION_REASON_REQUIRED") {
+      return NextResponse.json({ error: { code: error.message, message: "Alasan pembatalan wajib diisi." } }, { status: 400 });
+    }
     return NextResponse.json({ error: { code: "ADJUSTMENT_FAILED", message: "Penyesuaian tidak dapat disimpan." } }, { status: 409 });
   }
 }

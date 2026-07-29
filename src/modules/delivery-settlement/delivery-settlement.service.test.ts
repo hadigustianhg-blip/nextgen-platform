@@ -133,6 +133,18 @@ describe("Delivery Settlement contracts", () => {
     expect(result.success).toBe(true);
   });
 
+  it("normalizes an unpaid correction and requires no payment fields", () => {
+    const result = deliveryAdjustmentSchema.parse({
+      requestKey,
+      status: "BELUM_BAYAR",
+      cashAmount: "500000",
+      transfers: [{ sequence: 1, amount: "300000" }],
+      note: "Pembayaran belum diterima",
+    });
+    expect(result.cashAmount).toBe("0");
+    expect(result.transfers).toEqual([]);
+  });
+
   it.each([
     { name: "negative cash", value: { requestKey, cashAmount: "-1", transfers: [] } },
     { name: "negative transfer", value: { requestKey, cashAmount: "0", transfers: [{ sequence: 1, amount: "-1" }] } },

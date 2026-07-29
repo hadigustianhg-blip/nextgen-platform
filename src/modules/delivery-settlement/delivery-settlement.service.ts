@@ -357,7 +357,7 @@ export async function getDeliverySettlement(scope: Scope, id: string) {
 export async function adjustDeliverySettlement(
   context: Context,
   id: string,
-  input: { requestKey: string; cashAmount: string | number; transfers: Array<{ sequence: number; amount: string | number }>; note?: string | null },
+  input: { requestKey: string; status?: "BELUM_BAYAR" | "SUDAH_BAYAR"; cashAmount: string | number; transfers: Array<{ sequence: number; amount: string | number }>; note?: string | null },
 ) {
   try {
     return await prisma.$transaction(async (tx) => {
@@ -368,6 +368,10 @@ export async function adjustDeliverySettlement(
     }
     const master = await tx.masterSetoran.findFirst({ where: { id, tenantId: context.tenantId, outletId: context.outletId }, include: paymentInclude });
     if (!master) return null;
+    const cancelPayment = input.status === "BELUM_BAYAR";
+    if (cancelPayment && master.payments.length > 0 && !input.note?.trim()) {
+      throw new Error("CANCELLATION_REASON_REQUIRED");
+    }
     const cash = decimal(input.cashAmount);
     const transfers = input.transfers.filter((item) => decimal(item.amount).greaterThan(0));
     if (cash.isNegative() || transfers.some((item) => decimal(item.amount).isNegative())) throw new Error("INVALID_AMOUNT");
@@ -380,6 +384,23 @@ export async function adjustDeliverySettlement(
       await voidAutomaticCashMovements(tx, context, "CourierSettlementPayment", old.id);
       await tx.courierSettlementTransfer.updateMany({ where: { settlementPaymentId: old.id, recordStatus: "VALID" }, data: { recordStatus: "SUPERSEDED" } });
       await tx.courierSettlementPayment.update({ where: { id: old.id }, data: { recordStatus: "SUPERSEDED", updatedByUserId: context.actorId } });
+    }
+    if (cancelPayment) {
+      await tx.auditLog.create({ data: {
+        tenantId: context.tenantId, outletId: context.outletId, actorId: context.actorId,
+        action: "UPDATE", entityType: "DELIVERY_PAYMENT_CANCELLED", entityId: id,
+        metadata: {
+          requestKey: input.requestKey,
+          statusBefore: master.payments.length > 0 ? "SUDAH_BAYAR" : "BELUM_BAYAR",
+          statusAfter: "BELUM_BAYAR",
+          paymentIds: master.payments.map((payment) => payment.id),
+          previousPaidAmount: master.payments.reduce((sum, payment) => sum.plus(payment.paidAmountSnapshot), zero()).toString(),
+          previousTransferIds: master.payments.flatMap((payment) => payment.transfers.map((transfer) => transfer.id)),
+          reason: input.note!.trim(),
+        },
+      } });
+      const row = await tx.masterSetoran.findFirst({ where: { id, tenantId: context.tenantId, outletId: context.outletId }, include: paymentInclude });
+      return row ? mapMaster(row) : null;
     }
     const transferTotal = transfers.reduce((sum, item) => sum.plus(item.amount), zero());
     const paid = cash.plus(transferTotal);

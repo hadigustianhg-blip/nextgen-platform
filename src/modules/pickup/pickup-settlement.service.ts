@@ -291,10 +291,16 @@ export async function adjustPickupSettlement(
     if (!master || !isCashSettlement(master.rawPickup.settlementRaw)) {
       throw new Error("PICKUP_NOT_FOUND");
     }
-
     const discountAmount = new Prisma.Decimal(String(input.discountAmount));
     if (discountAmount.isNegative() || discountAmount.greaterThan(master.freightAmount)) {
       throw new Error("INVALID_DISCOUNT");
+    }
+    if (
+      input.status === "BELUM_BAYAR" &&
+      master.payments.length > 0 &&
+      !input.note?.trim()
+    ) {
+      throw new Error("CANCELLATION_REASON_REQUIRED");
     }
     const finalObligation = master.freightAmount.minus(discountAmount);
     const activeRevision = master.settlementRevisions[0];
@@ -347,6 +353,12 @@ export async function adjustPickupSettlement(
         await tx.auditLog.create({
           data: auditData(context, "PICKUP_PAYMENT_VOIDED", payment.id, {
             masterPickupId: master.id,
+            statusBefore: "SUDAH_BAYAR",
+            statusAfter: "BELUM_BAYAR",
+            amount: payment.receivedAmount.toString(),
+            method: payment.paymentMethodRaw,
+            accountId: payment.transferAccount,
+            reason: input.note!.trim(),
           }),
         });
       }
@@ -545,6 +557,13 @@ export async function bulkAdjustPickupSettlements(
         Object.assign(error, { waybillNo: invalidMaster.waybillNo });
         throw error;
       }
+      if (
+        input.status === "BELUM_BAYAR" &&
+        masters.some((master) => master.payments.length > 0) &&
+        !input.note?.trim()
+      ) {
+        throw new Error("CANCELLATION_REASON_REQUIRED");
+      }
 
       const totalNominal = masters.reduce(
         (total, master) => total.plus(master.freightAmount.minus(discountAmount)),
@@ -607,6 +626,12 @@ export async function bulkAdjustPickupSettlements(
             await tx.auditLog.create({
               data: auditData(context, "PICKUP_PAYMENT_VOIDED", payment.id, {
                 masterPickupId: master.id,
+                statusBefore: "SUDAH_BAYAR",
+                statusAfter: "BELUM_BAYAR",
+                amount: payment.receivedAmount.toString(),
+                method: payment.paymentMethodRaw,
+                accountId: payment.transferAccount,
+                reason: input.note!.trim(),
               }),
             });
           }

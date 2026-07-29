@@ -79,6 +79,12 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    if (code === "CANCELLATION_REASON_REQUIRED") {
+      return NextResponse.json(
+        { error: { code, message: "Alasan pembatalan wajib diisi." } },
+        { status: 400 },
+      );
+    }
     if (code === "INVALID_DISCOUNT") {
       const waybill =
         error && typeof error === "object" && "waybillNo" in error

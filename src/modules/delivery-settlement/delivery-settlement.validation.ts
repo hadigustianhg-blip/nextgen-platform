@@ -18,6 +18,7 @@ export const deliverySettlementListSchema = z.object({
 
 export const deliveryAdjustmentSchema = z.object({
   requestKey: z.string().uuid(),
+  status: z.enum(["BELUM_BAYAR", "SUDAH_BAYAR"]).default("SUDAH_BAYAR"),
   cashAmount: decimalText.default("0"),
   transfers: z.array(z.object({
     sequence: z.number().int().min(1).max(8),
@@ -29,7 +30,11 @@ export const deliveryAdjustmentSchema = z.object({
     }
   }),
   note: z.string().trim().max(500).nullable().optional(),
-});
+}).transform((value) =>
+  value.status === "BELUM_BAYAR"
+    ? { ...value, cashAmount: "0" as const, transfers: [] }
+    : value,
+);
 
 export const dispatchRecordSchema = z.object({
   waybillNo: z.string().trim().min(1),
