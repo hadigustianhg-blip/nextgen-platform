@@ -7,6 +7,8 @@ vi.mock("@/lib/db/prisma", () => ({ prisma: {} }));
 import {
   calculateOperationalSummary,
   normalizeTeamName,
+  operationalPrismaPagination,
+  operationalPrismaScope,
   resolveBusinessDateCandidates,
 } from "./operational-settlement.service";
 import {
@@ -196,5 +198,29 @@ describe("Operational Settlement validation", () => {
   it("normalizes duplicate team spellings into one canonical key", () => {
     expect(normalizeTeamName(" RIDWAN  ")).toBe("RIDWAN");
     expect(normalizeTeamName("Ridwan")).toBe(normalizeTeamName("ridwan"));
+  });
+});
+
+describe("Operational Settlement Prisma query boundary", () => {
+  it("keeps request pagination and filters out of Prisma scope", () => {
+    const requestInput = {
+      tenantId: "tenant-1",
+      outletId: "outlet-1",
+      page: 2,
+      pageSize: 25,
+      category: "Kasbon",
+      team: "RIDWAN",
+      search: "transport",
+    };
+
+    expect(operationalPrismaScope(requestInput)).toEqual({
+      tenantId: "tenant-1",
+      outletId: "outlet-1",
+    });
+  });
+
+  it("translates public page and pageSize into Prisma skip and take", () => {
+    expect(operationalPrismaPagination(1, 25)).toEqual({ skip: 0, take: 25 });
+    expect(operationalPrismaPagination(3, 25)).toEqual({ skip: 50, take: 25 });
   });
 });

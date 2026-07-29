@@ -9,6 +9,14 @@ type Context = Scope & { actorId: string };
 const zero = () => new Prisma.Decimal(0);
 const decimal = (value: string | number | Prisma.Decimal) => new Prisma.Decimal(String(value));
 const dateValue = (value: string) => new Date(`${value}T00:00:00.000Z`);
+export const operationalPrismaScope = (scope: Scope) => ({
+  tenantId: scope.tenantId,
+  outletId: scope.outletId,
+});
+export const operationalPrismaPagination = (page: number, pageSize: number) => ({
+  skip: (page - 1) * pageSize,
+  take: pageSize,
+});
 
 export function normalizeTeamName(value: string | null | undefined) {
   return (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID");
@@ -112,24 +120,25 @@ export async function resolveOperationalBusinessDate(
   calendarDate = jakartaOperationalDate(),
 ) {
   const calendar = dateValue(calendarDate);
+  const whereScope = operationalPrismaScope(scope);
   const [closings, expenses, pickups, deliveries] = await Promise.all([
     prisma.operationalClosing.findMany({
-      where: { ...scope, operationalDate: { lte: calendar } },
+      where: { ...whereScope, operationalDate: { lte: calendar } },
       select: { operationalDate: true, status: true },
       orderBy: { operationalDate: "asc" },
     }),
     prisma.operationalExpense.findMany({
-      where: { ...scope, operationalDate: { lte: calendar } },
+      where: { ...whereScope, operationalDate: { lte: calendar } },
       select: { operationalDate: true },
       distinct: ["operationalDate"],
     }),
     prisma.masterPickup.findMany({
-      where: { ...scope, operationalDate: { lte: calendar } },
+      where: { ...whereScope, operationalDate: { lte: calendar } },
       select: { operationalDate: true },
       distinct: ["operationalDate"],
     }),
     prisma.masterSetoran.findMany({
-      where: { ...scope, operationalDate: { lte: calendar } },
+      where: { ...whereScope, operationalDate: { lte: calendar } },
       select: { operationalDate: true },
       distinct: ["operationalDate"],
     }),
@@ -178,7 +187,7 @@ async function calculateDateFinancials(
   scope: Scope,
   operationalDate: Date,
 ) {
-  const where = { ...scope, operationalDate };
+  const where = { ...operationalPrismaScope(scope), operationalDate };
   const [pickupRows, deliveryRows, validExpenses] = await Promise.all([
     tx.masterPickup.findMany({ where, include: pickupFinancialInclude }),
     tx.masterSetoran.findMany({ where, include: deliveryFinancialInclude }),
@@ -232,7 +241,8 @@ type OperationalListInput = Scope & {
 };
 
 export async function listOperationalSettlement(input: OperationalListInput) {
-  const business = await resolveOperationalBusinessDate(input);
+  const scope = operationalPrismaScope(input);
+  const business = await resolveOperationalBusinessDate(scope);
   const viewDate = input.operationalDate || business.activeBusinessDate;
   const dateFilter = dateValue(viewDate);
   const expenseWhere: Prisma.OperationalExpenseWhereInput = {
@@ -249,13 +259,16 @@ export async function listOperationalSettlement(input: OperationalListInput) {
       ],
     } : {}),
   };
-  const [expenses, financial, closing] = await Promise.all([
+  const pagination = operationalPrismaPagination(input.page, input.pageSize);
+  const [expenses, totalExpenses, financial, closing] = await Promise.all([
     prisma.operationalExpense.findMany({
       where: expenseWhere,
       include: { createdBy: { select: { name: true } } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      ...pagination,
     }),
-    prisma.$transaction((tx) => calculateDateFinancials(tx, input, dateFilter)),
+    prisma.operationalExpense.count({ where: expenseWhere }),
+    prisma.$transaction((tx) => calculateDateFinancials(tx, scope, dateFilter)),
     prisma.operationalClosing.findUnique({
           where: { tenantId_outletId_operationalDate: {
             tenantId: input.tenantId,
@@ -276,13 +289,11 @@ export async function listOperationalSettlement(input: OperationalListInput) {
     cashVariance: closing.cashVariance,
     varianceStatus: closing.varianceStatus,
   } : liveSummary;
-  const start = (input.page - 1) * input.pageSize;
-
   return {
     ...business,
     selectedOperationalDate: viewDate,
     status: closing?.status ?? "OPEN",
-    data: expenses.slice(start, start + input.pageSize).map((row) => ({
+    data: expenses.map((row) => ({
       id: row.id,
       operationalDate: row.operationalDate,
       createdAt: row.createdAt,
@@ -298,8 +309,8 @@ export async function listOperationalSettlement(input: OperationalListInput) {
     pagination: {
       page: input.page,
       pageSize: input.pageSize,
-      total: expenses.length,
-      totalPages: Math.ceil(expenses.length / input.pageSize),
+      total: totalExpenses,
+      totalPages: Math.ceil(totalExpenses / input.pageSize),
     },
     summary: {
       cashCollected: summary.cashCollected.toString(),
@@ -325,14 +336,15 @@ export async function listOperationalSettlement(input: OperationalListInput) {
 }
 
 export async function listOperationalTeams(scope: Scope) {
+  const where = operationalPrismaScope(scope);
   const [pickup, delivery] = await Promise.all([
     prisma.masterPickup.findMany({
-      where: scope,
+      where,
       select: { staffName: true },
       distinct: ["staffName"],
     }),
     prisma.masterSetoran.findMany({
-      where: scope,
+      where,
       select: { courierName: true },
       distinct: ["courierName"],
     }),
