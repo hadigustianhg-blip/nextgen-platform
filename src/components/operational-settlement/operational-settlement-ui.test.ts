@@ -53,7 +53,7 @@ describe("Operational Settlement vertical slice", () => {
 
   it("supports edit and void without hard delete", () => {
     expect(client).toContain("Edit");
-    expect(client).toContain(">Void</button>");
+    expect(client).toMatch(/>\s*Void\s*<\/button>/);
     expect(service).toContain('status: "VOID"');
     expect(service).not.toContain("operationalExpense.delete");
   });

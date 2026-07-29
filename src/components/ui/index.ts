@@ -1,1 +1,1 @@
-// Shared UI primitives are exported from this boundary.
+export * from "./nextgen-card";
