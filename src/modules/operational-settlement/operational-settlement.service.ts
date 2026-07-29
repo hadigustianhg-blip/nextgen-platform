@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
 
 type Scope = { tenantId: string; outletId: string };
 type Context = Scope & { actorId: string };
@@ -13,6 +14,28 @@ export function normalizeTeamName(value: string | null | undefined) {
   return (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID");
 }
 
+export function resolveBusinessDateCandidates(
+  calendarDate: string,
+  candidates: Array<{ operationalDate: string; status?: "OPEN" | "REOPENED" | "CLOSED" }>,
+) {
+  const statusByDate = new Map(candidates.filter((item) => item.status).map((item) => [
+    item.operationalDate, item.status!,
+  ]));
+  const openBusinessDates = [...new Set(candidates.map((item) => item.operationalDate))]
+    .filter((date) => date <= calendarDate && statusByDate.get(date) !== "CLOSED")
+    .sort()
+    .map((operationalDate) => ({
+      operationalDate,
+      status: statusByDate.get(operationalDate) === "REOPENED" ? "REOPENED" as const : "OPEN" as const,
+    }));
+  const activeBusinessDate = openBusinessDates[0]?.operationalDate ?? calendarDate;
+  return {
+    activeBusinessDate, calendarDate, openBusinessDates,
+    openDayCount: openBusinessDates.length,
+    isPastDueOpenDay: activeBusinessDate < calendarDate,
+  };
+}
+
 export function calculateOperationalSummary(input: {
   pickupCash: Prisma.Decimal;
   deliveryCash: Prisma.Decimal;
@@ -21,21 +44,26 @@ export function calculateOperationalSummary(input: {
   pickupOutstanding: Prisma.Decimal;
   deliveryOutstanding: Prisma.Decimal;
   expense: Prisma.Decimal;
+  bankDepositAmount?: Prisma.Decimal;
   physicalCash?: Prisma.Decimal | null;
 }) {
   const cashCollected = input.pickupCash.plus(input.deliveryCash);
   const transferCollected = input.pickupTransfer.plus(input.deliveryTransfer);
   const operationalExpense = input.expense;
   const cashAvailable = cashCollected.minus(operationalExpense);
+  const bankDepositAmount = input.bankDepositAmount ?? zero();
+  const remainingCashAfterDeposit = cashAvailable.minus(bankDepositAmount);
   const outstanding = input.pickupOutstanding.plus(input.deliveryOutstanding);
   const cashVariance = input.physicalCash == null
     ? null
-    : input.physicalCash.minus(cashAvailable);
+    : input.physicalCash.minus(remainingCashAfterDeposit);
   return {
     cashCollected,
     transferCollected,
     operationalExpense,
     cashAvailable,
+    bankDepositAmount,
+    remainingCashAfterDeposit,
     outstanding,
     cashVariance,
     varianceStatus: cashVariance == null
@@ -79,61 +107,90 @@ function isCashPickup(value: string | null) {
   return value?.trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID") === "TUNAI";
 }
 
-type OperationalListInput = Scope & {
-  page: number;
-  pageSize: number;
-  operationalDate?: string;
-  category?: string;
-  team?: string;
-  search?: string;
-};
-
-export async function listOperationalSettlement(input: OperationalListInput) {
-  const dateFilter = input.operationalDate ? dateValue(input.operationalDate) : undefined;
-  const expenseWhere: Prisma.OperationalExpenseWhereInput = {
-    tenantId: input.tenantId,
-    outletId: input.outletId,
-    ...(dateFilter ? { operationalDate: dateFilter } : {}),
-    ...(input.category ? { category: input.category } : {}),
-    ...(input.team ? { teamName: { contains: input.team, mode: "insensitive" } } : {}),
-    ...(input.search ? {
-      OR: [
-        { description: { contains: input.search, mode: "insensitive" } },
-        { vehiclePlate: { contains: input.search, mode: "insensitive" } },
-        { teamName: { contains: input.search, mode: "insensitive" } },
-      ],
-    } : {}),
-  };
-  const settlementWhere = {
-    tenantId: input.tenantId,
-    outletId: input.outletId,
-    ...(dateFilter ? { operationalDate: dateFilter } : {}),
-  };
-
-  const [expenses, pickupRows, deliveryRows, closing] = await Promise.all([
-    prisma.operationalExpense.findMany({
-      where: expenseWhere,
-      include: { createdBy: { select: { name: true } } },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+export async function resolveOperationalBusinessDate(
+  scope: Scope,
+  calendarDate = jakartaOperationalDate(),
+) {
+  const calendar = dateValue(calendarDate);
+  const [closings, expenses, pickups, deliveries] = await Promise.all([
+    prisma.operationalClosing.findMany({
+      where: { ...scope, operationalDate: { lte: calendar } },
+      select: { operationalDate: true, status: true },
+      orderBy: { operationalDate: "asc" },
     }),
-    prisma.masterPickup.findMany({ where: settlementWhere, include: pickupFinancialInclude }),
-    prisma.masterSetoran.findMany({ where: settlementWhere, include: deliveryFinancialInclude }),
-    dateFilter
-      ? prisma.operationalClosing.findUnique({
-          where: { tenantId_outletId_operationalDate: {
-            tenantId: input.tenantId,
-            outletId: input.outletId,
-            operationalDate: dateFilter,
-          } },
-        })
-      : Promise.resolve(null),
+    prisma.operationalExpense.findMany({
+      where: { ...scope, operationalDate: { lte: calendar } },
+      select: { operationalDate: true },
+      distinct: ["operationalDate"],
+    }),
+    prisma.masterPickup.findMany({
+      where: { ...scope, operationalDate: { lte: calendar } },
+      select: { operationalDate: true },
+      distinct: ["operationalDate"],
+    }),
+    prisma.masterSetoran.findMany({
+      where: { ...scope, operationalDate: { lte: calendar } },
+      select: { operationalDate: true },
+      distinct: ["operationalDate"],
+    }),
   ]);
+  return resolveBusinessDateCandidates(calendarDate, [
+    ...expenses.map((row) => ({ operationalDate: row.operationalDate.toISOString().slice(0, 10) })),
+    ...pickups.map((row) => ({ operationalDate: row.operationalDate.toISOString().slice(0, 10) })),
+    ...deliveries.map((row) => ({ operationalDate: row.operationalDate.toISOString().slice(0, 10) })),
+    ...closings.map((row) => ({
+      operationalDate: row.operationalDate.toISOString().slice(0, 10),
+      status: row.status,
+    })),
+  ]);
+}
 
+export async function auditOperationalBusinessDate(
+  context: Context,
+  resolution: Awaited<ReturnType<typeof resolveOperationalBusinessDate>>,
+) {
+  await prisma.auditLog.create({ data: {
+    ...context,
+    action: "UPDATE",
+    entityType: "OPERATIONAL_BUSINESS_DATE_RESOLVED",
+    metadata: {
+      activeBusinessDate: resolution.activeBusinessDate,
+      calendarDate: resolution.calendarDate,
+      openDayCount: resolution.openDayCount,
+    },
+  } });
+  if (resolution.isPastDueOpenDay) {
+    await prisma.auditLog.create({ data: {
+      ...context,
+      action: "UPDATE",
+      entityType: "OPERATIONAL_PAST_DUE_OPEN_DAY_DETECTED",
+      metadata: {
+        activeBusinessDate: resolution.activeBusinessDate,
+        calendarDate: resolution.calendarDate,
+        openDayCount: resolution.openDayCount,
+      },
+    } });
+  }
+}
+
+async function calculateDateFinancials(
+  tx: Prisma.TransactionClient,
+  scope: Scope,
+  operationalDate: Date,
+) {
+  const where = { ...scope, operationalDate };
+  const [pickupRows, deliveryRows, validExpenses] = await Promise.all([
+    tx.masterPickup.findMany({ where, include: pickupFinancialInclude }),
+    tx.masterSetoran.findMany({ where, include: deliveryFinancialInclude }),
+    tx.operationalExpense.findMany({
+      where: { ...where, status: "VALID" },
+      select: { amount: true },
+    }),
+  ]);
   let pickupCash = zero(), pickupTransfer = zero(), pickupOutstanding = zero();
   for (const row of pickupRows) {
     if (!isCashPickup(row.rawPickup.settlementRaw)) continue;
-    const discount = row.settlementRevisions[0]?.discountAmount ?? zero();
-    const obligation = row.freightAmount.minus(discount);
+    const obligation = row.freightAmount.minus(row.settlementRevisions[0]?.discountAmount ?? zero());
     let paid = zero();
     for (const payment of row.payments) {
       paid = paid.plus(payment.receivedAmount);
@@ -144,7 +201,6 @@ export async function listOperationalSettlement(input: OperationalListInput) {
     const remaining = obligation.minus(paid);
     if (remaining.greaterThan(0)) pickupOutstanding = pickupOutstanding.plus(remaining);
   }
-
   let deliveryCash = zero(), deliveryTransfer = zero(), deliveryOutstanding = zero();
   for (const row of deliveryRows) {
     let paid = zero();
@@ -159,23 +215,73 @@ export async function listOperationalSettlement(input: OperationalListInput) {
     const remaining = row.totalSettlementAmount.minus(paid);
     if (remaining.greaterThan(0)) deliveryOutstanding = deliveryOutstanding.plus(remaining);
   }
+  return {
+    pickupCash, deliveryCash, pickupTransfer, deliveryTransfer,
+    pickupOutstanding, deliveryOutstanding,
+    expense: validExpenses.reduce((sum, row) => sum.plus(row.amount), zero()),
+  };
+}
 
-  const expenseTotal = expenses
-    .filter((row) => row.status === "VALID")
-    .reduce((sum, row) => sum.plus(row.amount), zero());
-  const summary = calculateOperationalSummary({
-    pickupCash,
-    deliveryCash,
-    pickupTransfer,
-    deliveryTransfer,
-    pickupOutstanding,
-    deliveryOutstanding,
-    expense: expenseTotal,
-    physicalCash: closing?.physicalCash,
-  });
+type OperationalListInput = Scope & {
+  page: number;
+  pageSize: number;
+  operationalDate?: string;
+  category?: string;
+  team?: string;
+  search?: string;
+};
+
+export async function listOperationalSettlement(input: OperationalListInput) {
+  const business = await resolveOperationalBusinessDate(input);
+  const viewDate = input.operationalDate || business.activeBusinessDate;
+  const dateFilter = dateValue(viewDate);
+  const expenseWhere: Prisma.OperationalExpenseWhereInput = {
+    tenantId: input.tenantId,
+    outletId: input.outletId,
+    operationalDate: dateFilter,
+    ...(input.category ? { category: input.category } : {}),
+    ...(input.team ? { teamName: { contains: input.team, mode: "insensitive" } } : {}),
+    ...(input.search ? {
+      OR: [
+        { description: { contains: input.search, mode: "insensitive" } },
+        { vehiclePlate: { contains: input.search, mode: "insensitive" } },
+        { teamName: { contains: input.search, mode: "insensitive" } },
+      ],
+    } : {}),
+  };
+  const [expenses, financial, closing] = await Promise.all([
+    prisma.operationalExpense.findMany({
+      where: expenseWhere,
+      include: { createdBy: { select: { name: true } } },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    }),
+    prisma.$transaction((tx) => calculateDateFinancials(tx, input, dateFilter)),
+    prisma.operationalClosing.findUnique({
+          where: { tenantId_outletId_operationalDate: {
+            tenantId: input.tenantId,
+            outletId: input.outletId,
+            operationalDate: dateFilter,
+          } },
+        }),
+  ]);
+  const liveSummary = calculateOperationalSummary({ ...financial, physicalCash: closing?.physicalCash });
+  const summary = closing?.status === "CLOSED" && closing.snapshotVersion > 0 ? {
+    cashCollected: closing.cashCollectedSnapshot,
+    transferCollected: closing.transferCollectedSnapshot,
+    operationalExpense: closing.operationalExpenseSnapshot,
+    cashAvailable: closing.cashAvailableBeforeDepositSnapshot,
+    outstanding: closing.outstandingSnapshot,
+    bankDepositAmount: closing.bankDepositAmount,
+    remainingCashAfterDeposit: closing.remainingCashAfterDepositSnapshot,
+    cashVariance: closing.cashVariance,
+    varianceStatus: closing.varianceStatus,
+  } : liveSummary;
   const start = (input.page - 1) * input.pageSize;
 
   return {
+    ...business,
+    selectedOperationalDate: viewDate,
+    status: closing?.status ?? "OPEN",
     data: expenses.slice(start, start + input.pageSize).map((row) => ({
       id: row.id,
       operationalDate: row.operationalDate,
@@ -204,6 +310,11 @@ export async function listOperationalSettlement(input: OperationalListInput) {
     },
     closing: {
       status: closing?.status ?? "OPEN",
+      bankDepositAmount: closing?.bankDepositAmount.toString() ?? "0",
+      bankDepositAccount: closing?.bankDepositAccount ?? null,
+      bankDepositReference: closing?.bankDepositReference ?? null,
+      bankDepositNote: closing?.bankDepositNote ?? null,
+      remainingCashAfterDeposit: summary.remainingCashAfterDeposit.toString(),
       physicalCash: closing?.physicalCash.toString() ?? "0",
       cashVariance: summary.cashVariance?.toString() ?? null,
       varianceStatus: summary.varianceStatus,
@@ -358,22 +469,61 @@ export async function voidOperationalExpense(
 
 export async function closeOperational(
   context: Context,
-  input: { requestKey: string; operationalDate: string; physicalCash: string | number },
+  input: {
+    requestKey: string;
+    operationalDate: string;
+    bankDepositAmount?: string | number;
+    bankDepositAccount?: string | null;
+    bankDepositReference?: string | null;
+    bankDepositNote?: string | null;
+    physicalCash: string | number;
+  },
 ) {
-  return prisma.$transaction(async (tx) => {
+  const closing = await prisma.$transaction(async (tx) => {
     const replay = await previousRequest(tx, context, input.requestKey);
     const operationalDate = dateValue(input.operationalDate);
     const key = { tenantId: context.tenantId, outletId: context.outletId, operationalDate };
     if (replay) return tx.operationalClosing.findUnique({ where: { tenantId_outletId_operationalDate: key } });
+    const financial = await calculateDateFinancials(tx, context, operationalDate);
+    const bankDepositAmount = decimal(input.bankDepositAmount ?? 0);
+    const physicalCash = decimal(input.physicalCash);
+    const calculated = calculateOperationalSummary({
+      ...financial, bankDepositAmount, physicalCash,
+    });
+    if (
+      bankDepositAmount.greaterThan(0) &&
+      bankDepositAmount.greaterThan(calculated.cashAvailable)
+    ) {
+      throw new Error("BANK_DEPOSIT_EXCEEDS_AVAILABLE_CASH");
+    }
+    if (bankDepositAmount.greaterThan(0) && !input.bankDepositAccount) {
+      throw new Error("BANK_ACCOUNT_REQUIRED");
+    }
+    const snapshot = {
+      snapshotVersion: 1,
+      cashCollectedSnapshot: calculated.cashCollected,
+      transferCollectedSnapshot: calculated.transferCollected,
+      outstandingSnapshot: calculated.outstanding,
+      operationalExpenseSnapshot: calculated.operationalExpense,
+      cashAvailableBeforeDepositSnapshot: calculated.cashAvailable,
+      bankDepositAmount,
+      bankDepositAccount: input.bankDepositAccount || null,
+      bankDepositReference: input.bankDepositReference || null,
+      bankDepositNote: input.bankDepositNote || null,
+      remainingCashAfterDepositSnapshot: calculated.remainingCashAfterDeposit,
+      physicalCash,
+      cashVariance: calculated.cashVariance ?? zero(),
+      varianceStatus: calculated.varianceStatus,
+    };
     const closing = await tx.operationalClosing.upsert({
       where: { tenantId_outletId_operationalDate: key },
       create: {
         tenantId: context.tenantId, outletId: context.outletId, operationalDate,
-        physicalCash: decimal(input.physicalCash), status: "CLOSED",
+        ...snapshot, status: "CLOSED",
         closedByUserId: context.actorId, closedAt: new Date(),
       },
       update: {
-        physicalCash: decimal(input.physicalCash), status: "CLOSED",
+        ...snapshot, status: "CLOSED",
         closedByUserId: context.actorId, closedAt: new Date(),
         version: { increment: 1 },
       },
@@ -381,10 +531,26 @@ export async function closeOperational(
     await tx.operationalActionRequest.create({ data: { tenantId: context.tenantId, outletId: context.outletId, requestKey: input.requestKey, action: "OPERATIONAL_CLOSED", entityId: closing.id } });
     await tx.auditLog.create({ data: {
       ...context, action: "UPDATE", entityType: "OPERATIONAL_CLOSED", entityId: closing.id,
-      metadata: { operationalDate: input.operationalDate, physicalCash: closing.physicalCash.toString() },
+      metadata: {
+        operationalDate: input.operationalDate,
+        calendarDateAtClosing: jakartaOperationalDate(),
+        cashCollected: calculated.cashCollected.toString(),
+        transferCollected: calculated.transferCollected.toString(),
+        operationalExpense: calculated.operationalExpense.toString(),
+        cashAvailableBeforeDeposit: calculated.cashAvailable.toString(),
+        bankDepositAmount: bankDepositAmount.toString(),
+        bankDepositAccount: input.bankDepositAccount ? input.bankDepositAccount.slice(0, 50) : null,
+        remainingCashAfterDeposit: calculated.remainingCashAfterDeposit.toString(),
+        physicalCash: physicalCash.toString(),
+        cashVariance: calculated.cashVariance?.toString() ?? "0",
+        varianceStatus: calculated.varianceStatus,
+        requestKey: input.requestKey,
+      },
     } });
     return closing;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  const next = await resolveOperationalBusinessDate(context);
+  return { closing, nextBusinessDate: next.activeBusinessDate };
 }
 
 export async function reopenOperational(
@@ -399,7 +565,7 @@ export async function reopenOperational(
     const existing = await tx.operationalClosing.findUnique({ where: { tenantId_outletId_operationalDate: key } });
     if (!existing) throw new Error("CLOSING_NOT_FOUND");
     const closing = await tx.operationalClosing.update({ where: { id: existing.id }, data: {
-      status: "OPEN", reopenedByUserId: context.actorId, reopenedAt: new Date(),
+      status: "REOPENED", reopenedByUserId: context.actorId, reopenedAt: new Date(),
       reopenReason: input.reason, version: { increment: 1 },
     } });
     await tx.operationalActionRequest.create({ data: { tenantId: context.tenantId, outletId: context.outletId, requestKey: input.requestKey, action: "OPERATIONAL_REOPENED", entityId: closing.id } });

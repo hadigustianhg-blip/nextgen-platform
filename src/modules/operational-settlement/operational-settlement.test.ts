@@ -7,6 +7,7 @@ vi.mock("@/lib/db/prisma", () => ({ prisma: {} }));
 import {
   calculateOperationalSummary,
   normalizeTeamName,
+  resolveBusinessDateCandidates,
 } from "./operational-settlement.service";
 import {
   closeOperationalSchema,
@@ -97,6 +98,41 @@ describe("Operational Settlement calculation", () => {
     });
     expect(result.cashAvailable.toString()).toBe("0");
   });
+
+  it("subtracts bank deposit before calculating physical cash variance", () => {
+    const result = calculateOperationalSummary({
+      pickupCash: d(15000000), deliveryCash: d(0),
+      pickupTransfer: d(0), deliveryTransfer: d(0),
+      pickupOutstanding: d(0), deliveryOutstanding: d(0),
+      expense: d(600000), bankDepositAmount: d(14000000), physicalCash: d(400000),
+    });
+    expect(result.cashAvailable.toString()).toBe("14400000");
+    expect(result.remainingCashAfterDeposit.toString()).toBe("400000");
+    expect(result.cashVariance?.toString()).toBe("0");
+    expect(result.varianceStatus).toBe("MATCH");
+  });
+});
+
+describe("Operational business date", () => {
+  it("defaults to Jakarta calendar date without open candidates", () => {
+    expect(resolveBusinessDateCandidates("2026-07-30", []).activeBusinessDate).toBe("2026-07-30");
+  });
+
+  it("selects the oldest OPEN/REOPENED day and excludes CLOSED or future days", () => {
+    const result = resolveBusinessDateCandidates("2026-07-31", [
+      { operationalDate: "2026-07-30", status: "OPEN" },
+      { operationalDate: "2026-07-29", status: "REOPENED" },
+      { operationalDate: "2026-07-28", status: "CLOSED" },
+      { operationalDate: "2026-08-01", status: "OPEN" },
+    ]);
+    expect(result.activeBusinessDate).toBe("2026-07-29");
+    expect(result.openBusinessDates).toEqual([
+      { operationalDate: "2026-07-29", status: "REOPENED" },
+      { operationalDate: "2026-07-30", status: "OPEN" },
+    ]);
+    expect(result.openDayCount).toBe(2);
+    expect(result.isPastDueOpenDay).toBe(true);
+  });
 });
 
 describe("Operational Settlement validation", () => {
@@ -131,6 +167,21 @@ describe("Operational Settlement validation", () => {
     expect(closeOperationalSchema.safeParse({ requestKey: base.requestKey, operationalDate: base.operationalDate, physicalCash: "500000" }).success).toBe(true);
     expect(reopenOperationalSchema.safeParse({ requestKey: base.requestKey, operationalDate: base.operationalDate, reason: "Koreksi biaya" }).success).toBe(true);
     expect(reopenOperationalSchema.safeParse({ requestKey: base.requestKey, operationalDate: base.operationalDate, reason: "" }).success).toBe(false);
+  });
+
+  it("requires a bank account only when deposit is positive", () => {
+    expect(closeOperationalSchema.safeParse({
+      requestKey: base.requestKey, operationalDate: base.operationalDate,
+      bankDepositAmount: "0", physicalCash: "0",
+    }).success).toBe(true);
+    expect(closeOperationalSchema.safeParse({
+      requestKey: base.requestKey, operationalDate: base.operationalDate,
+      bankDepositAmount: "100", physicalCash: "0",
+    }).success).toBe(false);
+    expect(closeOperationalSchema.safeParse({
+      requestKey: base.requestKey, operationalDate: base.operationalDate,
+      bankDepositAmount: "100", bankDepositAccount: "BCA Operasional", physicalCash: "0",
+    }).success).toBe(true);
   });
 
   it("supports date, category, team, search, and pagination filters", () => {

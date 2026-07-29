@@ -1,0 +1,16 @@
+ALTER TYPE "OperationalClosingStatus" ADD VALUE IF NOT EXISTS 'REOPENED' BEFORE 'CLOSED';
+
+ALTER TABLE "OperationalClosing"
+ADD COLUMN "snapshotVersion" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN "cashCollectedSnapshot" DECIMAL(18,2) NOT NULL DEFAULT 0,
+ADD COLUMN "transferCollectedSnapshot" DECIMAL(18,2) NOT NULL DEFAULT 0,
+ADD COLUMN "outstandingSnapshot" DECIMAL(18,2) NOT NULL DEFAULT 0,
+ADD COLUMN "operationalExpenseSnapshot" DECIMAL(18,2) NOT NULL DEFAULT 0,
+ADD COLUMN "cashAvailableBeforeDepositSnapshot" DECIMAL(18,2) NOT NULL DEFAULT 0,
+ADD COLUMN "bankDepositAmount" DECIMAL(18,2) NOT NULL DEFAULT 0,
+ADD COLUMN "bankDepositAccount" TEXT,
+ADD COLUMN "bankDepositReference" TEXT,
+ADD COLUMN "bankDepositNote" TEXT,
+ADD COLUMN "remainingCashAfterDepositSnapshot" DECIMAL(18,2) NOT NULL DEFAULT 0,
+ADD COLUMN "cashVariance" DECIMAL(18,2) NOT NULL DEFAULT 0,
+ADD COLUMN "varianceStatus" TEXT NOT NULL DEFAULT 'MATCH';

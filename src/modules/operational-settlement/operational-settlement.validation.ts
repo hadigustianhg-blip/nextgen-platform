@@ -31,6 +31,10 @@ const amountSchema = z.union([
   z.string().trim().regex(/^\d+(\.\d{1,2})?$/),
 ]);
 
+function amountIsPositive(value: string | number) {
+  return BigInt(String(value).replace(".", "")) > 0n;
+}
+
 export const operationalListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(10).max(100).default(25),
@@ -82,7 +86,15 @@ export const voidExpenseSchema = z.object({
 export const closeOperationalSchema = z.object({
   requestKey: z.string().uuid(),
   operationalDate: dateSchema,
+  bankDepositAmount: amountSchema.default("0"),
+  bankDepositAccount: z.string().trim().max(100).nullable().optional(),
+  bankDepositReference: z.string().trim().max(100).nullable().optional(),
+  bankDepositNote: z.string().trim().max(500).nullable().optional(),
   physicalCash: amountSchema,
+}).superRefine((value, context) => {
+  if (amountIsPositive(value.bankDepositAmount) && !value.bankDepositAccount) {
+    context.addIssue({ code: "custom", path: ["bankDepositAccount"], message: "Rekening tujuan wajib diisi." });
+  }
 });
 
 export const reopenOperationalSchema = z.object({

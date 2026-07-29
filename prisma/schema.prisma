@@ -66,6 +66,7 @@ enum OperationalExpenseStatus {
 
 enum OperationalClosingStatus {
   OPEN
+  REOPENED
   CLOSED
 }
 
@@ -656,24 +657,37 @@ model OperationalExpense {
 }
 
 model OperationalClosing {
-  id               String                   @id @default(uuid()) @db.Uuid
-  tenantId         String                   @db.Uuid
-  outletId         String                   @db.Uuid
-  operationalDate  DateTime                 @db.Date
-  physicalCash     Decimal                  @default(0) @db.Decimal(18, 2)
-  status           OperationalClosingStatus @default(OPEN)
-  version          Int                      @default(1)
-  closedByUserId   String?                  @db.Uuid
-  closedAt         DateTime?                @db.Timestamptz(3)
-  reopenedByUserId String?                  @db.Uuid
-  reopenedAt       DateTime?                @db.Timestamptz(3)
-  reopenReason     String?
-  createdAt        DateTime                 @default(now()) @db.Timestamptz(3)
-  updatedAt        DateTime                 @updatedAt @db.Timestamptz(3)
-  tenant           Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  outlet           Outlet                   @relation(fields: [outletId], references: [id], onDelete: Restrict)
-  closedBy         User?                    @relation("OperationalClosingClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
-  reopenedBy       User?                    @relation("OperationalClosingReopenedBy", fields: [reopenedByUserId], references: [id], onDelete: Restrict)
+  id                                 String                   @id @default(uuid()) @db.Uuid
+  tenantId                           String                   @db.Uuid
+  outletId                           String                   @db.Uuid
+  operationalDate                    DateTime                 @db.Date
+  snapshotVersion                    Int                      @default(0)
+  cashCollectedSnapshot              Decimal                  @default(0) @db.Decimal(18, 2)
+  transferCollectedSnapshot          Decimal                  @default(0) @db.Decimal(18, 2)
+  outstandingSnapshot                Decimal                  @default(0) @db.Decimal(18, 2)
+  operationalExpenseSnapshot         Decimal                  @default(0) @db.Decimal(18, 2)
+  cashAvailableBeforeDepositSnapshot Decimal                  @default(0) @db.Decimal(18, 2)
+  bankDepositAmount                  Decimal                  @default(0) @db.Decimal(18, 2)
+  bankDepositAccount                 String?
+  bankDepositReference               String?
+  bankDepositNote                    String?
+  remainingCashAfterDepositSnapshot  Decimal                  @default(0) @db.Decimal(18, 2)
+  physicalCash                       Decimal                  @default(0) @db.Decimal(18, 2)
+  cashVariance                       Decimal                  @default(0) @db.Decimal(18, 2)
+  varianceStatus                     String                   @default("MATCH")
+  status                             OperationalClosingStatus @default(OPEN)
+  version                            Int                      @default(1)
+  closedByUserId                     String?                  @db.Uuid
+  closedAt                           DateTime?                @db.Timestamptz(3)
+  reopenedByUserId                   String?                  @db.Uuid
+  reopenedAt                         DateTime?                @db.Timestamptz(3)
+  reopenReason                       String?
+  createdAt                          DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt                          DateTime                 @updatedAt @db.Timestamptz(3)
+  tenant                             Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet                             Outlet                   @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  closedBy                           User?                    @relation("OperationalClosingClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+  reopenedBy                         User?                    @relation("OperationalClosingReopenedBy", fields: [reopenedByUserId], references: [id], onDelete: Restrict)
 
   @@unique([tenantId, outletId, operationalDate])
   @@index([tenantId, outletId, status, operationalDate])

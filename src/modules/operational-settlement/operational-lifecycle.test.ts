@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
   closings: [] as Array<Record<string, any>>,
   requests: [] as Array<Record<string, any>>,
   audits: [] as Array<Record<string, any>>,
+  pickups: [] as Array<Record<string, any>>,
   expenseSequence: 0,
   closingSequence: 0,
 }));
@@ -18,6 +19,8 @@ function sameDate(left: Date, right: Date) {
 }
 
 const tx = {
+  masterPickup: { findMany: vi.fn(async () => state.pickups) },
+  masterSetoran: { findMany: vi.fn(async () => []) },
   operationalActionRequest: {
     findUnique: vi.fn(async ({ where }: any) => {
       const key = where.tenantId_outletId_requestKey;
@@ -71,6 +74,13 @@ const tx = {
     }),
   },
   operationalExpense: {
+    findMany: vi.fn(async ({ where }: any) =>
+      state.expenses.filter((row) =>
+        row.tenantId === where.tenantId &&
+        row.outletId === where.outletId &&
+        sameDate(row.operationalDate, where.operationalDate) &&
+        (!where.status || row.status === where.status),
+      ).map((row) => ({ amount: row.amount }))),
     findFirst: vi.fn(async ({ where }: any) =>
       state.expenses.find((row) =>
         row.id === where.id &&
@@ -106,6 +116,10 @@ const tx = {
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     $transaction: vi.fn(async (callback: any) => callback(tx)),
+    operationalClosing: { findMany: vi.fn(async () => state.closings) },
+    operationalExpense: { findMany: vi.fn(async () => state.expenses) },
+    masterPickup: { findMany: vi.fn(async () => state.pickups) },
+    masterSetoran: { findMany: vi.fn(async () => []) },
   },
 }));
 
@@ -125,6 +139,7 @@ beforeEach(() => {
   state.closings.length = 0;
   state.requests.length = 0;
   state.audits.length = 0;
+  state.pickups.length = 0;
   state.expenseSequence = 0;
   state.closingSequence = 0;
   vi.clearAllMocks();
@@ -197,9 +212,64 @@ describe("Operational Settlement lifecycle", () => {
       requestKey: "10000000-0000-4000-8000-000000000011",
       category: "ATK", amount: "15000",
     });
-    expect(state.closings[0].status).toBe("OPEN");
+    expect(state.closings[0].status).toBe("REOPENED");
     expect(state.closings[0].reopenReason).toBe("Ada koreksi ATK");
     expect(state.expenses[0].amount.toString()).toBe("15000");
     expect(state.audits.some((row) => row.entityType === "OPERATIONAL_REOPENED")).toBe(true);
+  });
+
+  it("stores the 29 July snapshot when closing on the next calendar day", async () => {
+    state.pickups.push({
+      operationalDate: new Date("2026-07-29T00:00:00Z"),
+      freightAmount: new Prisma.Decimal(15000000),
+      rawPickup: { settlementRaw: "Tunai" },
+      settlementRevisions: [],
+      payments: [{
+        receivedAmount: new Prisma.Decimal(15000000),
+        paymentMethodRaw: "TUNAI",
+      }],
+    });
+    await createOperationalExpense(context, {
+      requestKey: "10000000-0000-4000-8000-000000000012",
+      operationalDate: date, category: "BBM", amount: "600000", vehiclePlate: "D8634AB",
+    });
+    const result = await closeOperational(context, {
+      requestKey: "10000000-0000-4000-8000-000000000013",
+      operationalDate: date,
+      bankDepositAmount: "14000000",
+      bankDepositAccount: "BCA Operasional",
+      bankDepositReference: "SLIP-001",
+      bankDepositNote: "Setoran kas 29 Juli",
+      physicalCash: "400000",
+    });
+    expect(result.closing?.operationalDate.toISOString().slice(0, 10)).toBe("2026-07-29");
+    expect(result.closing?.snapshotVersion).toBe(1);
+    expect(result.closing?.cashCollectedSnapshot.toString()).toBe("15000000");
+    expect(result.closing?.operationalExpenseSnapshot.toString()).toBe("600000");
+    expect(result.closing?.cashAvailableBeforeDepositSnapshot.toString()).toBe("14400000");
+    expect(result.closing?.remainingCashAfterDepositSnapshot.toString()).toBe("400000");
+    expect(result.closing?.cashVariance.toString()).toBe("0");
+    expect(result.closing?.varianceStatus).toBe("MATCH");
+    expect(result.closing?.closedAt).toBeInstanceOf(Date);
+  });
+
+  it("rolls back closing when bank deposit exceeds server-calculated cash", async () => {
+    state.pickups.push({
+      operationalDate: new Date("2026-07-29T00:00:00Z"),
+      freightAmount: new Prisma.Decimal(100000),
+      rawPickup: { settlementRaw: "Tunai" },
+      settlementRevisions: [],
+      payments: [{ receivedAmount: new Prisma.Decimal(100000), paymentMethodRaw: "TUNAI" }],
+    });
+    await expect(closeOperational(context, {
+      requestKey: "10000000-0000-4000-8000-000000000014",
+      operationalDate: date,
+      bankDepositAmount: "100001",
+      bankDepositAccount: "BCA Operasional",
+      physicalCash: "0",
+    })).rejects.toThrow("BANK_DEPOSIT_EXCEEDS_AVAILABLE_CASH");
+    expect(state.closings).toHaveLength(0);
+    expect(state.requests).toHaveLength(0);
+    expect(state.audits).toHaveLength(0);
   });
 });

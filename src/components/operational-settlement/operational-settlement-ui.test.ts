@@ -25,6 +25,23 @@ describe("Operational Settlement vertical slice", () => {
     }
   });
 
+  it("renders past-due business day metadata and closing navigation", () => {
+    expect(client).toContain("isPastDueOpenDay");
+    expect(client).toContain("openDayCount");
+    expect(client).toContain("tanggal paling lama terlebih dahulu");
+    expect(client).toContain('href="#closing-harian"');
+  });
+
+  it("renders bank deposit fields and remaining cash formula", () => {
+    expect(client).toContain("Cash Tersedia Sebelum Setor");
+    expect(client).toContain("Setor Bank");
+    expect(client).toContain("Rekening Tujuan");
+    expect(client).toContain("Nomor Referensi");
+    expect(client).toContain("Keterangan Setor Bank");
+    expect(client).toContain("Sisa Cash Sistem");
+    expect(client).toContain("bankDepositAmount");
+  });
+
   it("renders conditional BBM and Kasbon fields", () => {
     expect(client).toContain('formCategory === "BBM"');
     expect(client).toContain("Nomor Polisi");
@@ -61,6 +78,8 @@ describe("Operational Settlement vertical slice", () => {
     expect(schema).toContain("model OperationalExpense");
     expect(schema).toContain("model OperationalClosing");
     expect(schema).toContain("model OperationalActionRequest");
+    expect(schema).toContain("cashCollectedSnapshot");
+    expect(schema).toContain("remainingCashAfterDepositSnapshot");
     expect(schema).toContain("model MasterPickup");
     expect(schema).toContain("model MasterSetoran");
   });

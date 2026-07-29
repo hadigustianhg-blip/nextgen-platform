@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { canReadOperational, listOperationalSettlement, operationalListQuerySchema, operationalScope } from "@/modules/operational-settlement";
+import { auditOperationalBusinessDate, canReadOperational, listOperationalSettlement, operationalListQuerySchema, operationalScope } from "@/modules/operational-settlement";
 
 export async function GET(request: Request) {
   const session = await getSession();
@@ -10,5 +10,21 @@ export async function GET(request: Request) {
   if (!canReadOperational(session)) return NextResponse.json({ error: { code: "FORBIDDEN", message: "Akses ditolak." } }, { status: 403 });
   const parsed = operationalListQuerySchema.safeParse(Object.fromEntries(new URL(request.url).searchParams));
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Filter tidak valid." } }, { status: 400 });
-  return NextResponse.json(await listOperationalSettlement({ ...scope, ...parsed.data }));
+  const data = await listOperationalSettlement({ ...scope, ...parsed.data });
+  try {
+    if (parsed.data.operationalDate) return NextResponse.json(data);
+    await auditOperationalBusinessDate(
+      { ...scope, actorId: session.userId },
+      {
+        activeBusinessDate: data.activeBusinessDate,
+        calendarDate: data.calendarDate,
+        openBusinessDates: data.openBusinessDates,
+        openDayCount: data.openDayCount,
+        isPastDueOpenDay: data.isPastDueOpenDay,
+      },
+    );
+  } catch {
+    // Audit telemetry must not make a scoped read unavailable.
+  }
+  return NextResponse.json(data);
 }
