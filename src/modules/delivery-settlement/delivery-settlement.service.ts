@@ -2,6 +2,7 @@ import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type SyncRunStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { createAutomaticCashMovement, voidAutomaticCashMovements } from "@/modules/payment/cash-flow.service";
 import { fetchDeliverySource, DeliverySourceError } from "./delivery-settlement.client";
 import { codRecordSchema, dispatchRecordSchema } from "./delivery-settlement.validation";
 
@@ -376,6 +377,7 @@ export async function adjustDeliverySettlement(
       metadata: { requestKey: input.requestKey },
     } });
     for (const old of master.payments) {
+      await voidAutomaticCashMovements(tx, context, "CourierSettlementPayment", old.id);
       await tx.courierSettlementTransfer.updateMany({ where: { settlementPaymentId: old.id, recordStatus: "VALID" }, data: { recordStatus: "SUPERSEDED" } });
       await tx.courierSettlementPayment.update({ where: { id: old.id }, data: { recordStatus: "SUPERSEDED", updatedByUserId: context.actorId } });
     }
@@ -388,6 +390,18 @@ export async function adjustDeliverySettlement(
       supersedesPaymentId: master.payments[0]?.id ?? null,
       note: input.note || null, createdByUserId: context.actorId, updatedByUserId: context.actorId,
     } });
+    await createAutomaticCashMovement(tx, {
+      ...context, businessDate: payment.paymentDate, direction: "IN", channel: "CASH",
+      movementType: "DELIVERY_PAYMENT", amount: cash, description: "Pembayaran delivery tunai",
+      reference: master.courierName, sourceType: "CourierSettlementPayment",
+      sourceId: payment.id, requestKey: payment.id,
+    });
+    await createAutomaticCashMovement(tx, {
+      ...context, businessDate: payment.paymentDate, direction: "IN", channel: "BANK",
+      movementType: "DELIVERY_PAYMENT", amount: transferTotal, description: "Pembayaran delivery transfer",
+      reference: master.courierName, sourceType: "CourierSettlementPayment",
+      sourceId: payment.id, requestKey: payment.id,
+    });
     for (const item of transfers) await tx.courierSettlementTransfer.create({ data: {
       tenantId: context.tenantId, outletId: context.outletId, settlementPaymentId: payment.id,
       transactionKey: randomUUID(), sequence: item.sequence, revision: 1,

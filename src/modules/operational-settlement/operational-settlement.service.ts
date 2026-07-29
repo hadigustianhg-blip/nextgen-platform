@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
+import { createAutomaticCashMovement, voidAutomaticCashMovements } from "@/modules/payment/cash-flow.service";
 
 type Scope = { tenantId: string; outletId: string };
 type Context = Scope & { actorId: string };
@@ -415,6 +416,13 @@ export async function createOperationalExpense(context: Context, input: ExpenseI
       createdByUserId: context.actorId,
       updatedByUserId: context.actorId,
     } });
+    await createAutomaticCashMovement(tx, {
+      ...context, businessDate: expense.operationalDate, occurredAt: expense.createdAt,
+      direction: "OUT", channel: "CASH", movementType: "OPERATIONAL_EXPENSE",
+      amount: expense.amount, description: expense.description || expense.category,
+      reference: expense.vehiclePlate || expense.teamName, sourceType: "OperationalExpense",
+      sourceId: expense.id, requestKey: expense.id,
+    });
     await tx.operationalActionRequest.create({ data: { tenantId: context.tenantId, outletId: context.outletId, requestKey: input.requestKey, action: "EXPENSE_CREATED", entityId: expense.id } });
     await tx.auditLog.create({ data: {
       ...context, action: "CREATE", entityType: "OPERATIONAL_EXPENSE_CREATED", entityId: expense.id,
@@ -445,6 +453,13 @@ export async function updateOperationalExpense(
       vehiclePlate: input.category === "BBM" ? input.vehiclePlate?.replace(/\s+/g, "").toLocaleUpperCase("id-ID") || null : null,
       updatedByUserId: context.actorId,
     } });
+    await createAutomaticCashMovement(tx, {
+      ...context, businessDate: updated.operationalDate, occurredAt: updated.createdAt,
+      direction: "OUT", channel: "CASH", movementType: "OPERATIONAL_EXPENSE",
+      amount: updated.amount, description: updated.description || updated.category,
+      reference: updated.vehiclePlate || updated.teamName, sourceType: "OperationalExpense",
+      sourceId: updated.id, requestKey: updated.id, auditEntityType: "CASH_MOVEMENT_UPDATED",
+    });
     await tx.operationalActionRequest.create({ data: { tenantId: context.tenantId, outletId: context.outletId, requestKey: input.requestKey, action: "EXPENSE_UPDATED", entityId: id } });
     await tx.auditLog.create({ data: {
       ...context, action: "UPDATE", entityType: "OPERATIONAL_EXPENSE_UPDATED", entityId: id,
@@ -470,6 +485,7 @@ export async function voidOperationalExpense(
       status: "VOID", voidedAt: new Date(), voidedByUserId: context.actorId,
       voidReason: input.reason, updatedByUserId: context.actorId,
     } });
+    await voidAutomaticCashMovements(tx, context, "OperationalExpense", id);
     await tx.operationalActionRequest.create({ data: { tenantId: context.tenantId, outletId: context.outletId, requestKey: input.requestKey, action: "EXPENSE_VOID", entityId: id } });
     await tx.auditLog.create({ data: {
       ...context, action: "DELETE", entityType: "OPERATIONAL_EXPENSE_VOID", entityId: id,
@@ -540,6 +556,18 @@ export async function closeOperational(
         version: { increment: 1 },
       },
     });
+    await createAutomaticCashMovement(tx, {
+      ...context, businessDate: operationalDate, direction: "OUT", channel: "CASH",
+      movementType: "BANK_DEPOSIT", amount: bankDepositAmount,
+      description: "Setoran bank dari kas", reference: input.bankDepositReference,
+      sourceType: "OperationalClosing", sourceId: closing.id, requestKey: closing.id,
+    });
+    await createAutomaticCashMovement(tx, {
+      ...context, businessDate: operationalDate, direction: "IN", channel: "BANK",
+      movementType: "BANK_DEPOSIT", amount: bankDepositAmount,
+      description: "Setoran bank masuk", reference: input.bankDepositReference,
+      sourceType: "OperationalClosing", sourceId: closing.id, requestKey: closing.id,
+    });
     await tx.operationalActionRequest.create({ data: { tenantId: context.tenantId, outletId: context.outletId, requestKey: input.requestKey, action: "OPERATIONAL_CLOSED", entityId: closing.id } });
     await tx.auditLog.create({ data: {
       ...context, action: "UPDATE", entityType: "OPERATIONAL_CLOSED", entityId: closing.id,
@@ -580,6 +608,7 @@ export async function reopenOperational(
       status: "REOPENED", reopenedByUserId: context.actorId, reopenedAt: new Date(),
       reopenReason: input.reason, version: { increment: 1 },
     } });
+    await voidAutomaticCashMovements(tx, context, "OperationalClosing", closing.id);
     await tx.operationalActionRequest.create({ data: { tenantId: context.tenantId, outletId: context.outletId, requestKey: input.requestKey, action: "OPERATIONAL_REOPENED", entityId: closing.id } });
     await tx.auditLog.create({ data: {
       ...context, action: "UPDATE", entityType: "OPERATIONAL_REOPENED", entityId: closing.id,

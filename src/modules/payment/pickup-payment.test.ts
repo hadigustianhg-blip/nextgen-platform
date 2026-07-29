@@ -1,0 +1,156 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
+
+vi.mock("server-only", () => ({}));
+const state = vi.hoisted(() => ({
+  payments: [] as Array<Record<string, any>>,
+  movements: [] as Array<Record<string, any>>,
+  audits: [] as Array<Record<string, any>>,
+}));
+const master = {
+  id: "10000000-0000-4000-8000-000000000010",
+  tenantId: "10000000-0000-4000-8000-000000000011",
+  outletId: "10000000-0000-4000-8000-000000000012",
+  waybillNo: "WB-001",
+  operationalDate: new Date("2026-07-20T00:00:00Z"),
+  freightAmount: new Prisma.Decimal(1000),
+  settlementRevisions: [{ discountAmount: new Prisma.Decimal(0) }],
+  payments: [] as Array<Record<string, any>>,
+};
+const tx = {
+  masterPickup: {
+    findFirst: vi.fn(async () => ({
+      ...master,
+      payments: state.payments.filter((item) => item.recordStatus === "VALID"),
+    })),
+  },
+  pickupPayment: {
+    findUnique: vi.fn(async ({ where }: any) => state.payments.find((item) =>
+      item.transactionKey === where.transactionKey_revision.transactionKey &&
+      item.revision === where.transactionKey_revision.revision,
+    ) ?? null),
+    findFirst: vi.fn(async ({ where }: any) => state.payments.find((item) => item.id === where.id) ?? null),
+    create: vi.fn(async ({ data }: any) => {
+      const row = { id: `20000000-0000-4000-8000-${String(state.payments.length + 1).padStart(12, "0")}`, recordStatus: "VALID", ...data };
+      state.payments.push(row); return row;
+    }),
+    update: vi.fn(async ({ where, data }: any) => {
+      const row = state.payments.find((item) => item.id === where.id)!;
+      Object.assign(row, data); return row;
+    }),
+  },
+  cashMovement: {
+    upsert: vi.fn(async ({ create }: any) => {
+      const row = { id: `movement-${state.movements.length + 1}`, recordStatus: "VALID", ...create };
+      state.movements.push(row); return row;
+    }),
+    updateMany: vi.fn(async ({ where, data }: any) => {
+      const rows = state.movements.filter((item) => item.sourceId === where.sourceId && item.recordStatus === where.recordStatus);
+      rows.forEach((row) => Object.assign(row, data)); return { count: rows.length };
+    }),
+  },
+  auditLog: { create: vi.fn(async ({ data }: any) => { state.audits.push(data); return data; }) },
+};
+vi.mock("@/lib/db/prisma", () => ({
+  prisma: { $transaction: vi.fn(async (callback: any) => callback(tx)) },
+}));
+
+import {
+  createPickupPayment, pickupReceivableStatus, receivableAgeBucket,
+  receivableAgeDays, voidPickupPayment,
+} from "./pickup-payment.service";
+import { pickupPaymentInputSchema, pickupPaymentListSchema } from "./pickup-payment.validation";
+import {
+  canCreatePickupPayment, canManagePickupPayment, canReadPickupPayment,
+} from "./pickup-payment.authorization";
+import type { SessionContext } from "@/lib/auth/session";
+
+const context = { tenantId: master.tenantId, outletId: master.outletId, actorId: "10000000-0000-4000-8000-000000000013" };
+const input = {
+  requestKey: "30000000-0000-4000-8000-000000000001",
+  masterPickupId: master.id, paymentDate: "2026-07-29", method: "CASH" as const,
+  amount: "400", reference: "REF-1", bank: "", note: "",
+};
+
+beforeEach(() => {
+  state.payments.length = 0; state.movements.length = 0; state.audits.length = 0;
+  vi.clearAllMocks();
+});
+
+describe("Pickup Payment AR formulas", () => {
+  it.each([
+    [0, "BELUM_BAYAR"], [400, "SEBAGIAN"], [1000, "LUNAS"], [1200, "LEBIH_BAYAR"],
+  ])("derives status for paid %s", (paid, expected) => {
+    expect(pickupReceivableStatus(new Prisma.Decimal(1000), new Prisma.Decimal(paid))).toBe(expected);
+  });
+  it("calculates overdue age and buckets", () => {
+    expect(receivableAgeDays(new Date("2026-07-20T00:00:00Z"), "2026-07-29")).toBe(9);
+    expect(receivableAgeBucket(0)).toBe("TODAY");
+    expect(receivableAgeBucket(2)).toBe("1_3");
+    expect(receivableAgeBucket(6)).toBe("4_7");
+    expect(receivableAgeBucket(9)).toBe("OVER_7");
+    expect(receivableAgeBucket(31)).toBe("OVER_30");
+  });
+});
+
+describe("Pickup Payment transaction and cash flow", () => {
+  it("creates a cash payment and matching CashMovement once", async () => {
+    const first = await createPickupPayment(context, input);
+    const replay = await createPickupPayment(context, input);
+    expect(first?.id).toBe(replay?.id);
+    expect(state.payments).toHaveLength(1);
+    expect(state.movements).toMatchObject([{
+      direction: "IN", channel: "CASH", movementType: "PICKUP_PAYMENT",
+      reference: "WB-001", sourceType: "PickupPayment",
+    }]);
+  });
+  it("creates transfer as BANK movement", async () => {
+    await createPickupPayment(context, {
+      ...input, requestKey: "30000000-0000-4000-8000-000000000002",
+      method: "TRANSFER", bank: "BCA",
+    });
+    expect(state.movements[0].channel).toBe("BANK");
+  });
+  it("requires confirmation for overpayment and supports it after confirmation", async () => {
+    await expect(createPickupPayment(context, {
+      ...input, amount: "1200",
+    })).rejects.toThrow("OVERPAYMENT_CONFIRMATION_REQUIRED");
+    await createPickupPayment(context, { ...input, amount: "1200", confirmOverpayment: true });
+    expect(state.payments[0].receivedAmount.toString()).toBe("1200");
+  });
+  it("voids payment and its cash movement without deleting history", async () => {
+    const payment = await createPickupPayment(context, input);
+    await voidPickupPayment(context, payment!.id, {
+      requestKey: "30000000-0000-4000-8000-000000000003", reason: "Salah input",
+    });
+    expect(state.payments).toHaveLength(1);
+    expect(state.payments[0].recordStatus).toBe("VOID");
+    expect(state.movements[0].recordStatus).toBe("VOID");
+    expect(state.audits.some((item) => item.entityType === "PICKUP_PAYMENT_VOIDED")).toBe(true);
+  });
+});
+
+describe("Pickup Payment validation, filters, pagination, and RBAC", () => {
+  it("rejects float, zero, and missing transfer bank", () => {
+    expect(pickupPaymentInputSchema.safeParse({ ...input, amount: "1.5" }).success).toBe(false);
+    expect(pickupPaymentInputSchema.safeParse({ ...input, amount: "0" }).success).toBe(false);
+    expect(pickupPaymentInputSchema.safeParse({ ...input, method: "TRANSFER", bank: "" }).success).toBe(false);
+  });
+  it("accepts search, filter, and pagination", () => {
+    const parsed = pickupPaymentListSchema.parse({
+      page: "2", pageSize: "50", status: "LUNAS", age: "OVER_30",
+      method: "TRANSFER", search: "WB-001",
+    });
+    expect(parsed).toMatchObject({ page: 2, pageSize: 50, status: "LUNAS", age: "OVER_30" });
+  });
+  it("enforces Viewer, Operational, Admin, and Owner roles", () => {
+    const session = (roles: string[]) => ({ roles, outletId: master.outletId } as SessionContext);
+    expect(canReadPickupPayment(session(["VIEWER"]))).toBe(true);
+    expect(canCreatePickupPayment(session(["VIEWER"]))).toBe(false);
+    expect(canCreatePickupPayment(session(["OPERATIONAL"]))).toBe(true);
+    expect(canManagePickupPayment(session(["OPERATIONAL"]))).toBe(false);
+    expect(canManagePickupPayment(session(["ADMIN"]))).toBe(true);
+    expect(canManagePickupPayment(session(["OWNER"]))).toBe(true);
+  });
+});

@@ -70,6 +70,34 @@ enum OperationalClosingStatus {
   CLOSED
 }
 
+enum CashDirection {
+  IN
+  OUT
+}
+
+enum CashChannel {
+  CASH
+  BANK
+}
+
+enum CashMovementType {
+  PICKUP_PAYMENT
+  DELIVERY_PAYMENT
+  BANK_DEPOSIT
+  OPERATIONAL_EXPENSE
+  CASH_WITHDRAWAL
+  MANUAL_INCOME
+  MANUAL_EXPENSE
+  REFUND
+  ADJUSTMENT
+  TRANSFER
+}
+
+enum CashMovementStatus {
+  VALID
+  VOID
+}
+
 model Tenant {
   id                         String                      @id @default(uuid()) @db.Uuid
   name                       String
@@ -97,6 +125,7 @@ model Tenant {
   operationalExpenses        OperationalExpense[]
   operationalClosings        OperationalClosing[]
   operationalActionRequests  OperationalActionRequest[]
+  cashMovements              CashMovement[]
 }
 
 model Outlet {
@@ -124,6 +153,7 @@ model Outlet {
   operationalExpenses        OperationalExpense[]
   operationalClosings        OperationalClosing[]
   operationalActionRequests  OperationalActionRequest[]
+  cashMovements              CashMovement[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -164,6 +194,7 @@ model User {
   operationalExpensesVoided           OperationalExpense[]        @relation("OperationalExpenseVoidedBy")
   operationalClosingsClosed           OperationalClosing[]        @relation("OperationalClosingClosedBy")
   operationalClosingsReopened         OperationalClosing[]        @relation("OperationalClosingReopenedBy")
+  cashMovementsCreated                CashMovement[]              @relation("CashMovementCreatedBy")
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -494,6 +525,7 @@ model PickupPayment {
   receivedAmount      Decimal               @db.Decimal(18, 2)
   paymentMethodRaw    String
   transferAccount     String?
+  reference           String?
   note                String?
   voidedAt            DateTime?             @db.Timestamptz(3)
   voidedByUserId      String?               @db.Uuid
@@ -514,6 +546,7 @@ model PickupPayment {
   @@unique([transactionKey, revision])
   @@index([tenantId, outletId, paymentDate])
   @@index([tenantId, outletId, masterPickupId, recordStatus])
+  @@index([tenantId, outletId, reference])
 }
 
 model MasterSetoran {
@@ -707,4 +740,35 @@ model OperationalActionRequest {
 
   @@unique([tenantId, outletId, requestKey])
   @@index([tenantId, outletId, action, createdAt])
+}
+
+model CashMovement {
+  id              String             @id @default(uuid()) @db.Uuid
+  tenantId        String             @db.Uuid
+  outletId        String             @db.Uuid
+  businessDate    DateTime           @db.Date
+  occurredAt      DateTime           @db.Timestamptz(3)
+  direction       CashDirection
+  channel         CashChannel
+  movementType    CashMovementType
+  amount          Decimal            @db.Decimal(18, 2)
+  description     String?
+  reference       String?
+  sourceType      String?
+  sourceId        String?
+  requestKey      String             @db.Uuid
+  recordStatus    CashMovementStatus @default(VALID)
+  createdByUserId String             @db.Uuid
+  createdAt       DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(3)
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet          Outlet             @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  createdBy       User               @relation("CashMovementCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, outletId, requestKey, direction, channel])
+  @@unique([tenantId, outletId, sourceType, sourceId, direction, channel])
+  @@index([tenantId, outletId, businessDate, occurredAt])
+  @@index([tenantId, outletId, recordStatus, channel])
+  @@index([tenantId, outletId, reference])
+  @@index([tenantId, outletId, businessDate, recordStatus, channel, direction, movementType], map: "CashMovement_settlement_summary_idx")
 }

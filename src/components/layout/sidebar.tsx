@@ -158,7 +158,28 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
               {!collapsed && <span>Operational Settlement</span>}
             </Link>
           </div>
-          {navigation.slice(1).map((item) => {
+          <div className="pt-1">
+            <div className={["flex h-11 items-center rounded-xl px-3 text-sm font-medium text-slate-300", collapsed ? "justify-center" : "gap-3"].join(" ")}>
+              <CreditCard size={19} />
+              {!collapsed && <><span>Payment</span><ChevronDown size={15} className="ml-auto" /></>}
+            </div>
+            <Link href="/dashboard/payment/settlement" title={collapsed ? "Payment Settlement" : undefined} className={[
+              "mt-1 flex h-10 items-center rounded-xl text-sm font-medium transition-colors",
+              pathname.startsWith("/dashboard/payment/settlement") ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
+              collapsed ? "justify-center px-3" : "ml-5 gap-3 px-3",
+            ].join(" ")}><WalletCards size={17} />{!collapsed && <span>Payment Settlement</span>}</Link>
+            <Link href="/dashboard/payment/pickup" title={collapsed ? "Pickup Payment" : undefined} className={[
+              "mt-1 flex h-10 items-center rounded-xl text-sm font-medium transition-colors",
+              pathname.startsWith("/dashboard/payment/pickup") ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
+              collapsed ? "justify-center px-3" : "ml-5 gap-3 px-3",
+            ].join(" ")}><PackageCheck size={17} />{!collapsed && <span>Pickup Payment</span>}</Link>
+            <Link href="/dashboard/payment/cash-flow" title={collapsed ? "Cash Flow Payment" : undefined} className={[
+              "mt-1 flex h-10 items-center rounded-xl text-sm font-medium transition-colors",
+              pathname.startsWith("/dashboard/payment/cash-flow") ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
+              collapsed ? "justify-center px-3" : "ml-5 gap-3 px-3",
+            ].join(" ")}><ReceiptText size={17} />{!collapsed && <span>Cash Flow Payment</span>}</Link>
+          </div>
+          {navigation.slice(1).filter((item) => item.label !== "Payment").map((item) => {
             const active = item.href.startsWith("/") && pathname.startsWith(item.href);
             return (
               <Link

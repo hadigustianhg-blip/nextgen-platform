@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { createAutomaticCashMovement, voidAutomaticCashMovements } from "@/modules/payment/cash-flow.service";
 import { getPickupTransferAccounts } from "./transfer-accounts";
 
 type SettlementContext = {
@@ -332,6 +333,7 @@ export async function adjustPickupSettlement(
     const activePayments = master.payments;
     if (input.status === "BELUM_BAYAR") {
       for (const payment of activePayments) {
+        await voidAutomaticCashMovements(tx, context, "PickupPayment", payment.id);
         await tx.pickupPayment.update({
           where: { id: payment.id },
           data: {
@@ -350,6 +352,7 @@ export async function adjustPickupSettlement(
       }
     } else {
       for (const payment of activePayments) {
+        await voidAutomaticCashMovements(tx, context, "PickupPayment", payment.id);
         await tx.pickupPayment.update({
           where: { id: payment.id },
           data: { recordStatus: "SUPERSEDED", updatedByUserId: context.actorId },
@@ -378,6 +381,13 @@ export async function adjustPickupSettlement(
           createdByUserId: context.actorId,
           updatedByUserId: context.actorId,
         },
+      });
+      await createAutomaticCashMovement(tx, {
+        ...context, businessDate: payment.paymentDate,
+        direction: "IN", channel: input.paymentMethod === "TUNAI" ? "CASH" : "BANK",
+        movementType: "PICKUP_PAYMENT", amount: payment.receivedAmount,
+        description: "Pembayaran pickup", reference: master.waybillNo,
+        sourceType: "PickupPayment", sourceId: payment.id, requestKey: payment.id,
       });
       await tx.auditLog.create({
         data: auditData(context, "PICKUP_PAYMENT_CREATED", payment.id, {
@@ -583,6 +593,7 @@ export async function bulkAdjustPickupSettlements(
 
         if (input.status === "BELUM_BAYAR") {
           for (const payment of master.payments) {
+            await voidAutomaticCashMovements(tx, context, "PickupPayment", payment.id);
             await tx.pickupPayment.update({
               where: { id: payment.id },
               data: {
@@ -601,6 +612,7 @@ export async function bulkAdjustPickupSettlements(
           }
         } else {
           for (const payment of master.payments) {
+            await voidAutomaticCashMovements(tx, context, "PickupPayment", payment.id);
             await tx.pickupPayment.update({
               where: { id: payment.id },
               data: {
@@ -627,6 +639,13 @@ export async function bulkAdjustPickupSettlements(
               createdByUserId: context.actorId,
               updatedByUserId: context.actorId,
             },
+          });
+          await createAutomaticCashMovement(tx, {
+            ...context, businessDate: payment.paymentDate,
+            direction: "IN", channel: input.paymentMethod === "TUNAI" ? "CASH" : "BANK",
+            movementType: "PICKUP_PAYMENT", amount: payment.receivedAmount,
+            description: "Pembayaran pickup", reference: master.waybillNo,
+            sourceType: "PickupPayment", sourceId: payment.id, requestKey: payment.id,
           });
           await tx.auditLog.create({
             data: auditData(context, "PICKUP_PAYMENT_CREATED", payment.id, {

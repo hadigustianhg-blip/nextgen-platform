@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   masters: [] as Array<Record<string, any>>,
   revisions: [] as Array<Record<string, any>>,
   payments: [] as Array<Record<string, any>>,
+  movements: [] as Array<Record<string, any>>,
   audits: [] as Array<Record<string, any>>,
   revisionSequence: 0,
   paymentSequence: 0,
@@ -34,6 +35,26 @@ function hydrate(master: Record<string, any>) {
 }
 
 const transactionClient = {
+  cashMovement: {
+    upsert: vi.fn(async ({ create, update }: any) => {
+      const row = state.movements.find((item) =>
+        item.sourceType === create.sourceType && item.sourceId === create.sourceId &&
+        item.direction === create.direction && item.channel === create.channel,
+      );
+      if (row) { Object.assign(row, update); return row; }
+      const created = { id: `movement-${state.movements.length + 1}`, recordStatus: "VALID", ...create };
+      state.movements.push(created);
+      return created;
+    }),
+    updateMany: vi.fn(async ({ where, data }: any) => {
+      const rows = state.movements.filter((item) =>
+        item.sourceType === where.sourceType && item.sourceId === where.sourceId &&
+        item.recordStatus === where.recordStatus,
+      );
+      rows.forEach((row) => Object.assign(row, data));
+      return { count: rows.length };
+    }),
+  },
   pickupSettlementRevision: {
     findMany: vi.fn(async ({ where }: any) =>
       state.revisions
@@ -135,6 +156,7 @@ vi.mock("@/lib/db/prisma", () => ({
       const snapshot = {
         revisions: state.revisions.map((revision) => ({ ...revision })),
         payments: state.payments.map((payment) => ({ ...payment })),
+        movements: state.movements.map((movement) => ({ ...movement })),
         audits: state.audits.map((audit) => ({ ...audit })),
         revisionSequence: state.revisionSequence,
         paymentSequence: state.paymentSequence,
@@ -144,6 +166,7 @@ vi.mock("@/lib/db/prisma", () => ({
       } catch (error) {
         state.revisions.splice(0, state.revisions.length, ...snapshot.revisions);
         state.payments.splice(0, state.payments.length, ...snapshot.payments);
+        state.movements.splice(0, state.movements.length, ...snapshot.movements);
         state.audits.splice(0, state.audits.length, ...snapshot.audits);
         state.revisionSequence = snapshot.revisionSequence;
         state.paymentSequence = snapshot.paymentSequence;
@@ -189,6 +212,7 @@ beforeEach(() => {
   state.masters.length = 0;
   state.revisions.length = 0;
   state.payments.length = 0;
+  state.movements.length = 0;
   state.audits.length = 0;
   state.revisionSequence = 0;
   state.paymentSequence = 0;
@@ -428,6 +452,10 @@ describe("Pickup Settlement service", () => {
     });
     expect(state.payments[0].recordStatus).toBe("VALID");
     expect(state.payments[0].receivedAmount.toString()).toBe("9000");
+    expect(state.movements[0]).toMatchObject({
+      direction: "IN", channel: "CASH", movementType: "PICKUP_PAYMENT",
+      sourceType: "PickupPayment",
+    });
     await expect(adjustPickupSettlement(context, "pickup", {
       requestId: "10000000-0000-4000-8000-000000000003",
       discountAmount: 11000,

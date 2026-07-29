@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   requests: [] as Array<Record<string, any>>,
   audits: [] as Array<Record<string, any>>,
   pickups: [] as Array<Record<string, any>>,
+  movements: [] as Array<Record<string, any>>,
   expenseSequence: 0,
   closingSequence: 0,
 }));
@@ -19,6 +20,26 @@ function sameDate(left: Date, right: Date) {
 }
 
 const tx = {
+  cashMovement: {
+    upsert: vi.fn(async ({ create, update }: any) => {
+      const row = state.movements.find((item) =>
+        item.sourceType === create.sourceType && item.sourceId === create.sourceId &&
+        item.direction === create.direction && item.channel === create.channel,
+      );
+      if (row) { Object.assign(row, update); return row; }
+      const created = { id: `movement-${state.movements.length + 1}`, recordStatus: "VALID", ...create };
+      state.movements.push(created);
+      return created;
+    }),
+    updateMany: vi.fn(async ({ where, data }: any) => {
+      const rows = state.movements.filter((item) =>
+        item.sourceType === where.sourceType && item.sourceId === where.sourceId &&
+        item.recordStatus === where.recordStatus,
+      );
+      rows.forEach((row) => Object.assign(row, data));
+      return { count: rows.length };
+    }),
+  },
   masterPickup: { findMany: vi.fn(async () => state.pickups) },
   masterSetoran: { findMany: vi.fn(async () => []) },
   operationalActionRequest: {
@@ -140,6 +161,7 @@ beforeEach(() => {
   state.requests.length = 0;
   state.audits.length = 0;
   state.pickups.length = 0;
+  state.movements.length = 0;
   state.expenseSequence = 0;
   state.closingSequence = 0;
   vi.clearAllMocks();
@@ -159,6 +181,10 @@ describe("Operational Settlement lifecycle", () => {
     expect(first?.id).toBe(replay?.id);
     expect(state.expenses).toHaveLength(1);
     expect(state.expenses[0].vehiclePlate).toBe("D8634AB");
+    expect(state.movements[0]).toMatchObject({
+      direction: "OUT", channel: "CASH", movementType: "OPERATIONAL_EXPENSE",
+      sourceType: "OperationalExpense",
+    });
     expect(state.audits.filter((row) => row.entityType === "OPERATIONAL_EXPENSE_CREATED")).toHaveLength(1);
   });
 
@@ -173,6 +199,7 @@ describe("Operational Settlement lifecycle", () => {
     });
     expect(state.expenses).toHaveLength(1);
     expect(state.expenses[0].status).toBe("VOID");
+    expect(state.movements[0].recordStatus).toBe("VOID");
     expect(state.audits.some((row) => row.entityType === "OPERATIONAL_EXPENSE_VOID")).toBe(true);
   });
 
