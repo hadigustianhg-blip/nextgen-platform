@@ -2,7 +2,6 @@ import { AppShell } from "@/components/layout/app-shell";
 import { MonitoringMonthlyClient } from "@/components/monitoring/monitoring-monthly-client";
 import { prisma } from "@/lib/db/prisma";
 import { requireSession } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
 import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
 import { resolveOperationalBusinessDate } from "@/modules/operational-settlement/operational-settlement.service";
 
@@ -37,7 +36,6 @@ export default async function MonitoringMonthlyPage() {
         initialStartDate={`${endDate.slice(0, 7)}-01`}
         initialEndDate={endDate}
         outletLocked={Boolean(session.outletId)}
-        canSync={hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL"])}
       />
     </AppShell>
   );

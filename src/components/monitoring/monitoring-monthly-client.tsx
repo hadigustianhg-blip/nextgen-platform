@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CloudDownload, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import {
   FilterCard,
   MetricCard,
@@ -85,14 +85,12 @@ export function MonitoringMonthlyClient({
   initialStartDate,
   initialEndDate,
   outletLocked,
-  canSync,
 }: {
   outlets: Array<{ id: string; code: string; name: string }>;
   initialOutletId: string;
   initialStartDate: string;
   initialEndDate: string;
   outletLocked: boolean;
-  canSync: boolean;
 }) {
   const [outletId, setOutletId] = useState(initialOutletId);
   const [startDate, setStartDate] = useState(initialStartDate);
@@ -102,11 +100,7 @@ export function MonitoringMonthlyClient({
   const [refreshKey, setRefreshKey] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [notice, setNotice] = useState<{
-    tone: "success" | "error";
-    text: string;
-  } | null>(null);
+  const [error, setError] = useState("");
 
   const validRange =
     Boolean(startDate && endDate) &&
@@ -119,6 +113,7 @@ export function MonitoringMonthlyClient({
       return;
     }
     setLoading(true);
+    setError("");
     const query = new URLSearchParams({
       outletId,
       startDate,
@@ -135,10 +130,7 @@ export function MonitoringMonthlyClient({
       if (!response.ok) throw new Error();
       setResult((await response.json()) as Result);
     } catch {
-      setNotice({
-        tone: "error",
-        text: "Monitoring Monthly belum dapat dimuat.",
-      });
+      setError("Monitoring Monthly belum dapat dimuat.");
     } finally {
       setLoading(false);
     }
@@ -161,50 +153,7 @@ export function MonitoringMonthlyClient({
     setEndDate(end);
     setDeliveryPage(1);
     setPickupPage(1);
-    setNotice(null);
-  }
-
-  async function syncLatestDate() {
-    if (syncing || !validRange || !outletId) return;
-    setSyncing(true);
-    setNotice(null);
-    try {
-      const response = await fetch("/api/monitoring/daily/sync", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ outletId, businessDate: endDate }),
-      });
-      const body = (await response.json()) as {
-        success?: boolean;
-        dispatch?: { success: boolean; processed?: number };
-        pickup?: { success: boolean; processed?: number };
-        error?: { message?: string };
-      };
-      if (!response.ok || !body.success) {
-        const failed = [
-          body.dispatch?.success === false ? "Dispatch" : null,
-          body.pickup?.success === false ? "Pickup" : null,
-        ].filter(Boolean);
-        throw new Error(
-          failed.length
-            ? `Sinkronisasi ${endDate} gagal pada: ${failed.join(" dan ")}.`
-            : body.error?.message || "Sinkronisasi data gagal.",
-        );
-      }
-      setNotice({
-        tone: "success",
-        text: `Business Date ${endDate} berhasil disinkronkan. Dispatch ${body.dispatch?.processed ?? 0} data, Pickup ${body.pickup?.processed ?? 0} data.`,
-      });
-      setRefreshKey((value) => value + 1);
-    } catch (error) {
-      setNotice({
-        tone: "error",
-        text:
-          error instanceof Error ? error.message : "Sinkronisasi data gagal.",
-      });
-    } finally {
-      setSyncing(false);
-    }
+    setError("");
   }
 
   const achievement = result?.summary.deliveryAchievement ?? 0;
@@ -262,29 +211,13 @@ export function MonitoringMonthlyClient({
           <div className="flex flex-col gap-3 sm:col-span-2 sm:flex-row xl:col-span-1">
             <button
               type="button"
-              disabled={loading || syncing || !validRange || !outletId}
+              disabled={loading || !validRange || !outletId}
               onClick={() => setRefreshKey((value) => value + 1)}
               className={`${nextgenButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}
             >
               <RefreshCw size={17} className={loading ? "animate-spin" : ""} />
               Refresh
             </button>
-            {canSync && (
-              <button
-                type="button"
-                disabled={loading || syncing || !validRange || !outletId}
-                onClick={() => void syncLatestDate()}
-                title={`Hanya menyinkronkan Business Date akhir: ${endDate}`}
-                className={`${nextgenButtonClass} bg-blue-600 text-white hover:bg-blue-700`}
-              >
-                {syncing ? (
-                  <RefreshCw size={17} className="animate-spin" />
-                ) : (
-                  <CloudDownload size={17} />
-                )}
-                {syncing ? "Menyinkronkan..." : "Sinkronkan Data"}
-              </button>
-            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -303,9 +236,6 @@ export function MonitoringMonthlyClient({
             label="16–Akhir Bulan"
             onClick={() => updatePeriod(`${periodMonth}-16`, currentMonthEnd)}
           />
-          <span className="ml-auto text-xs text-slate-500">
-            Sinkronisasi mengambil Business Date akhir saja ({endDate}).
-          </span>
         </div>
       </FilterCard>
 
@@ -317,16 +247,12 @@ export function MonitoringMonthlyClient({
           Tanggal mulai dan selesai wajib berurutan dalam bulan yang sama.
         </div>
       )}
-      {notice && (
+      {error && (
         <div
-          role="status"
-          className={`rounded-xl border px-4 py-3 text-sm ${
-            notice.tone === "success"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : "border-red-200 bg-red-50 text-red-800"
-          }`}
+          role="alert"
+          className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
         >
-          {notice.text}
+          {error}
         </div>
       )}
 

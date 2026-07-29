@@ -40,7 +40,7 @@ describe("Monitoring Monthly contracts", () => {
     expect(source).not.toContain("findMany");
   });
 
-  it("protects the API and synchronizes only the range end date", async () => {
+  it("protects the API and keeps Refresh database-only", async () => {
     const api = await readFile(
       new URL("../../app/api/monitoring/monthly/route.ts", import.meta.url),
       "utf8",
@@ -51,8 +51,9 @@ describe("Monitoring Monthly contracts", () => {
     );
     expect(api).toContain("canReadMonitoringDaily(session)");
     expect(api).toContain("resolveMonitoringOutlet");
-    expect(client).toContain('fetch("/api/monitoring/daily/sync"');
-    expect(client).toContain("businessDate: endDate");
-    expect(client).toContain("Sinkronisasi mengambil Business Date akhir saja");
+    expect(client).toContain("fetch(`/api/monitoring/monthly?${query}`");
+    expect(client).not.toContain("/api/monitoring/daily/sync");
+    expect(client).not.toContain("Sinkronkan Data");
+    expect(client).not.toContain("Menyinkronkan");
   });
 });
