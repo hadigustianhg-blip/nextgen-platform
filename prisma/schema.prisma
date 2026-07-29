@@ -59,6 +59,16 @@ enum SyncRunType {
   COD
 }
 
+enum OperationalExpenseStatus {
+  VALID
+  VOID
+}
+
+enum OperationalClosingStatus {
+  OPEN
+  CLOSED
+}
+
 model Tenant {
   id                         String                      @id @default(uuid()) @db.Uuid
   name                       String
@@ -83,6 +93,9 @@ model Tenant {
   courierSettlementPayments  CourierSettlementPayment[]
   courierSettlementTransfers CourierSettlementTransfer[]
   syncRuns                   SyncRun[]
+  operationalExpenses        OperationalExpense[]
+  operationalClosings        OperationalClosing[]
+  operationalActionRequests  OperationalActionRequest[]
 }
 
 model Outlet {
@@ -107,6 +120,9 @@ model Outlet {
   courierSettlementPayments  CourierSettlementPayment[]
   courierSettlementTransfers CourierSettlementTransfer[]
   syncRuns                   SyncRun[]
+  operationalExpenses        OperationalExpense[]
+  operationalClosings        OperationalClosing[]
+  operationalActionRequests  OperationalActionRequest[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -142,6 +158,11 @@ model User {
   courierTransfersCreated             CourierSettlementTransfer[] @relation("CourierTransferCreatedBy")
   courierTransfersUpdated             CourierSettlementTransfer[] @relation("CourierTransferUpdatedBy")
   syncRunsTriggered                   SyncRun[]                   @relation("SyncRunTriggeredBy")
+  operationalExpensesCreated          OperationalExpense[]        @relation("OperationalExpenseCreatedBy")
+  operationalExpensesUpdated          OperationalExpense[]        @relation("OperationalExpenseUpdatedBy")
+  operationalExpensesVoided           OperationalExpense[]        @relation("OperationalExpenseVoidedBy")
+  operationalClosingsClosed           OperationalClosing[]        @relation("OperationalClosingClosedBy")
+  operationalClosingsReopened         OperationalClosing[]        @relation("OperationalClosingReopenedBy")
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -602,4 +623,74 @@ model CourierSettlementTransfer {
   @@unique([transactionKey, revision])
   @@index([tenantId, outletId, settlementPaymentId, sequence, recordStatus])
   @@index([tenantId, outletId, referenceNumber])
+}
+
+model OperationalExpense {
+  id                  String                   @id @default(uuid()) @db.Uuid
+  tenantId            String                   @db.Uuid
+  outletId            String                   @db.Uuid
+  operationalDate     DateTime                 @db.Date
+  category            String
+  amount              Decimal                  @db.Decimal(18, 2)
+  description         String?
+  teamName            String?
+  cashAdvanceCategory String?
+  vehiclePlate        String?
+  status              OperationalExpenseStatus @default(VALID)
+  createdByUserId     String                   @db.Uuid
+  updatedByUserId     String                   @db.Uuid
+  voidedByUserId      String?                  @db.Uuid
+  voidedAt            DateTime?                @db.Timestamptz(3)
+  voidReason          String?
+  createdAt           DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime                 @updatedAt @db.Timestamptz(3)
+  tenant              Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet              Outlet                   @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  createdBy           User                     @relation("OperationalExpenseCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedBy           User                     @relation("OperationalExpenseUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict)
+  voidedBy            User?                    @relation("OperationalExpenseVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, outletId, operationalDate, status])
+  @@index([tenantId, outletId, category, operationalDate])
+  @@index([tenantId, outletId, teamName, operationalDate])
+}
+
+model OperationalClosing {
+  id               String                   @id @default(uuid()) @db.Uuid
+  tenantId         String                   @db.Uuid
+  outletId         String                   @db.Uuid
+  operationalDate  DateTime                 @db.Date
+  physicalCash     Decimal                  @default(0) @db.Decimal(18, 2)
+  status           OperationalClosingStatus @default(OPEN)
+  version          Int                      @default(1)
+  closedByUserId   String?                  @db.Uuid
+  closedAt         DateTime?                @db.Timestamptz(3)
+  reopenedByUserId String?                  @db.Uuid
+  reopenedAt       DateTime?                @db.Timestamptz(3)
+  reopenReason     String?
+  createdAt        DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime                 @updatedAt @db.Timestamptz(3)
+  tenant           Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet           Outlet                   @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  closedBy         User?                    @relation("OperationalClosingClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+  reopenedBy       User?                    @relation("OperationalClosingReopenedBy", fields: [reopenedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, outletId, operationalDate])
+  @@index([tenantId, outletId, status, operationalDate])
+}
+
+model OperationalActionRequest {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  outletId   String   @db.Uuid
+  requestKey String   @db.Uuid
+  action     String
+  entityId   String?
+  response   Json?
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet     Outlet   @relation(fields: [outletId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, outletId, requestKey])
+  @@index([tenantId, outletId, action, createdAt])
 }

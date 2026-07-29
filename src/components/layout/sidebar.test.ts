@@ -8,5 +8,9 @@ describe("pickup navigation", () => {
     expect(source).toContain("Settlement Center");
     expect(source).toContain('href="/dashboard/settlement/pickup"');
     expect(source).toContain("Pickup Settlement");
+    expect(source).toContain('href="/dashboard/settlement/operational"');
+    expect(source.indexOf("Delivery Settlement")).toBeLessThan(
+      source.indexOf("Operational Settlement"),
+    );
   });
 });

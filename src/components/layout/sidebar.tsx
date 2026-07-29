@@ -12,6 +12,7 @@ import {
   LogOut,
   Menu,
   PackageCheck,
+  ReceiptText,
   Truck,
   Settings,
   ShieldCheck,
@@ -141,6 +142,20 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
             >
               <Truck size={17} />
               {!collapsed && <span>Delivery Settlement</span>}
+            </Link>
+            <Link
+              href="/dashboard/settlement/operational"
+              title={collapsed ? "Operational Settlement" : undefined}
+              className={[
+                "mt-1 flex h-10 items-center rounded-xl text-sm font-medium transition-colors",
+                pathname.startsWith("/dashboard/settlement/operational")
+                  ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30"
+                  : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
+                collapsed ? "justify-center px-3" : "ml-5 gap-3 px-3",
+              ].join(" ")}
+            >
+              <ReceiptText size={17} />
+              {!collapsed && <span>Operational Settlement</span>}
             </Link>
           </div>
           {navigation.slice(1).map((item) => {
