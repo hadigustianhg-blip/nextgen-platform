@@ -1,21 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  ChevronDown,
   ChevronLeft,
   CircleGauge,
   CreditCard,
-  ChevronDown,
   LogOut,
   Menu,
   PackageCheck,
   ReceiptText,
-  Truck,
   Settings,
   ShieldCheck,
+  Truck,
   UsersRound,
   WalletCards,
   X,
@@ -34,186 +34,363 @@ const navigation = [
   href: string;
 }>;
 
+const storageKeys = {
+  collapsed: "nextgen.sidebar.collapsed",
+  settlementOpen: "nextgen.sidebar.settlement.open",
+  paymentOpen: "nextgen.sidebar.payment.open",
+} as const;
+
+const readStoredBoolean = (key: string, fallback: boolean) => {
+  const value = window.localStorage.getItem(key);
+  return value === null ? fallback : value === "true";
+};
+
 export function Sidebar({ outletCode }: { outletCode: string | null }) {
   const pathname = usePathname();
+  const settlementActive = pathname.startsWith("/dashboard/settlement/");
+  const paymentActive = pathname.startsWith("/dashboard/payment/");
   const [collapsed, setCollapsed] = useState(false);
+  const [settlementOpen, setSettlementOpen] = useState(settlementActive);
+  const [paymentOpen, setPaymentOpen] = useState(paymentActive);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [storageReady, setStorageReady] = useState(false);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setCollapsed(readStoredBoolean(storageKeys.collapsed, false));
+      setSettlementOpen(readStoredBoolean(storageKeys.settlementOpen, true));
+      setPaymentOpen(readStoredBoolean(storageKeys.paymentOpen, true));
+      setStorageReady(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (storageReady) {
+      window.localStorage.setItem(storageKeys.collapsed, String(collapsed));
+    }
+  }, [collapsed, storageReady]);
+
+  useEffect(() => {
+    if (storageReady) {
+      window.localStorage.setItem(
+        storageKeys.settlementOpen,
+        String(settlementOpen),
+      );
+    }
+  }, [settlementOpen, storageReady]);
+
+  useEffect(() => {
+    if (storageReady) {
+      window.localStorage.setItem(storageKeys.paymentOpen, String(paymentOpen));
+    }
+  }, [paymentOpen, storageReady]);
+
+  const settlementVisible = settlementActive || settlementOpen;
+  const paymentVisible = paymentActive || paymentOpen;
+  const labelClass = collapsed ? "lg:hidden" : "";
+  const closeMobile = () => setMobileOpen(false);
+  const itemLayout = collapsed ? "lg:justify-center lg:gap-0" : "";
+  const childLayout = collapsed
+    ? "lg:ml-0 lg:justify-center lg:px-3"
+    : "lg:ml-5";
 
   return (
     <>
       <button
         type="button"
         aria-label="Buka navigasi"
+        aria-expanded={mobileOpen}
         onClick={() => setMobileOpen(true)}
-        className="fixed left-4 top-4 z-30 rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 shadow-sm lg:hidden"
+        className="fixed left-4 top-4 z-30 rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-blue-500 lg:hidden"
       >
         <Menu size={20} />
       </button>
       {mobileOpen && (
         <button
+          type="button"
           className="fixed inset-0 z-30 bg-slate-950/45 lg:hidden"
           aria-label="Tutup navigasi"
-          onClick={() => setMobileOpen(false)}
+          onClick={closeMobile}
         />
       )}
       <aside
         className={[
-          "fixed inset-y-0 left-0 z-40 flex flex-col bg-[#0b1739] text-white transition-all duration-300",
+          "fixed inset-y-0 left-0 z-40 flex flex-col bg-[#0b1739] text-white transition-[width,transform] duration-300 ease-out",
           collapsed ? "lg:w-[86px]" : "lg:w-[264px]",
-          mobileOpen ? "w-[280px] translate-x-0" : "w-[280px] -translate-x-full lg:translate-x-0",
+          mobileOpen
+            ? "w-[280px] translate-x-0"
+            : "w-[280px] -translate-x-full lg:translate-x-0",
         ].join(" ")}
       >
         <div className="flex h-20 items-center border-b border-white/10 px-5">
-          <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-500 font-black tracking-tight">N</div>
-          {!collapsed && (
-            <div className="ml-3 min-w-0">
-              <div className="font-extrabold tracking-[0.16em]">NEXTGEN</div>
-              <div className="text-[11px] text-blue-200">Operations System</div>
-            </div>
-          )}
-          <button aria-label="Tutup navigasi" onClick={() => setMobileOpen(false)} className="ml-auto lg:hidden">
+          <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-500 font-black tracking-tight">
+            N
+          </div>
+          <div className={`ml-3 min-w-0 ${labelClass}`}>
+            <div className="font-extrabold tracking-[0.16em]">NEXTGEN</div>
+            <div className="text-[11px] text-blue-200">Operations System</div>
+          </div>
+          <button
+            type="button"
+            aria-label="Tutup navigasi"
+            onClick={closeMobile}
+            className="ml-auto rounded-lg p-1 outline-none focus-visible:ring-2 focus-visible:ring-blue-300 lg:hidden"
+          >
             <X size={20} />
           </button>
         </div>
 
-        {!collapsed && (
-          <div className="mx-4 mt-5 rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-300">Outlet aktif</p>
-            <p className="mt-1 text-sm font-semibold">{outletCode ?? "Semua Outlet"}</p>
-          </div>
-        )}
+        <div
+          className={`mx-4 mt-5 rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3 ${collapsed ? "lg:hidden" : ""}`}
+        >
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-300">
+            Outlet aktif
+          </p>
+          <p className="mt-1 text-sm font-semibold">
+            {outletCode ?? "Semua Outlet"}
+          </p>
+        </div>
 
-        <nav className="mt-5 flex-1 space-y-1 px-3" aria-label="Navigasi utama">
+        <nav
+          className="mt-5 flex-1 space-y-1 overflow-y-auto px-3"
+          aria-label="Navigasi utama"
+        >
           {navigation.slice(0, 1).map((item) => {
-            const active =
-              item.href === "/dashboard"
-                ? pathname === item.href
-                : item.href.startsWith("/") && pathname.startsWith(item.href);
+            const active = pathname === item.href;
             return (
               <Link
                 key={item.label}
                 href={item.href}
                 title={collapsed ? item.label : undefined}
+                onClick={closeMobile}
                 className={[
-                  "flex h-11 items-center rounded-xl px-3 text-sm font-medium transition-colors",
-                  active ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
-                  collapsed ? "justify-center" : "gap-3",
+                  "flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-300",
+                  active
+                    ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30"
+                    : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
+                  itemLayout,
                 ].join(" ")}
               >
-                <item.icon size={19} />
-                {!collapsed && <span>{item.label}</span>}
+                <item.icon size={19} className="shrink-0" />
+                <span className={labelClass}>{item.label}</span>
               </Link>
             );
           })}
+
           <div className="pt-1">
-            <div className={["flex h-11 items-center rounded-xl px-3 text-sm font-medium text-slate-300", collapsed ? "justify-center" : "gap-3"].join(" ")}>
-              <WalletCards size={19} />
-              {!collapsed && (
-                <>
-                  <span>Settlement Center</span>
-                  <ChevronDown size={15} className="ml-auto" />
-                </>
-              )}
-            </div>
-            <Link
-              href="/dashboard/settlement/pickup"
-              title={collapsed ? "Pickup Settlement" : undefined}
+            <button
+              type="button"
+              title={collapsed ? "Settlement Center" : undefined}
+              aria-expanded={settlementVisible}
+              aria-controls="settlement-submenu"
+              onClick={() => setSettlementOpen((value) => !value)}
               className={[
-                "mt-1 flex h-10 items-center rounded-xl text-sm font-medium transition-colors",
-                pathname.startsWith("/dashboard/settlement/pickup")
-                  ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30"
-                  : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
-                collapsed ? "justify-center px-3" : "ml-5 gap-3 px-3",
+                "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300",
+                itemLayout,
               ].join(" ")}
             >
-              <PackageCheck size={17} />
-              {!collapsed && <span>Pickup Settlement</span>}
-            </Link>
-            <Link
-              href="/dashboard/settlement/delivery"
-              title={collapsed ? "Delivery Settlement" : undefined}
-              className={[
-                "mt-1 flex h-10 items-center rounded-xl text-sm font-medium transition-colors",
-                pathname.startsWith("/dashboard/settlement/delivery")
-                  ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30"
-                  : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
-                collapsed ? "justify-center px-3" : "ml-5 gap-3 px-3",
-              ].join(" ")}
-            >
-              <Truck size={17} />
-              {!collapsed && <span>Delivery Settlement</span>}
-            </Link>
-            <Link
-              href="/dashboard/settlement/operational"
-              title={collapsed ? "Operational Settlement" : undefined}
-              className={[
-                "mt-1 flex h-10 items-center rounded-xl text-sm font-medium transition-colors",
-                pathname.startsWith("/dashboard/settlement/operational")
-                  ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30"
-                  : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
-                collapsed ? "justify-center px-3" : "ml-5 gap-3 px-3",
-              ].join(" ")}
-            >
-              <ReceiptText size={17} />
-              {!collapsed && <span>Operational Settlement</span>}
-            </Link>
+              <WalletCards size={19} className="shrink-0" />
+              <span className={labelClass}>Settlement Center</span>
+              <ChevronDown
+                size={15}
+                className={`${labelClass} ml-auto transition-transform ${settlementVisible ? "rotate-180" : ""}`}
+              />
+            </button>
+            {settlementVisible && (
+              <div id="settlement-submenu">
+                <SidebarChild
+                  href="/dashboard/settlement/pickup"
+                  label="Pickup Settlement"
+                  active={pathname.startsWith("/dashboard/settlement/pickup")}
+                  collapsed={collapsed}
+                  labelClass={labelClass}
+                  layoutClass={childLayout}
+                  onNavigate={closeMobile}
+                  icon={<PackageCheck size={17} />}
+                />
+                <SidebarChild
+                  href="/dashboard/settlement/delivery"
+                  label="Delivery Settlement"
+                  active={pathname.startsWith("/dashboard/settlement/delivery")}
+                  collapsed={collapsed}
+                  labelClass={labelClass}
+                  layoutClass={childLayout}
+                  onNavigate={closeMobile}
+                  icon={<Truck size={17} />}
+                />
+                <SidebarChild
+                  href="/dashboard/settlement/operational"
+                  label="Operational Settlement"
+                  active={pathname.startsWith(
+                    "/dashboard/settlement/operational",
+                  )}
+                  collapsed={collapsed}
+                  labelClass={labelClass}
+                  layoutClass={childLayout}
+                  onNavigate={closeMobile}
+                  icon={<ReceiptText size={17} />}
+                />
+              </div>
+            )}
           </div>
+
           <div className="pt-1">
-            <div className={["flex h-11 items-center rounded-xl px-3 text-sm font-medium text-slate-300", collapsed ? "justify-center" : "gap-3"].join(" ")}>
-              <CreditCard size={19} />
-              {!collapsed && <><span>Payment</span><ChevronDown size={15} className="ml-auto" /></>}
-            </div>
-            <Link href="/dashboard/payment/settlement" title={collapsed ? "Payment Settlement" : undefined} className={[
-              "mt-1 flex h-10 items-center rounded-xl text-sm font-medium transition-colors",
-              pathname.startsWith("/dashboard/payment/settlement") ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
-              collapsed ? "justify-center px-3" : "ml-5 gap-3 px-3",
-            ].join(" ")}><WalletCards size={17} />{!collapsed && <span>Payment Settlement</span>}</Link>
-            <Link href="/dashboard/payment/pickup" title={collapsed ? "Pickup Payment" : undefined} className={[
-              "mt-1 flex h-10 items-center rounded-xl text-sm font-medium transition-colors",
-              pathname.startsWith("/dashboard/payment/pickup") ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
-              collapsed ? "justify-center px-3" : "ml-5 gap-3 px-3",
-            ].join(" ")}><PackageCheck size={17} />{!collapsed && <span>Pickup Payment</span>}</Link>
-            <Link href="/dashboard/payment/cash-flow" title={collapsed ? "Cash Flow Payment" : undefined} className={[
-              "mt-1 flex h-10 items-center rounded-xl text-sm font-medium transition-colors",
-              pathname.startsWith("/dashboard/payment/cash-flow") ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
-              collapsed ? "justify-center px-3" : "ml-5 gap-3 px-3",
-            ].join(" ")}><ReceiptText size={17} />{!collapsed && <span>Cash Flow Payment</span>}</Link>
+            <button
+              type="button"
+              title={collapsed ? "Payment" : undefined}
+              aria-expanded={paymentVisible}
+              aria-controls="payment-submenu"
+              onClick={() => setPaymentOpen((value) => !value)}
+              className={[
+                "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300",
+                itemLayout,
+              ].join(" ")}
+            >
+              <CreditCard size={19} className="shrink-0" />
+              <span className={labelClass}>Payment</span>
+              <ChevronDown
+                size={15}
+                className={`${labelClass} ml-auto transition-transform ${paymentVisible ? "rotate-180" : ""}`}
+              />
+            </button>
+            {paymentVisible && (
+              <div id="payment-submenu">
+                <SidebarChild
+                  href="/dashboard/payment/settlement"
+                  label="Payment Settlement"
+                  active={pathname.startsWith("/dashboard/payment/settlement")}
+                  collapsed={collapsed}
+                  labelClass={labelClass}
+                  layoutClass={childLayout}
+                  onNavigate={closeMobile}
+                  icon={<WalletCards size={17} />}
+                />
+                <SidebarChild
+                  href="/dashboard/payment/pickup"
+                  label="Pickup Payment"
+                  active={pathname.startsWith("/dashboard/payment/pickup")}
+                  collapsed={collapsed}
+                  labelClass={labelClass}
+                  layoutClass={childLayout}
+                  onNavigate={closeMobile}
+                  icon={<PackageCheck size={17} />}
+                />
+                <SidebarChild
+                  href="/dashboard/payment/cash-flow"
+                  label="Cash Flow Payment"
+                  active={pathname.startsWith("/dashboard/payment/cash-flow")}
+                  collapsed={collapsed}
+                  labelClass={labelClass}
+                  layoutClass={childLayout}
+                  onNavigate={closeMobile}
+                  icon={<ReceiptText size={17} />}
+                />
+              </div>
+            )}
           </div>
-          {navigation.slice(1).filter((item) => item.label !== "Payment").map((item) => {
-            const active = item.href.startsWith("/") && pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.label}
-                href={item.href}
-                title={collapsed ? item.label : undefined}
-                className={[
-                  "flex h-11 items-center rounded-xl px-3 text-sm font-medium transition-colors",
-                  active ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30" : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
-                  collapsed ? "justify-center" : "gap-3",
-                ].join(" ")}
-              >
-                <item.icon size={19} />
-                {!collapsed && <span>{item.label}</span>}
-              </Link>
-            );
-          })}
+
+          {navigation
+            .slice(1)
+            .filter((item) => item.label !== "Payment")
+            .map((item) => {
+              const active =
+                item.href.startsWith("/") && pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  title={collapsed ? item.label : undefined}
+                  onClick={closeMobile}
+                  className={[
+                    "flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-300",
+                    active
+                      ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30"
+                      : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
+                    itemLayout,
+                  ].join(" ")}
+                >
+                  <item.icon size={19} className="shrink-0" />
+                  <span className={labelClass}>{item.label}</span>
+                </Link>
+              );
+            })}
         </nav>
 
-        <form action="/api/auth/logout" method="post" className="border-t border-white/10 p-3">
-          <button className={["flex h-11 w-full items-center rounded-xl px-3 text-sm font-medium text-slate-300 hover:bg-red-500/10 hover:text-red-200", collapsed ? "justify-center" : "gap-3"].join(" ")}>
-            <LogOut size={19} />
-            {!collapsed && "Logout"}
+        <form
+          action="/api/auth/logout"
+          method="post"
+          className="border-t border-white/10 p-3"
+        >
+          <button
+            type="submit"
+            title={collapsed ? "Logout" : undefined}
+            className={[
+              "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-red-500/10 hover:text-red-200 focus-visible:ring-2 focus-visible:ring-red-300",
+              itemLayout,
+            ].join(" ")}
+          >
+            <LogOut size={19} className="shrink-0" />
+            <span className={labelClass}>Logout</span>
           </button>
         </form>
         <button
+          type="button"
           aria-label={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}
+          aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
-          className="absolute -right-3 top-24 hidden size-7 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-md lg:grid"
+          className="absolute -right-3 top-24 hidden size-7 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-md outline-none transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 lg:grid"
         >
-          <ChevronLeft size={15} className={collapsed ? "rotate-180" : ""} />
+          <ChevronLeft
+            size={15}
+            className={`transition-transform ${collapsed ? "rotate-180" : ""}`}
+          />
         </button>
       </aside>
-      <div className={collapsed ? "hidden lg:block lg:w-[86px]" : "hidden lg:block lg:w-[264px]"} />
+      <div
+        aria-hidden="true"
+        className={[
+          "hidden shrink-0 transition-[width] duration-300 ease-out lg:block",
+          collapsed ? "lg:w-[86px]" : "lg:w-[264px]",
+        ].join(" ")}
+      />
     </>
+  );
+}
+
+function SidebarChild({
+  href,
+  label,
+  active,
+  collapsed,
+  labelClass,
+  layoutClass,
+  onNavigate,
+  icon,
+}: {
+  href: string;
+  label: string;
+  active: boolean;
+  collapsed: boolean;
+  labelClass: string;
+  layoutClass: string;
+  onNavigate: () => void;
+  icon: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      title={collapsed ? label : undefined}
+      onClick={onNavigate}
+      className={[
+        "mt-1 flex h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-300",
+        active
+          ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30"
+          : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
+        layoutClass,
+      ].join(" ")}
+    >
+      <span className="shrink-0">{icon}</span>
+      <span className={labelClass}>{label}</span>
+    </Link>
   );
 }
