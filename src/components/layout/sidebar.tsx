@@ -36,6 +36,7 @@ const navigation = [
 
 const storageKeys = {
   collapsed: "nextgen.sidebar.collapsed",
+  monitoringOpen: "nextgen.sidebar.monitoring.open",
   settlementOpen: "nextgen.sidebar.settlement.open",
   paymentOpen: "nextgen.sidebar.payment.open",
 } as const;
@@ -47,9 +48,11 @@ const readStoredBoolean = (key: string, fallback: boolean) => {
 
 export function Sidebar({ outletCode }: { outletCode: string | null }) {
   const pathname = usePathname();
+  const monitoringActive = pathname.startsWith("/dashboard/monitoring/");
   const settlementActive = pathname.startsWith("/dashboard/settlement/");
   const paymentActive = pathname.startsWith("/dashboard/payment/");
   const [collapsed, setCollapsed] = useState(false);
+  const [monitoringOpen, setMonitoringOpen] = useState(monitoringActive);
   const [settlementOpen, setSettlementOpen] = useState(settlementActive);
   const [paymentOpen, setPaymentOpen] = useState(paymentActive);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -58,11 +61,21 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
   useEffect(() => {
     queueMicrotask(() => {
       setCollapsed(readStoredBoolean(storageKeys.collapsed, false));
+      setMonitoringOpen(readStoredBoolean(storageKeys.monitoringOpen, true));
       setSettlementOpen(readStoredBoolean(storageKeys.settlementOpen, true));
       setPaymentOpen(readStoredBoolean(storageKeys.paymentOpen, true));
       setStorageReady(true);
     });
   }, []);
+
+  useEffect(() => {
+    if (storageReady) {
+      window.localStorage.setItem(
+        storageKeys.monitoringOpen,
+        String(monitoringOpen),
+      );
+    }
+  }, [monitoringOpen, storageReady]);
 
   useEffect(() => {
     if (storageReady) {
@@ -85,6 +98,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
     }
   }, [paymentOpen, storageReady]);
 
+  const monitoringVisible = monitoringActive || monitoringOpen;
   const settlementVisible = settlementActive || settlementOpen;
   const paymentVisible = paymentActive || paymentOpen;
   const labelClass = collapsed ? "lg:hidden" : "";
@@ -176,6 +190,41 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
               </Link>
             );
           })}
+
+          <div className="pt-1">
+            <button
+              type="button"
+              title={collapsed ? "Monitoring" : undefined}
+              aria-expanded={monitoringVisible}
+              aria-controls="monitoring-submenu"
+              onClick={() => setMonitoringOpen((value) => !value)}
+              className={[
+                "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300",
+                itemLayout,
+              ].join(" ")}
+            >
+              <BarChart3 size={19} className="shrink-0" />
+              <span className={labelClass}>Monitoring</span>
+              <ChevronDown
+                size={15}
+                className={`${labelClass} ml-auto transition-transform ${monitoringVisible ? "rotate-180" : ""}`}
+              />
+            </button>
+            {monitoringVisible && (
+              <div id="monitoring-submenu">
+                <SidebarChild
+                  href="/dashboard/monitoring/daily"
+                  label="Monitoring Daily"
+                  active={pathname.startsWith("/dashboard/monitoring/daily")}
+                  collapsed={collapsed}
+                  labelClass={labelClass}
+                  layoutClass={childLayout}
+                  onNavigate={closeMobile}
+                  icon={<BarChart3 size={17} />}
+                />
+              </div>
+            )}
+          </div>
 
           <div className="pt-1">
             <button
@@ -291,7 +340,9 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
 
           {navigation
             .slice(1)
-            .filter((item) => item.label !== "Payment")
+            .filter(
+              (item) => item.label !== "Monitoring" && item.label !== "Payment",
+            )
             .map((item) => {
               const active =
                 item.href.startsWith("/") && pathname.startsWith(item.href);

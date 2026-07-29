@@ -25,6 +25,8 @@ describe("pickup navigation", () => {
 
     expect(source).toContain('aria-controls="settlement-submenu"');
     expect(source).toContain('aria-controls="payment-submenu"');
+    expect(source).toContain('aria-controls="monitoring-submenu"');
+    expect(source).toContain("setMonitoringOpen((value) => !value)");
     expect(source).toContain("setSettlementOpen((value) => !value)");
     expect(source).toContain("setPaymentOpen((value) => !value)");
     expect(source).toContain(
@@ -32,6 +34,9 @@ describe("pickup navigation", () => {
     );
     expect(source).toContain(
       "const paymentVisible = paymentActive || paymentOpen",
+    );
+    expect(source).toContain(
+      "const monitoringVisible = monitoringActive || monitoringOpen",
     );
   });
 
@@ -42,6 +47,7 @@ describe("pickup navigation", () => {
     );
 
     expect(source).toContain('"nextgen.sidebar.collapsed"');
+    expect(source).toContain('"nextgen.sidebar.monitoring.open"');
     expect(source).toContain('"nextgen.sidebar.settlement.open"');
     expect(source).toContain('"nextgen.sidebar.payment.open"');
     expect(source).toContain("storageReady");
@@ -58,5 +64,18 @@ describe("pickup navigation", () => {
     expect(source).toContain("onClick={closeMobile}");
     expect(source).toContain("focus-visible:ring-2");
     expect(source).toContain("title={collapsed ? label : undefined}");
+  });
+
+  it("exposes Monitoring Daily with an active child route", async () => {
+    const source = await readFile(
+      new URL("./sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain('href="/dashboard/monitoring/daily"');
+    expect(source).toContain('label="Monitoring Daily"');
+    expect(source).toContain(
+      'active={pathname.startsWith("/dashboard/monitoring/daily")}',
+    );
   });
 });
