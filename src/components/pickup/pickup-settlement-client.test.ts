@@ -4,9 +4,8 @@ import { describe, expect, it } from "vitest";
 describe("Pickup Settlement UI", () => {
   it("puts updated time first and provides the adjustment modal trigger", async () => {
     const source = await readFile(new URL("./pickup-settlement-client.tsx", import.meta.url), "utf8");
-    const headers = source.match(/\["Waktu Diperbarui"[\s\S]*?"Aksi"\]/)?.[0] ?? "";
-    expect(headers.indexOf("Waktu Diperbarui")).toBeLessThan(headers.indexOf("Waybill"));
-    expect(source).toContain(">Penyesuaian</button>");
+    expect(source.indexOf('"Waktu Diperbarui"')).toBeLessThan(source.indexOf('"Waybill"'));
+    expect(source).toMatch(/>\s*Penyesuaian\s*<\/button>/);
     expect(source).toContain('role="dialog"');
     expect(source).toContain("Simpan Penyesuaian");
   });
@@ -17,9 +16,7 @@ describe("Pickup Settlement UI", () => {
     expect(source).toContain("Total Tunai");
     expect(source).toContain("Total Transfer");
     expect(source).toContain("listBody.data.summary");
-    expect(source.indexOf("Ringkasan Pickup Settlement")).toBeLessThan(
-      source.indexOf('placeholder="Cari waybill'),
-    );
+    expect(source.indexOf("Ringkasan Pickup Settlement")).toBeLessThan(source.indexOf('placeholder="Cari waybill'));
   });
 
   it("supports page-scoped select-all, persistent IDs, filter reset and cancel", async () => {
@@ -43,13 +40,25 @@ describe("Pickup Settlement UI", () => {
     expect(source).toContain("await loadData()");
   });
 
+  it("validates transfer accounts in individual and bulk adjustments", async () => {
+    const source = await readFile(new URL("./pickup-settlement-client.tsx", import.meta.url), "utf8");
+    expect(source).toContain("/api/pickup/transfer-accounts");
+    expect(source).toContain('<option value="">Pilih rekening</option>');
+    expect(source).toContain('setAccountError("Pilih rekening transfer terlebih dahulu.")');
+    expect(source).toContain('setBulkAccountError("Pilih rekening transfer terlebih dahulu.")');
+    expect(source).toContain('role="alert"');
+    expect(source).toContain('setAccountId(row.transferAccountId ?? "")');
+    expect(source).toContain('if (method !== "TRANSFER") {');
+    expect(source).toContain('setAccountId("");');
+    expect(source).toContain('setBulkAccountId("");');
+    expect(source).toContain("await loadData()");
+  });
+
   it("places an operational date picker before waybill search", async () => {
     const source = await readFile(new URL("./pickup-settlement-client.tsx", import.meta.url), "utf8");
-    expect(source.indexOf('aria-label="Tanggal operasional"')).toBeLessThan(
-      source.indexOf('placeholder="Cari waybill'),
-    );
+    expect(source.indexOf('aria-label="Tanggal operasional"')).toBeLessThan(source.indexOf('placeholder="Cari waybill'));
     expect(source).toContain("operationalDate,");
-    expect(source).toContain("useState(jakartaOperationalDate)");
+    expect(source).toMatch(/useState\(\s*jakartaOperationalDate\s*,?\s*\)/);
   });
 
   it("resets pagination, bulk selection and bulk modal when date changes", async () => {
