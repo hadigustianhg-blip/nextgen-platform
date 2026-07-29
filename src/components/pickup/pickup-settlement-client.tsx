@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CloudDownload, LoaderCircle, RefreshCw, Search, X } from "lucide-react";
 import { formatDateTime, formatMoney } from "./pickup-format";
+import { jakartaOperationalDate } from "./pickup-date";
 
 type SettlementRow = {
   id: string;
@@ -59,6 +60,7 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
   const [pagination, setPagination] = useState({ page: 1, pageSize: 25, total: 0, totalPages: 1 });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [operationalDate, setOperationalDate] = useState(jakartaOperationalDate);
   const [search, setSearch] = useState("");
   const [staff, setStaff] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("");
@@ -89,11 +91,12 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
   const query = useMemo(() => new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
+    operationalDate,
     search,
     staff,
     paymentStatus,
     paymentMethod,
-  }).toString(), [page, pageSize, search, staff, paymentStatus, paymentMethod]);
+  }).toString(), [page, pageSize, operationalDate, search, staff, paymentStatus, paymentMethod]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -132,10 +135,11 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
   }, []);
 
   function resetBulkSelectionForFilter() {
-    if (bulkSelected.size > 0) {
+    if (bulkSelected.size > 0 || bulkModalOpen) {
       setNotice({ tone: "info", text: "Pilihan massal direset karena filter berubah." });
     }
     setBulkSelected(new Map());
+    setBulkModalOpen(false);
   }
 
   function cancelBulkMode() {
@@ -364,7 +368,18 @@ export function PickupSettlementClient({ outletCode }: { outletCode: string }) {
       </section>
 
       <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="grid gap-3 border-b border-slate-100 p-4 md:grid-cols-2 xl:grid-cols-7">
+        <div className="grid gap-3 border-b border-slate-100 p-4 md:grid-cols-2 xl:grid-cols-8">
+          <input
+            aria-label="Tanggal operasional"
+            type="date"
+            value={operationalDate}
+            onChange={(event) => {
+              resetBulkSelectionForFilter();
+              setOperationalDate(event.target.value);
+              setPage(1);
+            }}
+            className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm"
+          />
           <label className="relative xl:col-span-2">
             <Search className="absolute left-3 top-3 text-slate-400" size={16} />
             <input value={search} onChange={(event) => { resetBulkSelectionForFilter(); setSearch(event.target.value); setPage(1); }} placeholder="Cari waybill…" className="h-10 w-full rounded-xl border border-slate-200 pl-9 pr-3 text-sm" />

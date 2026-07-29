@@ -16,6 +16,7 @@ type SettlementListInput = {
   outletId: string;
   page: number;
   pageSize: number;
+  operationalDate?: string;
   search?: string;
   staff?: string;
   paymentStatus?: "" | "BELUM_BAYAR" | "SUDAH_BAYAR" | "LEBIH_BAYAR";
@@ -138,6 +139,9 @@ export async function listPickupSettlements(input: SettlementListInput) {
     where: {
       tenantId: input.tenantId,
       outletId: input.outletId,
+      ...(input.operationalDate
+        ? { operationalDate: new Date(`${input.operationalDate}T00:00:00.000Z`) }
+        : {}),
       rawPickup: { settlementRaw: { not: null } },
       ...(input.search ? { waybillNo: { contains: input.search, mode: "insensitive" } } : {}),
       ...(input.staff ? { staffName: { contains: input.staff, mode: "insensitive" } } : {}),

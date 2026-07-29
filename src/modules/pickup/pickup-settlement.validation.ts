@@ -1,8 +1,23 @@
 import { z } from "zod";
 
+const pickupOperationalDateFilterSchema = z.union([
+  z.literal(""),
+  z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
+  }, "Tanggal operasional tidak valid."),
+]);
+
 export const pickupSettlementListQuerySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(10).max(100).default(25),
+  page: z.union([
+    z.literal("").transform(() => 1),
+    z.coerce.number().int().min(1),
+  ]).default(1),
+  pageSize: z.union([
+    z.literal("").transform(() => 25),
+    z.coerce.number().int().min(10).max(100),
+  ]).default(25),
+  operationalDate: pickupOperationalDateFilterSchema.optional().default(""),
   search: z.string().trim().max(100).optional().default(""),
   staff: z.string().trim().max(100).optional().default(""),
   paymentStatus: z.enum(["", "BELUM_BAYAR", "SUDAH_BAYAR", "LEBIH_BAYAR"]).optional().default(""),

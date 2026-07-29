@@ -114,6 +114,8 @@ vi.mock("@/lib/db/prisma", () => ({
           .filter((master) =>
             master.tenantId === where.tenantId &&
             master.outletId === where.outletId &&
+            (!where.operationalDate ||
+              master.operationalDate.valueOf() === where.operationalDate.valueOf()) &&
             (!where.waybillNo || master.waybillNo.toLowerCase().includes(where.waybillNo.contains.toLowerCase())) &&
             (!where.staffName || master.staffName?.toLowerCase().includes(where.staffName.contains.toLowerCase())),
           )
@@ -164,12 +166,13 @@ function addMaster(
   settlementRaw: string,
   tenantId = "tenant-a",
   outletId = "outlet-a",
+  operationalDate = "2026-07-28",
 ) {
   state.masters.push({
     id,
     tenantId,
     outletId,
-    operationalDate: new Date("2026-07-28T00:00:00Z"),
+    operationalDate: new Date(`${operationalDate}T00:00:00Z`),
     updatedAt: new Date(),
     waybillNo,
     staffName: "Ridwan",
@@ -310,6 +313,98 @@ describe("Pickup Settlement service", () => {
     expect(filtered.summary.totalPickupCount).toBe(1);
     expect(filtered.summary.totalCash).toBe("10000");
     expect(filtered.rows.map((row) => row.waybillNo)).toEqual(["WB-ONE"]);
+  });
+
+  it("filters by MasterPickup operationalDate and not updatedAt", async () => {
+    addMaster("old", "WB-OLD", "Tunai", "tenant-a", "outlet-a", "2026-07-28");
+    addMaster("today", "WB-TODAY", "Tunai", "tenant-a", "outlet-a", "2026-07-29");
+    state.masters.find((master) => master.id === "old")!.updatedAt =
+      new Date("2026-07-29T12:00:00Z");
+
+    const result = await listPickupSettlements({
+      ...context,
+      page: 1,
+      pageSize: 25,
+      operationalDate: "2026-07-29",
+    });
+
+    expect(result.rows.map((row) => row.waybillNo)).toEqual(["WB-TODAY"]);
+    expect(result.summary.totalPickupCount).toBe(1);
+    expect(result.summary.nominalTotalPickup).toBe("10000");
+  });
+
+  it("returns all history and full summary when operationalDate is empty", async () => {
+    addMaster("old", "WB-OLD", "Tunai", "tenant-a", "outlet-a", "2026-07-28");
+    addMaster("today", "WB-TODAY", "Tunai", "tenant-a", "outlet-a", "2026-07-29");
+    const result = await listPickupSettlements({
+      ...context,
+      page: 1,
+      pageSize: 1,
+      operationalDate: "",
+    });
+    expect(result.pagination.total).toBe(2);
+    expect(result.rows).toHaveLength(1);
+    expect(result.summary.totalPickupCount).toBe(2);
+    expect(result.summary.nominalTotalPickup).toBe("20000");
+  });
+
+  it("combines operationalDate with waybill, staff, status, method, tenant and outlet", async () => {
+    addMaster("match", "WB-MATCH", "Tunai", "tenant-a", "outlet-a", "2026-07-29");
+    addMaster("wrong-date", "WB-MATCH-OLD", "Tunai", "tenant-a", "outlet-a", "2026-07-28");
+    addMaster("wrong-tenant", "WB-MATCH-TENANT", "Tunai", "tenant-b", "outlet-a", "2026-07-29");
+    addMaster("wrong-outlet", "WB-MATCH-OUTLET", "Tunai", "tenant-a", "outlet-b", "2026-07-29");
+    state.payments.push({
+      id: "payment-match",
+      tenantId: "tenant-a",
+      outletId: "outlet-a",
+      masterPickupId: "match",
+      transactionKey: "10000000-0000-4000-8000-000000000299",
+      revision: 1,
+      recordStatus: "VALID",
+      receivedAmount: new Prisma.Decimal(10000),
+      paymentMethodRaw: "TUNAI",
+      transferAccount: null,
+      note: null,
+    });
+    const result = await listPickupSettlements({
+      ...context,
+      page: 1,
+      pageSize: 25,
+      operationalDate: "2026-07-29",
+      search: "MATCH",
+      staff: "RID",
+      paymentStatus: "SUDAH_BAYAR",
+      paymentMethod: "TUNAI",
+    });
+    expect(result.rows.map((row) => row.waybillNo)).toEqual(["WB-MATCH"]);
+    expect(result.summary.totalCash).toBe("10000");
+  });
+
+  it("excludes payments whose pickup parent is outside the active date", async () => {
+    addMaster("old", "WB-OLD", "Tunai", "tenant-a", "outlet-a", "2026-07-28");
+    addMaster("today", "WB-TODAY", "Tunai", "tenant-a", "outlet-a", "2026-07-29");
+    state.payments.push({
+      id: "payment-old",
+      tenantId: "tenant-a",
+      outletId: "outlet-a",
+      masterPickupId: "old",
+      transactionKey: "10000000-0000-4000-8000-000000000298",
+      revision: 1,
+      recordStatus: "VALID",
+      receivedAmount: new Prisma.Decimal(10000),
+      paymentMethodRaw: "TRANSFER",
+      transferAccount: "bank-ops",
+      note: null,
+    });
+    const result = await listPickupSettlements({
+      ...context,
+      page: 1,
+      pageSize: 25,
+      operationalDate: "2026-07-29",
+    });
+    expect(result.summary.totalTransfer).toBe("0");
+    expect(result.rows[0].waybillNo).toBe("WB-TODAY");
+    expect(typeof result.rows[0].finalObligation).toBe("string");
   });
 
   it("does not create a VALID payment for Belum Bayar", async () => {

@@ -42,4 +42,22 @@ describe("Pickup Settlement UI", () => {
     expect(source).toContain("disabled={saving}");
     expect(source).toContain("await loadData()");
   });
+
+  it("places an operational date picker before waybill search", async () => {
+    const source = await readFile(new URL("./pickup-settlement-client.tsx", import.meta.url), "utf8");
+    expect(source.indexOf('aria-label="Tanggal operasional"')).toBeLessThan(
+      source.indexOf('placeholder="Cari waybill'),
+    );
+    expect(source).toContain("operationalDate,");
+    expect(source).toContain("useState(jakartaOperationalDate)");
+  });
+
+  it("resets pagination, bulk selection and bulk modal when date changes", async () => {
+    const source = await readFile(new URL("./pickup-settlement-client.tsx", import.meta.url), "utf8");
+    expect(source).toContain("setOperationalDate(event.target.value)");
+    expect(source).toContain("resetBulkSelectionForFilter();");
+    expect(source).toContain("setPage(1);");
+    expect(source).toContain("setBulkSelected(new Map())");
+    expect(source).toContain("setBulkModalOpen(false)");
+  });
 });
