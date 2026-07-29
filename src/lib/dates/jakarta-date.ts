@@ -6,3 +6,10 @@ export function jakartaOperationalDate(now = new Date()) {
     day: "2-digit",
   }).format(now);
 }
+
+export function resolveJakartaOperationalDate(
+  operationalDate: string,
+  now = new Date(),
+) {
+  return operationalDate || jakartaOperationalDate(now);
+}

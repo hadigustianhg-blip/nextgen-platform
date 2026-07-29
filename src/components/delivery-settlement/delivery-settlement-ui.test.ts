@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const client = readFileSync(new URL("./delivery-settlement-client.tsx", import.meta.url), "utf8");
 const sidebar = readFileSync(new URL("../layout/sidebar.tsx", import.meta.url), "utf8");
+const dates = readFileSync(new URL("../../lib/dates/jakarta-date.ts", import.meta.url), "utf8");
 
 describe("Delivery Settlement UI contract", () => {
   it("shows Delivery directly below Pickup in Settlement Center without RAW menus", () => {
@@ -33,5 +34,30 @@ describe("Delivery Settlement UI contract", () => {
   it("builds list queries with the canonical search parameter", () => {
     expect(client).toContain("operationalDate, search, paymentStatus, paymentMethod");
     expect(client).not.toContain("searchch");
+  });
+
+  it("defaults the date picker and first list request to today in Jakarta", () => {
+    expect(client).toContain("useState(jakartaOperationalDate)");
+    expect(dates).toContain('timeZone: "Asia/Jakarta"');
+    expect(dates).not.toContain("toISOString().slice(0, 10)");
+    expect(client).toContain('aria-label="Tanggal operasional"');
+    expect(client).toContain("operationalDate,");
+  });
+
+  it("keeps empty dates valid for history and resets stale page/modal state", () => {
+    expect(client).toContain("setOperationalDate(event.target.value)");
+    expect(client).toContain("setPage(1)");
+    expect(client).toContain("setSelected(null)");
+    expect(client).toContain("setNotice(null)");
+    expect(client).not.toContain("setSearch(\"\")");
+    expect(client).not.toContain("setPaymentStatus(\"\")");
+    expect(client).not.toContain("setPaymentMethod(\"\")");
+  });
+
+  it("syncs the active date and safely resolves an empty date to Jakarta today", () => {
+    expect(client).toContain("resolveJakartaOperationalDate(operationalDate)");
+    expect(client).toContain("JSON.stringify({ operationalDate: syncDate })");
+    expect(client).toContain("operationalDate: syncDate");
+    expect(client).toContain("await load(refreshedQuery)");
   });
 });

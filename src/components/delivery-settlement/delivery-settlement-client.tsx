@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoaderCircle, RefreshCw, Search, Truck, X } from "lucide-react";
 import {
+  jakartaOperationalDate,
+  resolveJakartaOperationalDate,
+} from "@/lib/dates/jakarta-date";
+import {
   addTransferRow,
   buildTransferPayload,
   calculateTransferDraft,
@@ -37,7 +41,7 @@ export function DeliverySettlementClient({ outletCode }: { outletCode: string })
   const [summary, setSummary] = useState<Summary>(emptySummary);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 25, total: 0, totalPages: 0 });
   const [page, setPage] = useState(1);
-  const [operationalDate, setOperationalDate] = useState("");
+  const [operationalDate, setOperationalDate] = useState(jakartaOperationalDate);
   const [search, setSearch] = useState("");
   const [paymentStatus, setPaymentStatus] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
@@ -52,11 +56,11 @@ export function DeliverySettlementClient({ outletCode }: { outletCode: string })
   const [note, setNote] = useState("");
 
   const query = useMemo(() => new URLSearchParams({ page: String(page), pageSize: "25", operationalDate, search, paymentStatus, paymentMethod }).toString(), [page, operationalDate, search, paymentStatus, paymentMethod]);
-  const load = useCallback(async () => {
+  const load = useCallback(async (queryOverride?: string) => {
     setLoading(true);
     try {
       const [listResponse, runResponse] = await Promise.all([
-        fetch(`/api/delivery-settlement?${query}`, { cache: "no-store" }),
+        fetch(`/api/delivery-settlement?${queryOverride ?? query}`, { cache: "no-store" }),
         fetch("/api/delivery-settlement/runs/latest", { cache: "no-store" }),
       ]);
       if (!listResponse.ok || !runResponse.ok) throw new Error();
@@ -74,14 +78,33 @@ export function DeliverySettlementClient({ outletCode }: { outletCode: string })
   async function sync() {
     if (syncing) return;
     setSyncing(true); setNotice(null);
+    const syncDate = resolveJakartaOperationalDate(operationalDate);
+    const usedFallbackDate = !operationalDate;
+    if (usedFallbackDate) {
+      setOperationalDate(syncDate);
+      setPage(1);
+      setSelected(null);
+    }
     try {
       const response = await fetch("/api/delivery-settlement/sync", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify(operationalDate ? { operationalDate } : {}),
+        body: JSON.stringify({ operationalDate: syncDate }),
       });
       if (!response.ok) throw new Error();
       setNotice({ tone: "success", text: "Delivery Settlement berhasil disinkronkan." });
-      await load();
+      if (usedFallbackDate) {
+        const refreshedQuery = new URLSearchParams({
+          page: "1",
+          pageSize: "25",
+          operationalDate: syncDate,
+          search,
+          paymentStatus,
+          paymentMethod,
+        }).toString();
+        await load(refreshedQuery);
+      } else {
+        await load();
+      }
     } catch { setNotice({ tone: "error", text: "Sinkronisasi gagal. Data lama tetap dipertahankan." }); }
     finally { setSyncing(false); }
   }
@@ -136,7 +159,7 @@ export function DeliverySettlementClient({ outletCode }: { outletCode: string })
     </div>
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-        <input aria-label="Tanggal operasional" type="date" value={operationalDate} onChange={(event) => { setPage(1); setOperationalDate(event.target.value); }} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
+        <input aria-label="Tanggal operasional" type="date" value={operationalDate} onChange={(event) => { setNotice(null); setSelected(null); setPage(1); setOperationalDate(event.target.value); }} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
         <label className="relative xl:col-span-2"><Search className="absolute left-3 top-3 text-slate-400" size={17} /><input aria-label="Cari nama kurir" value={search} onChange={(event) => { setPage(1); setSearch(event.target.value); }} placeholder="Cari nama kurir" className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm" /></label>
         <select aria-label="Status pembayaran" value={paymentStatus} onChange={(event) => { setPage(1); setPaymentStatus(event.target.value); }} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm"><option value="">Semua status</option><option value="UNCLEARED">Belum Clear</option><option value="CLEAR">Clear</option><option value="OVERPAID">Lebih Bayar</option></select>
         <select aria-label="Metode pembayaran" value={paymentMethod} onChange={(event) => { setPage(1); setPaymentMethod(event.target.value); }} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm"><option value="">Semua metode</option><option value="UNPAID">Belum Ada Pembayaran</option><option value="CASH">Tunai</option><option value="TRANSFER">Transfer</option><option value="CASH_TRANSFER">Tunai + Transfer</option></select>
