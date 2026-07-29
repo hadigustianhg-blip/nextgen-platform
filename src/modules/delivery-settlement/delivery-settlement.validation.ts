@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { normalizeMoney } from "@/lib/financial/normalize-money";
 
 const decimalText = z.union([
   z.number().finite().nonnegative(),
   z.string().trim().regex(/^\d+(\.\d{1,2})?$/),
 ]);
+const sourceMoney = decimalText.transform(normalizeMoney);
 
 export const deliveryOperationalDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -39,7 +41,7 @@ export const deliveryAdjustmentSchema = z.object({
 export const dispatchRecordSchema = z.object({
   waybillNo: z.string().trim().min(1),
   kurir: z.string().default(""),
-  ongkir: decimalText,
+  ongkir: sourceMoney,
   waktu: z.string().default(""),
   receiver: z.string().default(""),
   address: z.string().default(""),
@@ -48,13 +50,13 @@ export const dispatchRecordSchema = z.object({
   pembayaran: z.string().default(""),
   service: z.string().default(""),
   codStatus: z.string().default(""),
-  codValue: decimalText.default(0),
+  codValue: sourceMoney.default(0),
   barang: z.string().default(""),
 });
 
 export const codRecordSchema = z.object({
   waybillNo: z.string().trim().min(1),
-  codAmount: decimalText,
+  codAmount: sourceMoney,
   repaymentStatus: z.unknown(),
   repaymentType: z.unknown(),
   repaymentTypeCode: z.number().int().nullable().optional(),

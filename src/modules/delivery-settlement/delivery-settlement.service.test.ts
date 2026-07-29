@@ -175,6 +175,48 @@ describe("Delivery Settlement contracts", () => {
   });
 
   it.each([
+    [45000.1, 45000],
+    [45000.9, 45000],
+    [45000.99, 45000],
+    [45000, 45000],
+  ])("normalizes RAW_DFOD and RAW_COD source money %s", (value, expected) => {
+    const dispatch = dispatchRecordSchema.parse({
+      waybillNo: "DFOD1", kurir: "A", ongkir: value, waktu: "",
+      receiver: "", address: "", status: "Penerimaan Normal", berat: 1,
+      pembayaran: "", service: "", codStatus: "", codValue: value, barang: "",
+    });
+    const cod = codRecordSchema.parse({
+      waybillNo: "COD1", codAmount: String(value), repaymentStatus: 1,
+      repaymentType: 0, signTime: "", dispatchStaffName: "A",
+    });
+    expect(dispatch.ongkir).toBe(expected);
+    expect(dispatch.codValue).toBe(expected);
+    expect(cod.codAmount).toBe(expected);
+  });
+
+  it("prevents a Rp1 remainder after source normalization", () => {
+    const dispatch = dispatchRecordSchema.parse({
+      waybillNo: "DFOD1", kurir: "A", ongkir: 45000.9, waktu: "",
+      receiver: "", address: "", status: "Penerimaan Normal", berat: 1,
+      pembayaran: "", service: "", codStatus: "", codValue: 0, barang: "",
+    });
+    const cod = codRecordSchema.parse({
+      waybillNo: "COD1", codAmount: 45000.1, repaymentStatus: 1,
+      repaymentType: 0, signTime: "", dispatchStaffName: "A",
+    });
+    const aggregate = aggregateDeliveryRecords(
+      [{ courierNameRaw: dispatch.kurir, deliveryStatusRaw: dispatch.status, freightAmount: d(dispatch.ongkir) }],
+      [{ courierNameRaw: cod.dispatchStaffName, repaymentTypeCode: 0, repaymentTypeLabel: "COD", codAmount: d(cod.codAmount) }],
+    ).rows[0];
+    const financials = calculateDeliveryFinancials({
+      totalSettlementAmount: aggregate.dfod.plus(aggregate.codCash),
+      payments: [{ cashAmount: d(90000), transfers: [] }],
+    });
+    expect(financials.remainingAmount.toString()).toBe("0");
+    expect(financials.paymentStatus).toBe("CLEAR");
+  });
+
+  it.each([
     { field: "page", value: "0" },
     { field: "pageSize", value: "101" },
     { field: "paymentStatus", value: "PAID" },
