@@ -315,7 +315,8 @@ function itemData(
 ) {
   const { row, financial, seller } = source;
   return {
-    ...context,
+    tenantId: context.tenantId,
+    outletId: context.outletId,
     invoiceId,
     masterPickupId: row.id,
     pickupSettlementRevisionId: row.settlementRevisions[0]?.id ?? null,

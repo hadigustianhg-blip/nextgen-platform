@@ -291,6 +291,37 @@ describe("Invoice persistence and PDF contracts", () => {
     infoLog.mockRestore();
   });
 
+  it("does not leak service context fields into InvoiceItem.createMany", async () => {
+    const infoLog = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await createInvoiceDraft({
+      ...scope,
+      actorId: "33333333-3333-4333-8333-333333333333",
+      outletCode: "OUT001",
+      requestId: "request-2",
+    }, {
+      customerKey: "name:anggrek cibogo",
+      customerName: "Anggrek Cibogo",
+      invoiceDate: "2026-07-30",
+      dueDate: "2026-08-06",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-30",
+      itemIds: ["11111111-1111-4111-8111-111111111111"],
+    });
+
+    const item = tx.invoiceItem.createMany.mock.calls[0][0].data[0];
+    expect(item).toMatchObject({
+      tenantId: scope.tenantId,
+      outletId: scope.outletId,
+      invoiceId: "invoice-1",
+      masterPickupId: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(item).not.toHaveProperty("actorId");
+    expect(item).not.toHaveProperty("outletCode");
+    expect(item).not.toHaveProperty("requestId");
+    infoLog.mockRestore();
+  });
+
   it("uses race-safe item locks, serializable transactions and atomic sequence updates", async () => {
     const [schema, migration, service] = await Promise.all([
       readFile(new URL("../../../prisma/schema.prisma", import.meta.url), "utf8"),
