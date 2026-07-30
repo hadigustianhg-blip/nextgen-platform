@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   CircleGauge,
   CreditCard,
+  FileCheck2,
   LogOut,
   Menu,
   PackageCheck,
@@ -418,6 +419,10 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
                 active={pathname.startsWith("/dashboard/finance/cashflow-jfs")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<WalletCards size={17}/>} />
+              <SidebarChild href="/dashboard/finance/create-invoice" label="Create Invoice"
+                active={pathname.startsWith("/dashboard/finance/create-invoice")}
+                collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
+                onNavigate={closeMobile} icon={<FileCheck2 size={17}/>} />
             </div>}
           </div>
 

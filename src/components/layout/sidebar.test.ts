@@ -164,4 +164,13 @@ describe("pickup navigation", () => {
       'active={pathname.startsWith("/dashboard/finance/cashflow-jfs")}',
     );
   });
+
+  it("exposes Create Invoice under persistent Finance & HR", async () => {
+    const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
+    expect(source).toContain('href="/dashboard/finance/create-invoice"');
+    expect(source).toContain('label="Create Invoice"');
+    expect(source).toContain(
+      'active={pathname.startsWith("/dashboard/finance/create-invoice")}',
+    );
+  });
 });
