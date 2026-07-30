@@ -156,4 +156,12 @@ describe("pickup navigation", () => {
       'active={pathname.startsWith("/dashboard/finance/rincian-operasional")}',
     );
   });
+
+  it("exposes Cashflow JFS under persistent Finance & HR", async () => {
+    const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
+    expect(source).toContain('href="/dashboard/finance/cashflow-jfs"');
+    expect(source).toContain(
+      'active={pathname.startsWith("/dashboard/finance/cashflow-jfs")}',
+    );
+  });
 });
