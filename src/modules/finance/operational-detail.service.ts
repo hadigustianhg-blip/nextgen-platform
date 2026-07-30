@@ -1,70 +1,104 @@
 import "server-only";
-import { prisma } from "@/lib/db/prisma";
+import { listOperationalSettlement } from "@/modules/operational-settlement";
 
 type Scope = { tenantId: string; outletId: string };
-const date = (value: string) => new Date(`${value}T00:00:00.000Z`);
+type OperationalDetailInput = Scope & {
+  startDate: string;
+  endDate: string;
+  category?: string;
+  page?: number;
+  pageSize?: number;
+  all?: boolean;
+};
 
-const whereRange = (scope: Scope, startDate: string, endDate: string) => ({
-  ...scope,
-  status: "VALID" as const,
-  operationalDate: { gte: date(startDate), lte: date(endDate) },
-});
+type SettlementRow = Awaited<ReturnType<typeof listOperationalSettlement>>["data"][number];
+
+function calendarDates(startDate: string, endDate: string) {
+  const dates: string[] = [];
+  const cursor = new Date(`${startDate}T00:00:00.000Z`);
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+  while (cursor <= end) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+async function getValidManualTransactions(input: OperationalDetailInput) {
+  const rows: SettlementRow[] = [];
+  for (const operationalDate of calendarDates(input.startDate, input.endDate)) {
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const result = await listOperationalSettlement({
+        tenantId: input.tenantId,
+        outletId: input.outletId,
+        operationalDate,
+        category: input.category,
+        page,
+        pageSize: 100,
+      });
+      rows.push(...result.data.filter((row) => row.status === "VALID"));
+      totalPages = result.pagination.totalPages;
+      page += 1;
+    } while (page <= totalPages);
+  }
+  return rows;
+}
 
 export async function getOperationalDetailSummary(
   input: Scope & { startDate: string; endDate: string },
 ) {
-  const rows = await prisma.operationalExpense.groupBy({
-    by: ["category"],
-    where: whereRange(input, input.startDate, input.endDate),
-    _count: { _all: true },
-    _sum: { amount: true },
-    orderBy: { _sum: { amount: "desc" } },
-  });
+  const transactions = await getValidManualTransactions(input);
+  const grouped = new Map<string, { transactionCount: number; totalAmount: number }>();
+  for (const row of transactions) {
+    const current = grouped.get(row.category) ?? { transactionCount: 0, totalAmount: 0 };
+    current.transactionCount += 1;
+    current.totalAmount += Number(row.amount);
+    grouped.set(row.category, current);
+  }
+  const categories = [...grouped.entries()]
+    .map(([category, values]) => ({ category, ...values }))
+    .sort((left, right) => right.totalAmount - left.totalAmount);
   return {
     summary: {
-      totalAmount: rows.reduce((sum, row) => sum + Number(row._sum.amount || 0), 0),
-      totalTransactions: rows.reduce((sum, row) => sum + row._count._all, 0),
-      totalCategories: rows.length,
+      totalAmount: categories.reduce((sum, row) => sum + row.totalAmount, 0),
+      totalTransactions: transactions.length,
+      totalCategories: categories.length,
     },
-    categories: rows.map((row) => ({
-      category: row.category,
-      transactionCount: row._count._all,
-      totalAmount: Number(row._sum.amount || 0),
-    })),
+    categories,
   };
 }
 
-export async function getOperationalDetailRows(input: Scope & {
-  startDate: string; endDate: string; category?: string;
-  page?: number; pageSize?: number; all?: boolean;
-}) {
-  const where = {
-    ...whereRange(input, input.startDate, input.endDate),
-    ...(input.category ? { category: input.category } : {}),
-  };
+export async function getOperationalDetailRows(input: OperationalDetailInput) {
+  const transactions = await getValidManualTransactions(input);
+  const sorted = transactions.sort((left, right) => {
+    const byDate = right.operationalDate.getTime() - left.operationalDate.getTime();
+    if (byDate !== 0) return byDate;
+    const byCreatedAt = right.createdAt.getTime() - left.createdAt.getTime();
+    return byCreatedAt !== 0 ? byCreatedAt : right.id.localeCompare(left.id);
+  });
   const page = input.page || 1;
   const pageSize = input.pageSize || 25;
-  const [rows, total] = await Promise.all([
-    prisma.operationalExpense.findMany({
-      where,
-      include: { createdBy: { select: { name: true } } },
-      orderBy: [{ operationalDate: "desc" }, { createdAt: "desc" }, { id: "desc" }],
-      ...(input.all ? {} : { skip: (page - 1) * pageSize, take: pageSize }),
-    }),
-    prisma.operationalExpense.count({ where }),
-  ]);
+  const selected = input.all
+    ? sorted
+    : sorted.slice((page - 1) * pageSize, page * pageSize);
+
   return {
-    data: rows.map((row) => ({
+    data: selected.map((row) => ({
       id: row.id,
       date: row.operationalDate.toISOString().slice(0, 10),
       category: row.category,
       description: row.description,
       amount: Number(row.amount),
-      pic: row.createdBy.name,
+      pic: row.createdBy,
       referenceNumber: row.vehiclePlate || row.id,
     })),
     pagination: {
-      page, pageSize, total, totalPages: Math.ceil(total / pageSize),
+      page,
+      pageSize,
+      total: sorted.length,
+      totalPages: Math.ceil(sorted.length / pageSize),
     },
   };
 }

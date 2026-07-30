@@ -7,6 +7,7 @@ import {
   nextgenButtonClass, nextgenControlClass, nextgenNeutralButtonClass,
 } from "@/components/ui";
 import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
+import { downloadFile } from "@/lib/files/download-file";
 
 type Category = { category: string; transactionCount: number; totalAmount: number };
 type Detail = {
@@ -29,9 +30,11 @@ export function OperationalDetailClient({ canExport }: { canExport: boolean }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [detailPage, setDetailPage] = useState(1);
   const [detailPages, setDetailPages] = useState(1);
   const [notice, setNotice] = useState("");
+  const [exportError, setExportError] = useState("");
 
   async function show() {
     setLoading(true); setNotice("");
@@ -60,10 +63,28 @@ export function OperationalDetailClient({ canExport }: { canExport: boolean }) {
 
   const exportUrl = `/api/finance/operational-detail/export?${new URLSearchParams({ startDate, endDate })}`;
 
+  async function exportExcel() {
+    setExporting(true);
+    setExportError("");
+    try {
+      await downloadFile(exportUrl);
+    } catch {
+      setExportError("Export gagal. Silakan coba kembali.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return <div className="space-y-6">
+    {exportError && <div role="alert" className="fixed right-5 top-5 z-[70] rounded-xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-lg">
+      {exportError}
+    </div>}
     <PageHeader eyebrow="Finance & HR" title="Rincian Operasional"
       description="Ringkasan seluruh transaksi biaya operasional manual."
-      actions={canExport ? <a href={exportUrl} className={nextgenNeutralButtonClass}><Download size={17}/>Export Excel</a> : undefined}/>
+      actions={canExport ? <button type="button" disabled={exporting} onClick={() => void exportExcel()} className={nextgenNeutralButtonClass}>
+        {exporting ? <LoaderCircle className="animate-spin" size={17}/> : <Download size={17}/>}
+        {exporting ? "Mengekspor..." : "Export Excel"}
+      </button> : undefined}/>
     {notice && <div role="status" className="rounded-xl border bg-white px-4 py-3 text-sm">{notice}</div>}
     <FilterCard><div className="grid gap-3 md:grid-cols-3">
       <input aria-label="Tanggal Awal" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className={nextgenControlClass}/>

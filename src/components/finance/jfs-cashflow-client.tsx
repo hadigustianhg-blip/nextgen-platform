@@ -7,6 +7,7 @@ import {
   nextgenButtonClass, nextgenControlClass, nextgenNeutralButtonClass,
 } from "@/components/ui";
 import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
+import { downloadFile } from "@/lib/files/download-file";
 
 type Row = { transactionType: string; total: number };
 type Result = {
@@ -37,7 +38,9 @@ export function JfsCashflowClient({ canExport }: { canExport: boolean }) {
   const [result, setResult] = useState(initial);
   const [hasChecked, setHasChecked] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState("");
+  const [exportError, setExportError] = useState("");
 
   async function check() {
     if (!validRange(startDate, endDate)) {
@@ -69,11 +72,29 @@ export function JfsCashflowClient({ canExport }: { canExport: boolean }) {
     : "";
   const exportUrl = `/api/finance/cashflow-jfs/export?${new URLSearchParams({ startDate, endDate })}`;
 
+  async function exportExcel() {
+    setExporting(true);
+    setExportError("");
+    try {
+      await downloadFile(exportUrl);
+    } catch {
+      setExportError("Export gagal. Silakan coba kembali.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return <div className="space-y-6">
+    {exportError && <div role="alert" className="fixed right-5 top-5 z-[70] rounded-xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-lg">
+      {exportError}
+    </div>}
     <PageHeader eyebrow="Finance & HR" title="Cashflow JFS"
       description="Pemeriksaan pemasukan dan pengeluaran langsung dari laporan JFS."
       actions={canExport && hasChecked
-        ? <a href={exportUrl} className={nextgenNeutralButtonClass}><Download size={17}/>Export Excel</a>
+        ? <button type="button" disabled={exporting} onClick={() => void exportExcel()} className={nextgenNeutralButtonClass}>
+          {exporting ? <LoaderCircle className="animate-spin" size={17}/> : <Download size={17}/>}
+          {exporting ? "Mengekspor..." : "Export Excel"}
+        </button>
         : undefined}/>
     {notice && <div role="status" className="rounded-xl border bg-white px-4 py-3 text-sm">{notice}</div>}
     <FilterCard><div className="grid gap-3 md:grid-cols-3">
