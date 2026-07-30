@@ -36,11 +36,16 @@ type BankAccount = {
 };
 
 export type InvoicePdfPhase =
+  | "pdf_start"
+  | "logo_loaded"
   | "pdf_document_created"
+  | "font_loaded"
   | "header_rendered"
   | "items_rendered"
+  | "table_rendered"
   | "totals_rendered"
-  | "pdf_finalized";
+  | "pdf_finalized"
+  | "pdf_end";
 
 type PdfOptions = {
   onPhase?: (phase: InvoicePdfPhase) => void;
@@ -69,6 +74,10 @@ export async function createInvoicePdf(
   options: PdfOptions = {},
 ) {
   return new Promise<Buffer>((resolve, reject) => {
+    options.onPhase?.("pdf_start");
+    // The invoice currently has no mandatory logo asset. Treat an absent logo as
+    // a completed optional phase so PDF generation can continue without it.
+    options.onPhase?.("logo_loaded");
     let settled = false;
     const finish = (callback: () => void) => {
       if (settled) return;
@@ -86,6 +95,10 @@ export async function createInvoicePdf(
         info: { Title: invoice.invoiceNumber || "Draft Invoice" },
       });
       options.onPhase?.("pdf_document_created");
+      // Helvetica is a PDFKit built-in font. Keeping it external at build time
+      // lets PDFKit resolve its AFM files from the runtime package.
+      document.font("Helvetica");
+      options.onPhase?.("font_loaded");
     } catch (error) {
       finish(() => reject(error));
       return;
@@ -94,6 +107,7 @@ export async function createInvoicePdf(
     document.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
     document.once("end", () => {
       options.onPhase?.("pdf_finalized");
+      options.onPhase?.("pdf_end");
       finish(() => resolve(Buffer.concat(chunks)));
     });
     document.once("error", (error) => finish(() => reject(error)));
@@ -168,6 +182,7 @@ export async function createInvoicePdf(
         document.y = y + 25;
       });
       options.onPhase?.("items_rendered");
+      options.onPhase?.("table_rendered");
 
       ensureRoom(125);
       document.moveDown().font("Helvetica-Bold").fontSize(9)

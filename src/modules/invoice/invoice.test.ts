@@ -463,16 +463,26 @@ describe("Invoice persistence and PDF contracts", () => {
     });
     expect(pdf.subarray(0, 4).toString()).toBe("%PDF");
     expect(phases).toEqual([
+      "pdf_start",
+      "logo_loaded",
       "pdf_document_created",
+      "font_loaded",
       "header_rendered",
       "items_rendered",
+      "table_rendered",
       "totals_rendered",
       "pdf_finalized",
+      "pdf_end",
     ]);
     expect(invoicePdfFilename(invoice)).toBe("Invoice_DRAFT_Seller.pdf");
     const source = await readFile(new URL("./invoice.pdf.ts", import.meta.url), "utf8");
     expect(source).toContain('.text("DRAFT"');
-    expect(source).not.toMatch(/registerFont|readFileSync|logo/i);
+    expect(source).not.toMatch(/registerFont|readFileSync|document\.image/);
+    const nextConfig = await readFile(
+      new URL("../../../next.config.ts", import.meta.url),
+      "utf8",
+    );
+    expect(nextConfig).toContain('serverExternalPackages: ["pdfkit"]');
   });
 
   it("contains no hardcoded production identity or automatic attachment claim", async () => {

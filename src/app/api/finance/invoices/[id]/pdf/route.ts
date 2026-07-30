@@ -14,11 +14,16 @@ type PdfPhase =
   | "status_validated"
   | "outlet_loaded"
   | "bank_accounts_loaded"
+  | "pdf_start"
+  | "logo_loaded"
   | "pdf_document_created"
+  | "font_loaded"
   | "header_rendered"
   | "items_rendered"
+  | "table_rendered"
   | "totals_rendered"
   | "pdf_finalized"
+  | "pdf_end"
   | "response_created";
 
 const pdfError = (status: number, code: string, message: string) =>

@@ -60,11 +60,16 @@ beforeEach(() => {
   mocks.getAccounts.mockResolvedValue([]);
   mocks.createPdf.mockImplementation(async (_invoice, _accounts, options) => {
     for (const phase of [
+      "pdf_start",
+      "logo_loaded",
       "pdf_document_created",
+      "font_loaded",
       "header_rendered",
       "items_rendered",
+      "table_rendered",
       "totals_rendered",
       "pdf_finalized",
+      "pdf_end",
     ]) options.onPhase(phase);
     return Buffer.from("%PDF-test");
   });
