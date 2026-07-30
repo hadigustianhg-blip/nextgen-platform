@@ -77,7 +77,7 @@ export function calculatePickupFinancials(source: PickupFinancialSource) {
   };
 }
 
-function isCashSettlement(value: string | null) {
+export function isCashSettlement(value: string | null) {
   return value?.trim().toLocaleLowerCase("id-ID") === "tunai";
 }
 
