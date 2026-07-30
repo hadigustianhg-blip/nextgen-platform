@@ -41,6 +41,7 @@ const storageKeys = {
   settlementOpen: "nextgen.sidebar.settlement.open",
   paymentOpen: "nextgen.sidebar.payment.open",
   qualityControlOpen: "nextgen.sidebar.quality-control.open",
+  financeOpen: "nextgen.sidebar.finance.open",
 } as const;
 
 const readStoredBoolean = (key: string, fallback: boolean) => {
@@ -54,11 +55,13 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
   const settlementActive = pathname.startsWith("/dashboard/settlement/");
   const paymentActive = pathname.startsWith("/dashboard/payment/");
   const qualityControlActive = pathname.startsWith("/dashboard/quality-control/");
+  const financeActive = pathname.startsWith("/dashboard/finance/");
   const [collapsed, setCollapsed] = useState(false);
   const [monitoringOpen, setMonitoringOpen] = useState(monitoringActive);
   const [settlementOpen, setSettlementOpen] = useState(settlementActive);
   const [paymentOpen, setPaymentOpen] = useState(paymentActive);
   const [qualityControlOpen, setQualityControlOpen] = useState(qualityControlActive);
+  const [financeOpen, setFinanceOpen] = useState(financeActive);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
 
@@ -69,6 +72,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
       setSettlementOpen(readStoredBoolean(storageKeys.settlementOpen, true));
       setPaymentOpen(readStoredBoolean(storageKeys.paymentOpen, true));
       setQualityControlOpen(readStoredBoolean(storageKeys.qualityControlOpen, true));
+      setFinanceOpen(readStoredBoolean(storageKeys.financeOpen, true));
       setStorageReady(true);
     });
   }, []);
@@ -109,10 +113,17 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
     }
   }, [qualityControlOpen, storageReady]);
 
+  useEffect(() => {
+    if (storageReady) {
+      window.localStorage.setItem(storageKeys.financeOpen, String(financeOpen));
+    }
+  }, [financeOpen, storageReady]);
+
   const monitoringVisible = monitoringActive || monitoringOpen;
   const settlementVisible = settlementActive || settlementOpen;
   const paymentVisible = paymentActive || paymentOpen;
   const qualityControlVisible = qualityControlActive || qualityControlOpen;
+  const financeVisible = financeActive || financeOpen;
   const labelClass = collapsed ? "lg:hidden" : "";
   const closeMobile = () => setMobileOpen(false);
   const itemLayout = collapsed ? "lg:justify-center lg:gap-0" : "";
@@ -389,10 +400,27 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
             </div>}
           </div>
 
+          <div className="pt-1">
+            <button type="button" title={collapsed ? "Finance & HR" : undefined}
+              aria-expanded={financeVisible} aria-controls="finance-submenu"
+              onClick={() => setFinanceOpen((value) => !value)}
+              className={["flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300", itemLayout].join(" ")}>
+              <UsersRound size={19} className="shrink-0" />
+              <span className={labelClass}>Finance & HR</span>
+              <ChevronDown size={15} className={`${labelClass} ml-auto transition-transform ${financeVisible ? "rotate-180" : ""}`} />
+            </button>
+            {financeVisible && <div id="finance-submenu">
+              <SidebarChild href="/dashboard/finance/rincian-operasional" label="Rincian Operasional"
+                active={pathname.startsWith("/dashboard/finance/rincian-operasional")}
+                collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
+                onNavigate={closeMobile} icon={<ReceiptText size={17}/>} />
+            </div>}
+          </div>
+
           {navigation
             .slice(1)
             .filter(
-              (item) => item.label !== "Monitoring" && item.label !== "Payment" && item.label !== "Quality Control",
+              (item) => item.label !== "Monitoring" && item.label !== "Payment" && item.label !== "Quality Control" && item.label !== "Finance & HR",
             )
             .map((item) => {
               const active =

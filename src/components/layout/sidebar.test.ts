@@ -146,4 +146,14 @@ describe("pickup navigation", () => {
       'active={pathname.startsWith("/dashboard/quality-control/pickup-scheduling")}',
     );
   });
+
+  it("exposes Rincian Operasional under persistent Finance & HR", async () => {
+    const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
+    expect(source).toContain('"nextgen.sidebar.finance.open"');
+    expect(source).toContain('aria-controls="finance-submenu"');
+    expect(source).toContain('href="/dashboard/finance/rincian-operasional"');
+    expect(source).toContain(
+      'active={pathname.startsWith("/dashboard/finance/rincian-operasional")}',
+    );
+  });
 });
