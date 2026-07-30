@@ -9,3 +9,7 @@ export * from "./problem-waybill-delivery-sensitive.service";
 export * from "./problem-waybill-delivery.validation";
 export * from "./problem-waybill-delivery-whatsapp";
 export * from "./problem-waybill-delivery-rate-limit";
+export * from "./waybill-stuck-delivery.authorization";
+export * from "./waybill-stuck-delivery.service";
+export * from "./waybill-stuck-delivery-sync.service";
+export * from "./waybill-stuck-delivery.validation";

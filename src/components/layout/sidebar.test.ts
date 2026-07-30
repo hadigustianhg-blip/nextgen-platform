@@ -116,4 +116,20 @@ describe("pickup navigation", () => {
       'active={pathname.startsWith("/dashboard/quality-control/problem-waybill-delivery")}',
     );
   });
+
+  it("orders Waybill Stuck Delivery between SLA and Problem Waybill", async () => {
+    const source = await readFile(
+      new URL("./sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain(
+      'href="/dashboard/quality-control/waybill-stuck-delivery"',
+    );
+    expect(source.indexOf('label="SLA Cut Off"')).toBeLessThan(
+      source.indexOf('label="Waybill Stuck Delivery"'),
+    );
+    expect(source.indexOf('label="Waybill Stuck Delivery"')).toBeLessThan(
+      source.indexOf('label="Problem Waybill Delivery"'),
+    );
+  });
 });
