@@ -93,6 +93,7 @@ export async function getOperationalDetailRows(input: OperationalDetailInput) {
       amount: Number(row.amount),
       pic: row.createdBy,
       referenceNumber: row.vehiclePlate || row.id,
+      recipientName: row.teamName,
     })),
     pagination: {
       page,

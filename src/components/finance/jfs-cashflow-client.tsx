@@ -73,6 +73,7 @@ export function JfsCashflowClient({ canExport }: { canExport: boolean }) {
   const exportUrl = `/api/finance/cashflow-jfs/export?${new URLSearchParams({ startDate, endDate })}`;
 
   async function exportExcel() {
+    if (exporting) return;
     setExporting(true);
     setExportError("");
     try {
