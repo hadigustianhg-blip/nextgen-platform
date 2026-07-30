@@ -6,12 +6,23 @@ vi.mock("server-only", () => ({}));
 const db = vi.hoisted(() => ({
   masterPickup: { findMany: vi.fn() },
   outletBankAccount: { findMany: vi.fn() },
+  $transaction: vi.fn(),
+}));
+const tx = vi.hoisted(() => ({
+  masterPickup: { findMany: vi.fn() },
+  invoice: {
+    create: vi.fn(),
+    findUniqueOrThrow: vi.fn(),
+  },
+  invoiceItem: { createMany: vi.fn() },
+  auditLog: { create: vi.fn() },
 }));
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
 
 import {
   getInvoiceSourceItems,
   getInvoiceSourceSellers,
+  createInvoiceDraft,
   normalizeSellerName,
   normalizeWhatsappNumber,
   sellerIdentity,
@@ -65,6 +76,12 @@ function pickup(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   db.masterPickup.findMany.mockResolvedValue([pickup()]);
+  tx.masterPickup.findMany.mockResolvedValue([pickup()]);
+  tx.invoice.create.mockResolvedValue({ id: "invoice-1" });
+  tx.invoiceItem.createMany.mockResolvedValue({ count: 1 });
+  tx.auditLog.create.mockResolvedValue({ id: "audit-1" });
+  tx.invoice.findUniqueOrThrow.mockResolvedValue({ id: "invoice-1" });
+  db.$transaction.mockImplementation(async (callback) => callback(tx));
 });
 
 describe("Pickup invoice source", () => {
@@ -234,6 +251,46 @@ describe("Invoice validation and authorization", () => {
 });
 
 describe("Invoice persistence and PDF contracts", () => {
+  it("retries a serializable transaction conflict once", async () => {
+    const conflict = new Prisma.PrismaClientKnownRequestError(
+      "Transaction conflict",
+      { code: "P2034", clientVersion: "6.19.3" },
+    );
+    db.$transaction
+      .mockRejectedValueOnce(conflict)
+      .mockImplementationOnce(async (callback) => callback(tx));
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const infoLog = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await expect(createInvoiceDraft({
+      ...scope,
+      actorId: "33333333-3333-4333-8333-333333333333",
+      outletCode: "OUT001",
+      requestId: "request-1",
+    }, {
+      customerKey: "name:anggrek cibogo",
+      customerName: "Anggrek Cibogo",
+      invoiceDate: "2026-07-30",
+      dueDate: "2026-08-06",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-30",
+      itemIds: ["11111111-1111-4111-8111-111111111111"],
+    })).resolves.toEqual({ id: "invoice-1" });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(errorLog).toHaveBeenCalledWith(
+      "[invoice.create.failed]",
+      expect.objectContaining({
+        requestId: "request-1",
+        step: "transaction_started",
+        attempt: 1,
+        code: "P2034",
+      }),
+    );
+    errorLog.mockRestore();
+    infoLog.mockRestore();
+  });
+
   it("uses race-safe item locks, serializable transactions and atomic sequence updates", async () => {
     const [schema, migration, service] = await Promise.all([
       readFile(new URL("../../../prisma/schema.prisma", import.meta.url), "utf8"),

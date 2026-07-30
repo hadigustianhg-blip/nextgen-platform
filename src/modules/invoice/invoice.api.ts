@@ -14,6 +14,7 @@ const safeMessages: Record<string, string> = {
   INVOICE_CONFLICT: "Invoice sedang diproses oleh pengguna lain. Silakan coba kembali.",
   INVOICE_NOT_READY: "Invoice belum siap untuk proses ini.",
   WHATSAPP_INVALID: "Nomor WhatsApp customer belum valid.",
+  INVOICE_CREATE_FAILED: "Invoice gagal disimpan.",
   INVOICE_SAVE_FAILED: "Invoice gagal disimpan.",
   INVOICE_ISSUE_FAILED: "Invoice gagal difinalisasi.",
 };
@@ -22,6 +23,13 @@ export function invoiceErrorResponse(error: unknown) {
   const known = error instanceof InvoiceServiceError
     ? error
     : new InvoiceServiceError("INVOICE_SAVE_FAILED", 500);
+  if (known.code === "INVOICE_CREATE_FAILED") {
+    return NextResponse.json({
+      success: false,
+      code: known.code,
+      message: safeMessages[known.code],
+    }, { status: known.status });
+  }
   return NextResponse.json({
     error: {
       code: known.code,

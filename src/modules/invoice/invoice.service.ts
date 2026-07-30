@@ -7,7 +7,11 @@ import {
 } from "@/modules/pickup/pickup-settlement.service";
 
 type Scope = { tenantId: string; outletId: string };
-type Context = Scope & { actorId: string; outletCode: string };
+type Context = Scope & {
+  actorId: string;
+  outletCode: string;
+  requestId?: string;
+};
 type DraftInput = {
   customerKey: string;
   customerName: string;
@@ -34,9 +38,62 @@ export class InvoiceServiceError extends Error {
     public code: string,
     public status = 400,
     public details?: string[],
+    options?: ErrorOptions,
   ) {
-    super(code);
+    super(code, options);
   }
+}
+
+type CreateInvoiceStep =
+  | "transaction_started"
+  | "sources_validated"
+  | "invoice_created"
+  | "invoice_items_created"
+  | "audit_log_created"
+  | "invoice_loaded"
+  | "transaction_committed";
+
+function logCreateInvoice(
+  context: Context,
+  step: CreateInvoiceStep,
+  metadata: Record<string, unknown> = {},
+) {
+  console.info("[invoice.create]", {
+    requestId: context.requestId ?? "unknown",
+    step,
+    ...metadata,
+  });
+}
+
+function prismaErrorDetails(error: unknown) {
+  const candidate = error as {
+    name?: string;
+    code?: string;
+    message?: string;
+    stack?: string;
+    meta?: unknown;
+  };
+  return {
+    name: candidate?.name ?? "UnknownError",
+    code: candidate?.code ?? null,
+    message: candidate?.message ?? String(error),
+    stack: candidate?.stack ?? null,
+    meta: candidate?.meta ?? null,
+  };
+}
+
+function logCreateInvoiceError(
+  context: Context,
+  step: CreateInvoiceStep,
+  attempt: number,
+  error: unknown,
+) {
+  console.error("[invoice.create.failed]", {
+    requestId: context.requestId ?? "unknown",
+    step,
+    attempt,
+    ...prismaErrorDetails(error),
+  });
 }
 
 export function normalizeSellerName(value: string | null | undefined) {
@@ -284,60 +341,109 @@ const invoiceInclude = {
 };
 
 export async function createInvoiceDraft(context: Context, input: DraftInput) {
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const sources = await validatedSources(tx, context, input.itemIds);
-      if (sources.some((source) => source.seller.customerKey !== input.customerKey)) {
-        throw new InvoiceServiceError("SOURCE_SELLER_MISMATCH");
-      }
-      const calculated = totals(sources);
-      const invoice = await tx.invoice.create({
-        data: {
-          tenantId: context.tenantId,
-          outletId: context.outletId,
-          customerKey: input.customerKey,
-          customerNameSnapshot: input.customerName,
-          companyNameSnapshot: input.companyName || null,
-          whatsappSnapshot: input.whatsapp || null,
-          emailSnapshot: input.email || null,
-          addressSnapshot: input.address || null,
-          invoiceDate: date(input.invoiceDate),
-          dueDate: date(input.dueDate),
-          periodStart: date(input.periodStart),
-          periodEnd: date(input.periodEnd),
-          ...calculated,
-          notes: input.notes || null,
-          createdByUserId: context.actorId,
-        },
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    let step: CreateInvoiceStep = "transaction_started";
+    try {
+      logCreateInvoice(context, step, {
+        attempt,
+        sellerKey: input.customerKey,
+        itemCount: input.itemIds.length,
       });
-      await tx.invoiceItem.createMany({
-        data: sources.map((source) => itemData(context, invoice.id, source)),
-      });
-      await tx.auditLog.create({ data: {
-        tenantId: context.tenantId, outletId: context.outletId,
-        actorId: context.actorId, action: "CREATE",
-        entityType: "CREATE_INVOICE_DRAFT", entityId: invoice.id,
-        metadata: {
-          customerKey: input.customerKey,
-          periodStart: input.periodStart,
-          periodEnd: input.periodEnd,
+      const result = await prisma.$transaction(async (tx) => {
+        const sources = await validatedSources(tx, context, input.itemIds);
+        step = "sources_validated";
+        if (sources.some((source) => source.seller.customerKey !== input.customerKey)) {
+          throw new InvoiceServiceError("SOURCE_SELLER_MISMATCH");
+        }
+        const calculated = totals(sources);
+        logCreateInvoice(context, step, {
+          attempt,
           itemCount: sources.length,
+          subtotal: calculated.subtotal.toString(),
           grandTotal: calculated.grandTotal.toString(),
-          result: "SUCCESS",
-        },
-      } });
-      return tx.invoice.findUniqueOrThrow({ where: { id: invoice.id }, include: invoiceInclude });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  } catch (error) {
-    if (error instanceof InvoiceServiceError) throw error;
-    if ((error as { code?: string })?.code === "P2021") {
-      throw new InvoiceServiceError("DATABASE_MIGRATION_REQUIRED", 503);
+        });
+        const invoice = await tx.invoice.create({
+          data: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            customerKey: input.customerKey,
+            customerNameSnapshot: input.customerName,
+            companyNameSnapshot: input.companyName || null,
+            whatsappSnapshot: input.whatsapp || null,
+            emailSnapshot: input.email || null,
+            addressSnapshot: input.address || null,
+            invoiceDate: date(input.invoiceDate),
+            dueDate: date(input.dueDate),
+            periodStart: date(input.periodStart),
+            periodEnd: date(input.periodEnd),
+            ...calculated,
+            notes: input.notes || null,
+            createdByUserId: context.actorId,
+          },
+        });
+        step = "invoice_created";
+        logCreateInvoice(context, step, { attempt, invoiceId: invoice.id });
+        await tx.invoiceItem.createMany({
+          data: sources.map((source) => itemData(context, invoice.id, source)),
+        });
+        step = "invoice_items_created";
+        logCreateInvoice(context, step, {
+          attempt,
+          invoiceId: invoice.id,
+          itemCount: sources.length,
+        });
+        await tx.auditLog.create({ data: {
+          tenantId: context.tenantId, outletId: context.outletId,
+          actorId: context.actorId, action: "CREATE",
+          entityType: "CREATE_INVOICE_DRAFT", entityId: invoice.id,
+          metadata: {
+            customerKey: input.customerKey,
+            periodStart: input.periodStart,
+            periodEnd: input.periodEnd,
+            itemCount: sources.length,
+            grandTotal: calculated.grandTotal.toString(),
+            result: "SUCCESS",
+          },
+        } });
+        step = "audit_log_created";
+        logCreateInvoice(context, step, { attempt, invoiceId: invoice.id });
+        const created = await tx.invoice.findUniqueOrThrow({
+          where: { id: invoice.id },
+          include: invoiceInclude,
+        });
+        step = "invoice_loaded";
+        return created;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      step = "transaction_committed";
+      logCreateInvoice(context, step, { attempt, invoiceId: result.id });
+      return result;
+    } catch (error) {
+      logCreateInvoiceError(context, step, attempt, error);
+      if (error instanceof InvoiceServiceError) throw error;
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2034" &&
+        attempt < maxAttempts
+      ) {
+        continue;
+      }
+      if ((error as { code?: string })?.code === "P2021") {
+        throw new InvoiceServiceError("DATABASE_MIGRATION_REQUIRED", 503, undefined, {
+          cause: error,
+        });
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new InvoiceServiceError("INVOICE_ITEM_LOCKED", 409, undefined, {
+          cause: error,
+        });
+      }
+      throw new InvoiceServiceError("INVOICE_CREATE_FAILED", 500, undefined, {
+        cause: error,
+      });
     }
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw new InvoiceServiceError("INVOICE_ITEM_LOCKED", 409);
-    }
-    throw new InvoiceServiceError("INVOICE_SAVE_FAILED", 500);
   }
+  throw new InvoiceServiceError("INVOICE_CREATE_FAILED", 500);
 }
 
 export async function updateInvoiceDraft(

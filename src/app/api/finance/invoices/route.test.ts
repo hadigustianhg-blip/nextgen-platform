@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { InvoiceServiceError } from "@/modules/invoice/invoice.service";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/auth/session", () => ({
@@ -53,5 +54,33 @@ describe("POST /api/finance/invoices", () => {
       message: "Pilih minimal satu resi untuk membuat invoice.",
     });
     expect(mocks.createInvoiceDraft).not.toHaveBeenCalled();
+  });
+
+  it("returns the safe create failure contract without exposing the exception", async () => {
+    mocks.createInvoiceDraft.mockRejectedValueOnce(
+      new InvoiceServiceError("INVOICE_CREATE_FAILED", 500, undefined, {
+        cause: new Error("database detail must stay server-side"),
+      }),
+    );
+    const response = await POST(new Request("http://localhost/api/finance/invoices", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        customerKey: "name:putra",
+        customerName: "PUTRA",
+        invoiceDate: "2026-07-30",
+        dueDate: "2026-08-06",
+        periodStart: "2026-07-01",
+        periodEnd: "2026-07-30",
+        itemIds: ["11111111-1111-4111-8111-111111111111"],
+      }),
+    }));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      code: "INVOICE_CREATE_FAILED",
+      message: "Invoice gagal disimpan.",
+    });
   });
 });

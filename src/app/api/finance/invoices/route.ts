@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { getSession } from "@/lib/auth/session";
 import {
   canMutateInvoice, canReadInvoice, createInvoiceDraft, invoiceDraftSchema,
@@ -22,6 +23,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const requestId = randomUUID();
+  console.info("[invoice.create.request]", { requestId, step: "request_received" });
   const session = await getSession();
   if (!session) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   if (!canMutateInvoice(session)) return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
@@ -42,10 +45,24 @@ export async function POST(request: Request) {
       message: "Data invoice tidak valid.",
     }, { status: 400 });
   }
+  console.info("[invoice.create.request]", {
+    requestId,
+    step: "validation_passed",
+    sellerKey: parsed.data.customerKey,
+    itemCount: parsed.data.itemIds.length,
+  });
   try {
     const data = await createInvoiceDraft({
-      ...scope, actorId: session.userId, outletCode: session.outletCode,
+      ...scope,
+      actorId: session.userId,
+      outletCode: session.outletCode,
+      requestId,
     }, parsed.data);
+    console.info("[invoice.create.request]", {
+      requestId,
+      step: "response_created",
+      invoiceId: data.id,
+    });
     return NextResponse.json({ success: true, data }, { status: 201 });
   } catch (error) {
     if ((error as { code?: string })?.code === "P2021") {
