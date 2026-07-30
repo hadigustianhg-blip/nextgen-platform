@@ -382,6 +382,10 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
                 active={pathname.startsWith("/dashboard/quality-control/problem-waybill-delivery")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<Truck size={17}/>} />
+              <SidebarChild href="/dashboard/quality-control/pickup-scheduling" label="Penjadwalan Pickup"
+                active={pathname.startsWith("/dashboard/quality-control/pickup-scheduling")}
+                collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
+                onNavigate={closeMobile} icon={<CalendarDays size={17}/>} />
             </div>}
           </div>
 

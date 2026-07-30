@@ -132,4 +132,18 @@ describe("pickup navigation", () => {
       source.indexOf('label="Problem Waybill Delivery"'),
     );
   });
+
+  it("exposes Penjadwalan Pickup under Quality Control", async () => {
+    const source = await readFile(
+      new URL("./sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain(
+      'href="/dashboard/quality-control/pickup-scheduling"',
+    );
+    expect(source).toContain('label="Penjadwalan Pickup"');
+    expect(source).toContain(
+      'active={pathname.startsWith("/dashboard/quality-control/pickup-scheduling")}',
+    );
+  });
 });
