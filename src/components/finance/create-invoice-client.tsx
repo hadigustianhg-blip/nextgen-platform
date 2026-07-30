@@ -15,6 +15,8 @@ import {
   buildInvoiceSourceItemsQuery, canSaveInvoiceDraft, formatRupiahFromCents,
   invoiceDraftErrorMessage, invoicePdfErrorMessage, invoiceWhatsappDisabledReason,
   invoiceWhatsappErrorMessage, selectableInvoiceItems, sumMoney,
+  buildRecipientWhatsappMessage, buildRecipientWhatsappUrl,
+  invoiceRecipientDetailErrorMessage,
 } from "./invoice.view";
 
 type Seller = {
@@ -68,6 +70,12 @@ type Invoice = {
   whatsappSnapshot: string | null;
   emailSnapshot: string | null;
   addressSnapshot: string | null;
+  recipientName: string | null;
+  recipientPhone: string | null;
+  recipientCity: string | null;
+  transferBankName: string | null;
+  transferAccountNumber: string | null;
+  transferAccountHolder: string | null;
   invoiceDate: string;
   dueDate: string;
   periodStart: string;
@@ -78,6 +86,8 @@ type Invoice = {
   status: string;
   notes: string | null;
   items: InvoiceItem[];
+  outlet?: { code: string; name: string };
+  tenant?: { name: string };
   _count?: { items: number };
 };
 
@@ -125,6 +135,8 @@ export function CreateInvoiceClient({
   const [saving, setSaving] = useState(false);
   const [issuing, setIssuing] = useState(false);
   const [pdfLoadingId, setPdfLoadingId] = useState("");
+  const [recipientLoadingId, setRecipientLoadingId] = useState("");
+  const [recipientLoadedId, setRecipientLoadedId] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [itemsError, setItemsError] = useState("");
@@ -138,6 +150,9 @@ export function CreateInvoiceClient({
   const [whatsapp, setWhatsapp] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
+  const [transferBankName, setTransferBankName] = useState("");
+  const [transferAccountNumber, setTransferAccountNumber] = useState("");
+  const [transferAccountHolder, setTransferAccountHolder] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(today);
   const [dueDate, setDueDate] = useState(plusDays(today, 7));
   const [notes, setNotes] = useState("");
@@ -211,6 +226,9 @@ export function CreateInvoiceClient({
       setWhatsapp(payload.data[0]?.whatsapp || "");
       setEmail(payload.data[0]?.email || "");
       setAddress(payload.data[0]?.address || "");
+      setTransferBankName("");
+      setTransferAccountNumber("");
+      setTransferAccountHolder("");
     } catch (cause) {
       setItems([]);
       setItemsError(cause instanceof Error
@@ -260,6 +278,9 @@ export function CreateInvoiceClient({
       whatsapp: whatsapp || null,
       email: email || null,
       address: address || null,
+      transferBankName: transferBankName || null,
+      transferAccountNumber: transferAccountNumber || null,
+      transferAccountHolder: transferAccountHolder || null,
       invoiceDate,
       dueDate,
       periodStart: startDate,
@@ -352,6 +373,9 @@ export function CreateInvoiceClient({
       setWhatsapp(invoice.whatsappSnapshot || "");
       setEmail(invoice.emailSnapshot || "");
       setAddress(invoice.addressSnapshot || "");
+      setTransferBankName(invoice.transferBankName || "");
+      setTransferAccountNumber(invoice.transferAccountNumber || "");
+      setTransferAccountHolder(invoice.transferAccountHolder || "");
       setInvoiceDate(isoDate(invoice.invoiceDate));
       setDueDate(isoDate(invoice.dueDate));
       setNotes(invoice.notes || "");
@@ -366,6 +390,9 @@ export function CreateInvoiceClient({
       setWhatsapp(invoice.whatsappSnapshot || "");
       setEmail(invoice.emailSnapshot || "");
       setAddress(invoice.addressSnapshot || "");
+      setTransferBankName(invoice.transferBankName || "");
+      setTransferAccountNumber(invoice.transferAccountNumber || "");
+      setTransferAccountHolder(invoice.transferAccountHolder || "");
       setInvoiceDate(isoDate(invoice.invoiceDate));
       setDueDate(isoDate(invoice.dueDate));
       setNotes(invoice.notes || "");
@@ -387,6 +414,54 @@ export function CreateInvoiceClient({
     } finally {
       setPdfLoadingId("");
     }
+  }
+
+  async function showRecipientDetail(invoice: Invoice) {
+    if (recipientLoadingId || invoice.status !== "DRAFT") return;
+    setRecipientLoadingId(invoice.id);
+    setRecipientLoadedId("");
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/finance/invoices/${invoice.id}/recipient-detail`,
+        { cache: "no-store" },
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(invoiceRecipientDetailErrorMessage(result.error?.code));
+      }
+      setCurrentInvoice((current) => current?.id === invoice.id
+        ? { ...current, ...result.data }
+        : current);
+      setRecipientLoadedId(invoice.id);
+      setNotice("Detail penerima ditampilkan.");
+      await loadInvoices();
+    } catch (cause) {
+      setError(cause instanceof Error
+        ? cause.message
+        : "Gagal mengambil detail penerima.");
+    } finally {
+      setRecipientLoadingId("");
+    }
+  }
+
+  function chatRecipient(invoice: Invoice) {
+    const message = buildRecipientWhatsappMessage({
+      recipientName: invoice.recipientName,
+      outletName: invoice.outlet?.name,
+      invoiceNumber: invoice.invoiceNumber,
+      formattedTotal: money(invoice.grandTotal),
+      formattedDueDate: invoice.dueDate ? displayDate(invoice.dueDate) : null,
+    });
+    const url = buildRecipientWhatsappUrl({
+      phone: invoice.recipientPhone,
+      message,
+    });
+    if (!url) {
+      setError("Tampilkan detail penerima terlebih dahulu.");
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   async function prepareWhatsapp(invoice: Invoice) {
@@ -487,6 +562,18 @@ export function CreateInvoiceClient({
             <textarea aria-label="Alamat" placeholder="Alamat penagihan" value={address}
               onChange={(event) => setAddress(event.target.value)}
               className={`${nextgenControlClass} md:col-span-2`}/>
+            <input aria-label="Nama Bank" placeholder="Nama bank customer (opsional)"
+              value={transferBankName}
+              onChange={(event) => setTransferBankName(event.target.value)}
+              className={nextgenControlClass}/>
+            <input aria-label="Nomor Rekening" placeholder="Nomor rekening customer (opsional)"
+              value={transferAccountNumber}
+              onChange={(event) => setTransferAccountNumber(event.target.value)}
+              className={nextgenControlClass}/>
+            <input aria-label="Atas Nama Rekening" placeholder="Atas nama rekening (opsional)"
+              value={transferAccountHolder}
+              onChange={(event) => setTransferAccountHolder(event.target.value)}
+              className={nextgenControlClass}/>
             <input aria-label="Tanggal Invoice" type="date" value={invoiceDate}
               onChange={(event) => setInvoiceDate(event.target.value)} className={nextgenControlClass}/>
             <input aria-label="Tanggal Jatuh Tempo" type="date" value={dueDate}
@@ -495,6 +582,48 @@ export function CreateInvoiceClient({
               onChange={(event) => setNotes(event.target.value)}
               className={`${nextgenControlClass} md:col-span-2`}/>
           </div>
+
+          {currentInvoice?.id === draftId && <AppCard className="rounded-2xl border border-slate-200 p-4 shadow-sm">
+            <div className="mb-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+                Detail Penerima
+              </p>
+              <p className="mt-1 text-sm text-slate-500">
+                Detail diambil dari resi pertama yang valid pada invoice.
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div><p className="text-xs text-slate-500">Nama Penerima</p>
+                <p className="font-semibold">{currentInvoice.recipientName || "—"}</p></div>
+              <div><p className="text-xs text-slate-500">Nomor WhatsApp</p>
+                <p className="font-semibold">{currentInvoice.recipientPhone || "—"}</p></div>
+              <div><p className="text-xs text-slate-500">Kota/Kabupaten</p>
+                <p className="font-semibold">{currentInvoice.recipientCity || "—"}</p></div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button type="button"
+                disabled={recipientLoadingId === currentInvoice.id}
+                onClick={() => void showRecipientDetail(currentInvoice)}
+                className={nextgenNeutralButtonClass}>
+                {recipientLoadingId === currentInvoice.id &&
+                  <LoaderCircle className="animate-spin" size={17}/>}
+                {recipientLoadingId === currentInvoice.id
+                  ? "Mengambil detail..."
+                  : recipientLoadedId === currentInvoice.id
+                    ? "Detail penerima ditampilkan"
+                    : "Tampilkan Detail Penerima"}
+              </button>
+              <button type="button"
+                disabled={!currentInvoice.recipientPhone}
+                title={!currentInvoice.recipientPhone
+                  ? "Tampilkan detail penerima terlebih dahulu"
+                  : "Chat WA Customer"}
+                onClick={() => chatRecipient(currentInvoice)}
+                className={nextgenButtonClass}>
+                <MessageCircle size={17}/>Chat WA Customer
+              </button>
+            </div>
+          </AppCard>}
 
           <div>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -577,7 +706,7 @@ export function CreateInvoiceClient({
               disabled={!draftCanBeSaved}
               onClick={() => void saveDraft()} className={nextgenNeutralButtonClass}>
               {saving ? <LoaderCircle className="animate-spin" size={17}/> : <Save size={17}/>}
-              {saving ? "Menyimpan..." : draftId ? "Perbarui Draft" : "Simpan Draft"}
+              {saving ? "Menyimpan..." : draftId ? "Simpan Perubahan" : "Simpan Draft"}
             </button>
             {canIssue && draftId && <button type="button" disabled={issuing}
               onClick={() => void issueCurrentInvoice()} className={nextgenButtonClass}>
@@ -652,18 +781,18 @@ export function CreateInvoiceClient({
     {currentInvoice && currentInvoice.status !== "DRAFT" &&
       <InvoicePreview invoice={currentInvoice} onClose={() => setCurrentInvoice(null)}
         onPdf={canExport ? exportPdf : undefined}
-        onWhatsapp={canWhatsapp ? prepareWhatsapp : undefined}
+        onChat={canWhatsapp ? chatRecipient : undefined}
         loadingPdf={pdfLoadingId === currentInvoice.id}/>}
   </div>;
 }
 
 function InvoicePreview({
-  invoice, onClose, onPdf, onWhatsapp, loadingPdf,
+  invoice, onClose, onPdf, onChat, loadingPdf,
 }: {
   invoice: Invoice;
   onClose: () => void;
   onPdf?: (invoice: Invoice) => Promise<void>;
-  onWhatsapp?: (invoice: Invoice) => Promise<void>;
+  onChat?: (invoice: Invoice) => void;
   loadingPdf: boolean;
 }) {
   return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
@@ -675,14 +804,42 @@ function InvoicePreview({
       </div>
       <div className="space-y-5 p-5">
         <div className="grid gap-4 md:grid-cols-2">
-          <AppCard className="p-4"><p className="text-xs text-slate-500">Ditagihkan kepada</p>
-            <p className="font-bold">{invoice.customerNameSnapshot}</p>
-            <p className="text-sm text-slate-600">{invoice.companyNameSnapshot || ""}</p>
-            <p className="text-sm text-slate-600">{invoice.addressSnapshot || "Alamat belum diisi"}</p></AppCard>
+          <AppCard className="rounded-2xl border border-slate-200 p-4 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+              Detail Penerima
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3 md:grid-cols-1 lg:grid-cols-3">
+              <div><p className="text-xs text-slate-500">Nama Penerima</p>
+                <p className="font-semibold">{invoice.recipientName || "—"}</p></div>
+              <div><p className="text-xs text-slate-500">Nomor WhatsApp</p>
+                <p className="font-semibold">{invoice.recipientPhone || "—"}</p></div>
+              <div><p className="text-xs text-slate-500">Kota/Kabupaten</p>
+                <p className="font-semibold">{invoice.recipientCity || "—"}</p></div>
+            </div>
+          </AppCard>
           <AppCard className="p-4 text-sm"><p>Tanggal: {displayDate(invoice.invoiceDate)}</p>
             <p>Jatuh tempo: {displayDate(invoice.dueDate)}</p>
             <p>Periode: {displayDate(invoice.periodStart)} – {displayDate(invoice.periodEnd)}</p></AppCard>
         </div>
+        <AppCard className="rounded-2xl border border-slate-200 p-4 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+            Informasi Customer
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              ["Nama Perusahaan", invoice.companyNameSnapshot],
+              ["Email", invoice.emailSnapshot],
+              ["Alamat", invoice.addressSnapshot],
+              ["Nama Bank", invoice.transferBankName],
+              ["Nomor Rekening", invoice.transferAccountNumber],
+              ["Atas Nama", invoice.transferAccountHolder],
+              ["Catatan", invoice.notes],
+            ].map(([label, value]) => <div key={label}>
+              <p className="text-xs text-slate-500">{label}</p>
+              <p className="font-medium">{value || "—"}</p>
+            </div>)}
+          </div>
+        </AppCard>
         <div className="overflow-x-auto"><table className="w-full min-w-[800px] text-left text-sm">
           <thead className="bg-slate-50"><tr>{["No", "Tanggal", "No Resi", "Staff", "Pengirim", "Berat", "Ongkir", "Diskon", "Final"]
             .map((label) => <th key={label} className="px-3 py-2">{label}</th>)}</tr></thead>
@@ -707,9 +864,15 @@ function InvoicePreview({
           {loadingPdf ? <LoaderCircle className="animate-spin" size={17}/> : <FileCheck2 size={17}/>}
           {loadingPdf ? "Membuat PDF..." : "Export PDF"}
         </button>}
-        {onWhatsapp && ["ISSUED", "SENT"].includes(invoice.status) &&
-          <button type="button" onClick={() => void onWhatsapp(invoice)}
-            className={nextgenButtonClass}><MessageCircle size={17}/>Kirim WhatsApp</button>}
+        {onChat && <button type="button"
+          disabled={!invoice.recipientPhone}
+          title={!invoice.recipientPhone
+            ? "Tampilkan detail penerima terlebih dahulu"
+            : "Chat WA Customer"}
+          onClick={() => onChat(invoice)}
+          className={nextgenButtonClass}>
+          <MessageCircle size={17}/>Chat WA Customer
+        </button>}
       </div>
     </ModalCard>
   </div>;

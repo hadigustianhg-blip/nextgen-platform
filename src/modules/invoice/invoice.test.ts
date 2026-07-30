@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const db = vi.hoisted(() => ({
   masterPickup: { findMany: vi.fn() },
-  invoice: { findFirst: vi.fn() },
+  invoice: { findFirst: vi.fn(), updateMany: vi.fn() },
   outletBankAccount: { findMany: vi.fn() },
   $transaction: vi.fn(),
 }));
@@ -43,12 +43,176 @@ import {
 } from "./invoice.authorization";
 import { invoiceDraftSchema, invoiceRangeSchema } from "./invoice.validation";
 import { createInvoicePdf, invoicePdfFilename } from "./invoice.pdf";
+import {
+  buildSenderDetailUrl,
+  fetchInvoiceRecipientDetail,
+  mapMiddlewareRecipient,
+  representativeInvoiceWaybill,
+} from "./invoice-recipient.service";
 
 const scope = { tenantId: "tenant-1", outletId: "outlet-1" };
 const session = (roles: string[]) => ({
   sessionId: "s", tenantId: "tenant-1", tenantName: "Tenant",
   userId: "user-1", userName: "User", email: "user@example.test",
   outletId: "outlet-1", outletCode: "OUT001", roles,
+});
+
+describe("Invoice recipient detail", () => {
+  const invoice = (overrides: Record<string, unknown> = {}) => ({
+    id: "invoice-1",
+    tenantId: scope.tenantId,
+    outletId: scope.outletId,
+    status: "DRAFT",
+    items: [
+      { waybillNumber: "" },
+      { waybillNumber: "201680658475" },
+      { waybillNumber: "201680658476" },
+    ],
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    db.invoice.findFirst.mockResolvedValue(invoice());
+    db.invoice.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("chooses the first valid ordered invoice waybill", () => {
+    expect(representativeInvoiceWaybill(invoice().items)).toBe("201680658475");
+    expect(representativeInvoiceWaybill([
+      { waybillNumber: "ABC" },
+      { waybillNumber: null },
+    ])).toBeNull();
+  });
+
+  it("uses the configured environment base and encodes the waybill", () => {
+    expect(buildSenderDetailUrl(
+      "https://middleware.example.test/",
+      "201680658475",
+    )).toBe(
+      "https://middleware.example.test/jfs-sender-detail?waybillNo=201680658475",
+    );
+    expect(buildSenderDetailUrl(
+      "https://middleware.example.test",
+      "201680658475 test",
+    )).toContain("waybillNo=201680658475%20test");
+  });
+
+  it("maps middleware fields, stores a scoped snapshot and returns no raw data", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      data: {
+        senderName: "  Recipient Test ",
+        senderMobilePhone: " 087777376950 ",
+        senderCityName: " Kab. Test ",
+        internalId: "DO_NOT_EXPOSE",
+      },
+    }), { status: 200 }));
+    const result = await fetchInvoiceRecipientDetail(scope, "invoice-1", {
+      fetcher,
+      baseUrl: "https://middleware.example.test",
+    });
+
+    expect(db.invoice.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "invoice-1", ...scope },
+    }));
+    expect(db.invoice.updateMany).toHaveBeenCalledWith({
+      where: { id: "invoice-1", ...scope, status: "DRAFT" },
+      data: {
+        recipientName: "Recipient Test",
+        recipientPhone: "087777376950",
+        recipientCity: "Kab. Test",
+      },
+    });
+    expect(result).toEqual({
+      waybillNo: "201680658475",
+      recipientName: "Recipient Test",
+      recipientPhone: "087777376950",
+      recipientCity: "Kab. Test",
+    });
+    expect(JSON.stringify(result)).not.toContain("DO_NOT_EXPOSE");
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("keeps missing or non-string middleware fields null", () => {
+    expect(mapMiddlewareRecipient({
+      senderName: "",
+      senderMobilePhone: null,
+      senderCityName: 123,
+    })).toEqual({
+      recipientName: null,
+      recipientPhone: null,
+      recipientCity: null,
+    });
+  });
+
+  it("protects missing, cross-scope, waybill-less and read-only invoices", async () => {
+    db.invoice.findFirst.mockResolvedValueOnce(null);
+    await expect(fetchInvoiceRecipientDetail(scope, "missing", {
+      baseUrl: "https://middleware.example.test",
+    })).rejects.toMatchObject({ code: "INVOICE_NOT_FOUND", status: 404 });
+
+    db.invoice.findFirst.mockResolvedValueOnce(invoice({
+      items: [{ waybillNumber: "INVALID" }],
+    }));
+    await expect(fetchInvoiceRecipientDetail(scope, "invoice-1", {
+      baseUrl: "https://middleware.example.test",
+    })).rejects.toMatchObject({
+      code: "INVOICE_WAYBILL_NOT_AVAILABLE",
+      status: 422,
+    });
+
+    db.invoice.findFirst.mockResolvedValueOnce(invoice({ status: "ISSUED" }));
+    await expect(fetchInvoiceRecipientDetail(scope, "invoice-1", {
+      baseUrl: "https://middleware.example.test",
+    })).rejects.toMatchObject({ code: "INVOICE_LOCKED", status: 409 });
+  });
+
+  it.each([
+    [404, "SENDER_DETAIL_NOT_FOUND", 404],
+    [502, "JFS_AUTH_EXPIRED", 502],
+    [502, "JFS_UPSTREAM_ERROR", 502],
+    [504, "JFS_UPSTREAM_TIMEOUT", 504],
+  ])("maps middleware %s %s safely", async (status, code, expectedStatus) => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: false,
+      error: { code, message: "raw middleware detail" },
+    }), { status }));
+    await expect(fetchInvoiceRecipientDetail(scope, "invoice-1", {
+      fetcher,
+      baseUrl: "https://middleware.example.test",
+    })).rejects.toMatchObject({ code, status: expectedStatus });
+    expect(db.invoice.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("maps timeout, invalid JSON, missing environment and update races safely", async () => {
+    const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
+    await expect(fetchInvoiceRecipientDetail(scope, "invoice-1", {
+      fetcher: vi.fn().mockRejectedValue(timeout),
+      baseUrl: "https://middleware.example.test",
+    })).rejects.toMatchObject({ code: "JFS_UPSTREAM_TIMEOUT", status: 504 });
+
+    await expect(fetchInvoiceRecipientDetail(scope, "invoice-1", {
+      fetcher: vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })),
+      baseUrl: "https://middleware.example.test",
+    })).rejects.toMatchObject({ code: "JFS_UPSTREAM_ERROR", status: 502 });
+
+    await expect(fetchInvoiceRecipientDetail(scope, "invoice-1", {
+      baseUrl: "",
+    })).rejects.toMatchObject({
+      code: "JFS_MIDDLEWARE_NOT_CONFIGURED",
+      status: 500,
+    });
+
+    db.invoice.updateMany.mockResolvedValueOnce({ count: 0 });
+    await expect(fetchInvoiceRecipientDetail(scope, "invoice-1", {
+      fetcher: vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        success: true,
+        data: { senderName: "Recipient" },
+      }), { status: 200 })),
+      baseUrl: "https://middleware.example.test",
+    })).rejects.toMatchObject({ code: "INVOICE_LOCKED", status: 409 });
+  });
 });
 const decimal = (value: string | number) => new Prisma.Decimal(value);
 
@@ -396,6 +560,41 @@ describe("Invoice persistence and PDF contracts", () => {
     expect(service).toContain("INVOICE_SOURCE_CHANGED");
   });
 
+  it("stores optional manual customer fields as trimmed nullable snapshots", async () => {
+    const service = await readFile(new URL("./invoice.service.ts", import.meta.url), "utf8");
+    for (const field of [
+      "companyNameSnapshot",
+      "emailSnapshot",
+      "addressSnapshot",
+      "transferBankName",
+      "transferAccountNumber",
+      "transferAccountHolder",
+      "notes",
+    ]) expect(service).toContain(field);
+    expect(invoiceDraftSchema.parse({
+      customerKey: "name:test",
+      customerName: "Customer",
+      companyName: "  Company Test  ",
+      email: "",
+      address: "   ",
+      transferBankName: "  Bank Test ",
+      transferAccountNumber: "   ",
+      transferAccountHolder: " Holder ",
+      invoiceDate: "2026-07-30",
+      dueDate: "2026-08-06",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-30",
+      itemIds: ["11111111-1111-4111-8111-111111111111"],
+    })).toMatchObject({
+      companyName: "Company Test",
+      email: "",
+      address: "",
+      transferBankName: "Bank Test",
+      transferAccountNumber: "",
+      transferAccountHolder: "Holder",
+    });
+  });
+
   it("creates a structured A4 PDF with invoice rows and active bank accounts", async () => {
     const invoice = {
       status: "ISSUED",
@@ -502,6 +701,9 @@ describe("Invoice persistence and PDF contracts", () => {
     expect(source).toContain("invoice.outlet.name");
     expect(source).toContain("invoice.outlet.code");
     expect(source).toContain("invoice.tenant.name");
+    expect(source).toContain("invoice.recipientName");
+    expect(source).toContain("invoice.recipientPhone");
+    expect(source).toContain("invoice.recipientCity");
     expect(source).not.toMatch(/NEXTGEN|J&T CARGO SUM001A|PT HUTAMA DAYA LOGISTIK/i);
     expect(source).not.toMatch(/registerFont|readFileSync|\/ROOT\/|node_modules\/pdfkit\/js\/data/);
     const fontNames = [...source.matchAll(/\.font\("([^"]+)"\)/g)]

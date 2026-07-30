@@ -4,6 +4,8 @@ import {
   buildInvoiceSourceItemsQuery, canSaveInvoiceDraft, formatRupiahFromCents,
   invoiceDraftErrorMessage, moneyToCents, normalizeSellerLabel, sumMoney,
   invoicePdfErrorMessage, invoiceWhatsappDisabledReason, selectableInvoiceItems,
+  buildRecipientWhatsappMessage, buildRecipientWhatsappUrl,
+  invoiceRecipientDetailErrorMessage, normalizeRecipientWhatsapp,
 } from "./invoice.view";
 
 describe("Create Invoice interface", () => {
@@ -91,7 +93,7 @@ describe("Create Invoice interface", () => {
   it("supports save draft, update, issue, preview and void actions", async () => {
     const source = await readFile(new URL("./create-invoice-client.tsx", import.meta.url), "utf8");
     for (const text of [
-      "Simpan Draft", "Perbarui Draft", "Finalisasi Invoice",
+      "Simpan Draft", "Simpan Perubahan", "Finalisasi Invoice",
       "Preview Invoice", "Void Invoice",
     ]) expect(source).toContain(text);
     expect(source).toContain('method: draftId ? "PATCH" : "POST"');
@@ -178,5 +180,56 @@ describe("Create Invoice interface", () => {
     expect(ui).not.toMatch(/tenantId|outletId/);
     expect(sellerRoute).toContain("invoiceScope(session)");
     expect(invoiceRoute).toContain("invoiceScope(session)");
+  });
+
+  it("normalizes recipient WhatsApp numbers without changing other country prefixes", () => {
+    expect(normalizeRecipientWhatsapp("0877 7737-6950")).toBe("6287777376950");
+    expect(normalizeRecipientWhatsapp("+62 (877) 7737-6950")).toBe("6287777376950");
+    expect(normalizeRecipientWhatsapp("62 877 7737 6950")).toBe("6287777376950");
+    expect(normalizeRecipientWhatsapp("+1 202-555-0100")).toBe("12025550100");
+    expect(normalizeRecipientWhatsapp("")).toBeNull();
+  });
+
+  it("builds a safe tenant-branded WhatsApp message and encoded link", () => {
+    const message = buildRecipientWhatsappMessage({
+      recipientName: null,
+      outletName: "Outlet Bandung",
+      invoiceNumber: "INV/OUT/2026/07/0001",
+      formattedTotal: "Rp125.000",
+      formattedDueDate: null,
+    });
+    expect(message).toContain("Halo Bapak/Ibu,");
+    expect(message).toContain("Kami dari Outlet Bandung");
+    expect(message).not.toContain("undefined");
+    expect(message).not.toContain("Jatuh Tempo:");
+    expect(message).not.toContain("NEXTGEN");
+    const url = buildRecipientWhatsappUrl({
+      phone: "0812-3456-7890",
+      message,
+    });
+    expect(url).toBe(
+      `https://wa.me/6281234567890?text=${encodeURIComponent(message)}`,
+    );
+    expect(buildRecipientWhatsappUrl({ phone: null, message })).toBeNull();
+  });
+
+  it("renders recipient actions, loading states and manual customer fields", async () => {
+    const source = await readFile(new URL("./create-invoice-client.tsx", import.meta.url), "utf8");
+    for (const text of [
+      "Tampilkan Detail Penerima",
+      "Mengambil detail...",
+      "Detail penerima ditampilkan",
+      "Chat WA Customer",
+      "Nama Perusahaan",
+      "Nama Bank",
+      "Nomor Rekening",
+      "Atas Nama Rekening",
+    ]) expect(source).toContain(text);
+    expect(source).toContain("/recipient-detail");
+    expect(source).toContain("disabled={!currentInvoice.recipientPhone}");
+    expect(source).not.toContain("jfs-middleware-v2-production.up.railway.app");
+    expect(invoiceRecipientDetailErrorMessage("JFS_AUTH_EXPIRED")).toContain(
+      "Perbarui token middleware",
+    );
   });
 });

@@ -119,3 +119,62 @@ export function invoiceWhatsappErrorMessage(
   return (code && whatsappErrors[code]) || serverMessage ||
     "Penagihan WhatsApp tidak dapat disiapkan.";
 }
+
+export function normalizeRecipientWhatsapp(value: string | null | undefined) {
+  const raw = (value ?? "").trim();
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return null;
+  if (raw.startsWith("+62")) return digits;
+  if (digits.startsWith("0")) return `62${digits.slice(1)}`;
+  return digits;
+}
+
+export function buildRecipientWhatsappMessage(input: {
+  recipientName?: string | null;
+  outletName?: string | null;
+  invoiceNumber?: string | null;
+  formattedTotal: string;
+  formattedDueDate?: string | null;
+}) {
+  const recipientName = input.recipientName?.trim();
+  const greeting = recipientName ? `Bapak/Ibu ${recipientName}` : "Bapak/Ibu";
+  const outlet = input.outletName?.trim() || "Outlet";
+  return [
+    `Halo ${greeting},`,
+    "",
+    `Kami dari ${outlet} ingin menyampaikan invoice:`,
+    "",
+    `Nomor Invoice: ${input.invoiceNumber?.trim() || "DRAFT"}`,
+    `Total Tagihan: ${input.formattedTotal}`,
+    ...(input.formattedDueDate?.trim()
+      ? [`Jatuh Tempo: ${input.formattedDueDate.trim()}`]
+      : []),
+    "",
+    "Silakan menghubungi kami apabila memerlukan informasi tambahan.",
+    "",
+    "Terima kasih.",
+  ].join("\n");
+}
+
+export function buildRecipientWhatsappUrl(input: {
+  phone?: string | null;
+  message: string;
+}) {
+  const phone = normalizeRecipientWhatsapp(input.phone);
+  return phone
+    ? `https://wa.me/${phone}?text=${encodeURIComponent(input.message)}`
+    : null;
+}
+
+const recipientDetailErrors: Record<string, string> = {
+  INVALID_WAYBILL_NO: "Nomor resi invoice tidak valid.",
+  INVOICE_WAYBILL_NOT_AVAILABLE: "Nomor resi invoice tidak tersedia.",
+  SENDER_DETAIL_NOT_FOUND: "Detail penerima tidak ditemukan di JFS.",
+  JFS_AUTH_EXPIRED: "Sesi JFS telah berakhir. Perbarui token middleware.",
+  JFS_UPSTREAM_TIMEOUT: "JFS terlalu lama merespons. Silakan coba kembali.",
+};
+
+export function invoiceRecipientDetailErrorMessage(code?: string) {
+  return (code && recipientDetailErrors[code]) ||
+    "Gagal mengambil detail penerima.";
+}

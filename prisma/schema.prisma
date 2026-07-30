@@ -911,36 +911,42 @@ model CashMovement {
 }
 
 model Invoice {
-  id                   String        @id @default(uuid()) @db.Uuid
-  tenantId             String        @db.Uuid
-  outletId             String        @db.Uuid
-  invoiceNumber        String?
-  customerKey          String
-  customerNameSnapshot String
-  companyNameSnapshot  String?
-  whatsappSnapshot     String?
-  emailSnapshot        String?
-  addressSnapshot      String?
-  invoiceDate          DateTime      @db.Date
-  dueDate              DateTime      @db.Date
-  periodStart          DateTime      @db.Date
-  periodEnd            DateTime      @db.Date
-  subtotal             Decimal       @db.Decimal(18, 2)
-  discountTotal        Decimal       @db.Decimal(18, 2)
-  grandTotal           Decimal       @db.Decimal(18, 2)
-  status               InvoiceStatus @default(DRAFT)
-  notes                String?
-  issuedAt             DateTime?     @db.Timestamptz(3)
-  sentAt               DateTime?     @db.Timestamptz(3)
-  paidAt               DateTime?     @db.Timestamptz(3)
-  voidedAt             DateTime?     @db.Timestamptz(3)
-  createdByUserId      String        @db.Uuid
-  createdAt            DateTime      @default(now()) @db.Timestamptz(3)
-  updatedAt            DateTime      @updatedAt @db.Timestamptz(3)
-  tenant               Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  outlet               Outlet        @relation(fields: [outletId], references: [id], onDelete: Restrict)
-  createdBy            User          @relation("InvoiceCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  items                InvoiceItem[]
+  id                    String        @id @default(uuid()) @db.Uuid
+  tenantId              String        @db.Uuid
+  outletId              String        @db.Uuid
+  invoiceNumber         String?
+  customerKey           String
+  customerNameSnapshot  String
+  companyNameSnapshot   String?
+  whatsappSnapshot      String?
+  emailSnapshot         String?
+  addressSnapshot       String?
+  recipientName         String?
+  recipientPhone        String?
+  recipientCity         String?
+  transferBankName      String?
+  transferAccountNumber String?
+  transferAccountHolder String?
+  invoiceDate           DateTime      @db.Date
+  dueDate               DateTime      @db.Date
+  periodStart           DateTime      @db.Date
+  periodEnd             DateTime      @db.Date
+  subtotal              Decimal       @db.Decimal(18, 2)
+  discountTotal         Decimal       @db.Decimal(18, 2)
+  grandTotal            Decimal       @db.Decimal(18, 2)
+  status                InvoiceStatus @default(DRAFT)
+  notes                 String?
+  issuedAt              DateTime?     @db.Timestamptz(3)
+  sentAt                DateTime?     @db.Timestamptz(3)
+  paidAt                DateTime?     @db.Timestamptz(3)
+  voidedAt              DateTime?     @db.Timestamptz(3)
+  createdByUserId       String        @db.Uuid
+  createdAt             DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime      @updatedAt @db.Timestamptz(3)
+  tenant                Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet                Outlet        @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  createdBy             User          @relation("InvoiceCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  items                 InvoiceItem[]
 
   @@unique([tenantId, outletId, invoiceNumber])
   @@index([tenantId, outletId, status, invoiceDate])

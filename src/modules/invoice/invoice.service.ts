@@ -19,6 +19,9 @@ type DraftInput = {
   whatsapp?: string | null;
   email?: string | null;
   address?: string | null;
+  transferBankName?: string | null;
+  transferAccountNumber?: string | null;
+  transferAccountHolder?: string | null;
   invoiceDate: string;
   dueDate: string;
   periodStart: string;
@@ -374,6 +377,9 @@ export async function createInvoiceDraft(context: Context, input: DraftInput) {
             whatsappSnapshot: input.whatsapp || null,
             emailSnapshot: input.email || null,
             addressSnapshot: input.address || null,
+            transferBankName: input.transferBankName || null,
+            transferAccountNumber: input.transferAccountNumber || null,
+            transferAccountHolder: input.transferAccountHolder || null,
             invoiceDate: date(input.invoiceDate),
             dueDate: date(input.dueDate),
             periodStart: date(input.periodStart),
@@ -474,6 +480,9 @@ export async function updateInvoiceDraft(
           whatsappSnapshot: input.whatsapp || null,
           emailSnapshot: input.email || null,
           addressSnapshot: input.address || null,
+          transferBankName: input.transferBankName || null,
+          transferAccountNumber: input.transferAccountNumber || null,
+          transferAccountHolder: input.transferAccountHolder || null,
           invoiceDate: date(input.invoiceDate),
           dueDate: date(input.dueDate),
           periodStart: date(input.periodStart),

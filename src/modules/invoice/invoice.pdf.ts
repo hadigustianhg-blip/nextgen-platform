@@ -9,6 +9,9 @@ type PdfInvoice = {
   whatsappSnapshot?: string | null;
   emailSnapshot?: string | null;
   addressSnapshot: string | null;
+  recipientName?: string | null;
+  recipientPhone?: string | null;
+  recipientCity?: string | null;
   invoiceDate: Date;
   dueDate: Date;
   periodStart: Date;
@@ -75,6 +78,20 @@ const dateText = (value: Date) =>
 
 const cleanText = (value: string | null | undefined, fallback = "—") =>
   value?.normalize("NFKC").trim() || fallback;
+const tenantIdentity = (value: string | null | undefined) => {
+  const normalized = value?.normalize("NFKC").trim() || "";
+  const platformNames = [
+    ["next", "gen"].join(""),
+    [["next", "gen"].join(""), "demo"].join(" "),
+    ["operations", "system"].join(" "),
+  ];
+  return platformNames.some((name) =>
+    name.localeCompare(normalized, "en", { sensitivity: "base" }) === 0)
+    ? ""
+    : normalized;
+};
+const outletIdentity = (invoice: PdfInvoice) =>
+  cleanText(invoice.outlet.name, cleanText(invoice.outlet.code, "Outlet"));
 
 export function invoicePdfFilename(invoice: PdfInvoice) {
   const clean = (value: string) => value
@@ -247,7 +264,8 @@ function drawPaymentAccounts(
   bankAccounts: BankAccount[],
 ) {
   const accountHeight = bankAccounts.length ? bankAccounts.length * 22 : 20;
-  const notesHeight = invoice.whatsappSnapshot ? 38 : 26;
+  const paymentPhone = invoice.recipientPhone || invoice.whatsappSnapshot;
+  const notesHeight = paymentPhone ? 38 : 26;
   ensurePageSpace(doc, invoice, 42 + accountHeight + notesHeight);
   const startY = doc.y;
   doc.font("Helvetica-Bold").fontSize(9).fillColor(PRIMARY)
@@ -283,9 +301,9 @@ function drawPaymentAccounts(
       doc.y + 5,
       { width: CONTENT_WIDTH },
     );
-  if (invoice.whatsappSnapshot) {
+  if (paymentPhone) {
     doc.text(
-      `Setelah pembayaran dilakukan, mohon mengirimkan bukti transfer ke nomor WhatsApp ${invoice.whatsappSnapshot}.`,
+      `Setelah pembayaran dilakukan, mohon mengirimkan bukti transfer ke nomor WhatsApp ${paymentPhone}.`,
       PAGE.margin,
       doc.y + 3,
       { width: CONTENT_WIDTH },
@@ -308,7 +326,10 @@ function drawFooter(
     });
   doc.font("Helvetica").fontSize(7).fillColor(MUTED)
     .text(
-      `${cleanText(invoice.outlet.name)} (${cleanText(invoice.outlet.code)}) · ${cleanText(invoice.tenant.name)}`,
+      [
+        `${outletIdentity(invoice)} (${cleanText(invoice.outlet.code, "Outlet")})`,
+        tenantIdentity(invoice.tenant.name),
+      ].filter(Boolean).join(" · "),
       PAGE.margin,
       y + 19,
       { width: 350, lineBreak: false, ellipsis: true },
@@ -332,17 +353,20 @@ function drawInvoiceHeader(doc: PDFKit.PDFDocument, invoice: PdfInvoice) {
     .text("Dokumen tagihan elektronik", PAGE.margin, top + 34, { width: 225 });
 
   doc.font("Helvetica-Bold").fontSize(13).fillColor(DARK)
-    .text(cleanText(invoice.outlet.name), 318, top, {
+    .text(outletIdentity(invoice), 318, top, {
       width: 241, align: "right",
     });
   doc.font("Helvetica-Bold").fontSize(9).fillColor(PRIMARY)
     .text(cleanText(invoice.outlet.code), 318, doc.y + 2, {
       width: 241, align: "right",
     });
-  doc.font("Helvetica").fontSize(8).fillColor(MUTED)
-    .text(cleanText(invoice.tenant.name), 318, doc.y + 2, {
-      width: 241, align: "right",
-    });
+  const tenantName = tenantIdentity(invoice.tenant.name);
+  if (tenantName) {
+    doc.font("Helvetica").fontSize(8).fillColor(MUTED)
+      .text(tenantName, 318, doc.y + 2, {
+        width: 241, align: "right",
+      });
+  }
   doc.moveTo(PAGE.margin, top + 68).lineTo(PAGE.width - PAGE.margin, top + 68)
     .strokeColor(PRIMARY).lineWidth(2).stroke();
 
@@ -350,13 +374,19 @@ function drawInvoiceHeader(doc: PDFKit.PDFDocument, invoice: PdfInvoice) {
   doc.font("Helvetica-Bold").fontSize(8).fillColor(PRIMARY)
     .text("DITAGIHKAN KEPADA", PAGE.margin, customerY, { width: 245 });
   doc.font("Helvetica-Bold").fontSize(11).fillColor(DARK)
-    .text(cleanText(invoice.customerNameSnapshot), PAGE.margin, customerY + 16, {
+    .text(
+      cleanText(invoice.recipientName || invoice.customerNameSnapshot),
+      PAGE.margin,
+      customerY + 16,
+      {
       width: 245,
-    });
+      },
+    );
   const customerLines = [
     invoice.companyNameSnapshot,
     invoice.addressSnapshot,
-    invoice.whatsappSnapshot ? `WhatsApp: ${invoice.whatsappSnapshot}` : null,
+    invoice.recipientCity,
+    invoice.recipientPhone ? `WA: ${invoice.recipientPhone}` : null,
     invoice.emailSnapshot ? `Email: ${invoice.emailSnapshot}` : null,
   ].filter((value): value is string => Boolean(value?.trim()));
   doc.font("Helvetica").fontSize(8).fillColor(MUTED)
