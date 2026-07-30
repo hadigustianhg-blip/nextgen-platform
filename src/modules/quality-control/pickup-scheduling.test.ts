@@ -42,6 +42,8 @@ import {
 import {
   groupPickupSchedules,
   listPickupScheduling,
+  normalizeMaskedAddress,
+  normalizeMaskedPhone,
   pickupAgeLabel,
   pickupGroupingKey,
 } from "./pickup-scheduling.service";
@@ -130,7 +132,7 @@ describe("Pickup Scheduling date range", () => {
     expect(pickupAgeLabel(businessDate, "2026-07-30")).toBe(label);
   });
 
-  it("reads an inclusive range and groups the same customer across dates", async () => {
+  it("reads an inclusive range and groups the same masked contact across dates", async () => {
     memory.rows = [
       row(1, { businessDate: new Date("2026-07-27T00:00:00.000Z") }),
       row(2, { businessDate: new Date("2026-07-30T00:00:00.000Z") }),
@@ -152,24 +154,93 @@ describe("Pickup Scheduling date range", () => {
       },
     });
   });
+
+  it("calculates total groups from both masked phone and address", async () => {
+    memory.rows = [
+      row(1),
+      row(2, { customerId: "customer-1", pickupAddressMasked: "Different ***" }),
+    ];
+    const result = await listPickupScheduling({
+      tenantId: "tenant", outletId: "outlet",
+      startDate: "2026-07-27", endDate: "2026-07-30",
+      waybill: "", senderName: "", sourcePlatform: "", page: 1, pageSize: 20,
+    });
+    expect(result.summary).toMatchObject({ totalWaybills: 2, totalGroups: 2 });
+  });
 });
 
 describe("Pickup Scheduling grouping", () => {
-  it("groups multiple waybills for the same stable customer ID and preserves order", () => {
+  it("groups equal masked phone and address and preserves order", () => {
     const groups = groupPickupSchedules([row(1), row(2)]);
     expect(groups).toHaveLength(1);
     expect(groups[0].orders.map((order) => order.waybill)).toEqual(["WB-1", "WB-2"]);
     expect(groups[0].representativeOrderId).toBe("order-1");
   });
 
-  it("prioritizes customer ID, then masked phone, identity, and safe name fallback", () => {
-    expect(pickupGroupingKey(row(1))).toBe("customer:customer-1");
-    expect(pickupGroupingKey(row(1, { customerId: null }))).toBe("phone:0812****");
-    expect(pickupGroupingKey(row(1, { customerId: null, senderPhoneMasked: null })))
-      .toBe("identity:seller a***|jalan ***");
+  it("keeps equal phones with different addresses in separate groups", () => {
+    expect(groupPickupSchedules([
+      row(1), row(2, { pickupAddressMasked: "Alamat lain ***" }),
+    ])).toHaveLength(2);
+  });
+
+  it("keeps equal addresses with different phones in separate groups", () => {
+    expect(groupPickupSchedules([
+      row(1), row(2, { senderPhoneMasked: "0899****" }),
+    ])).toHaveLength(2);
+  });
+
+  it("does not group by equal customer name or customer ID", () => {
+    expect(groupPickupSchedules([
+      row(1),
+      row(2, {
+        customerId: "customer-1",
+        senderNameMasked: "Seller A***",
+        senderPhoneMasked: "0899****",
+        pickupAddressMasked: "Alamat lain ***",
+      }),
+    ])).toHaveLength(2);
+  });
+
+  it.each([
+    { senderPhoneMasked: null },
+    { pickupAddressMasked: null },
+    { senderPhoneMasked: null, pickupAddressMasked: null },
+  ])("does not merge records when a required contact field is missing", (override) => {
+    const groups = groupPickupSchedules([row(1, override), row(2, override)]);
+    expect(groups).toHaveLength(2);
+    expect(groups.every((group) => group.orders.length === 1)).toBe(true);
+  });
+
+  it("normalizes address case, spaces, and line breaks without changing display", () => {
+    const groups = groupPickupSchedules([
+      row(1, { pickupAddressMasked: "Jl. Kebonkol No. 87  RT. 01" }),
+      row(2, { pickupAddressMasked: "  jl. kebonkol no. 87\nrt. 01 " }),
+    ]);
+    expect(normalizeMaskedAddress("  Jl. A\n  RT 01 ")).toBe("jl. a rt 01");
+    expect(groups).toHaveLength(1);
+    expect(groups[0].pickupAddressMasked).toBe("Jl. Kebonkol No. 87  RT. 01");
+  });
+
+  it("normalizes masked phone separators while preserving mask characters", () => {
+    expect(normalizeMaskedPhone(" 62 ****-(27) ")).toBe("62****27");
     expect(pickupGroupingKey(row(1, {
-      customerId: null, senderPhoneMasked: null, pickupAddressMasked: null,
-    }))).toBe("name:seller a***");
+      senderPhoneMasked: "62 **** 27",
+      pickupAddressMasked: "Jalan A",
+    }))).toContain("62****27");
+  });
+
+  it("keeps a single record as one group with one waybill", () => {
+    const groups = groupPickupSchedules([row(1)]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].orders).toHaveLength(1);
+  });
+
+  it("selects the first valid source order as representative", () => {
+    const groups = groupPickupSchedules([
+      row(1, { sourceOrderId: "" }),
+      row(2, { sourceOrderId: "valid-order" }),
+    ]);
+    expect(groups[0].representativeOrderId).toBe("valid-order");
   });
 });
 

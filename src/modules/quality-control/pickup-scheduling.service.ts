@@ -11,17 +11,19 @@ export type PickupScheduleRow = {
   sourceStatus: string | null; sourceOutletCode: string | null;
 };
 
-const normalized = (value: string | null) =>
-  value?.trim().toLowerCase().replace(/\s+/g, " ") || "";
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
+export const normalizeMaskedPhone = (value: string | null) =>
+  value?.trim().toLowerCase().replace(/[\s\-()]/g, "") || "";
+
+export const normalizeMaskedAddress = (value: string | null) =>
+  value?.trim().toLowerCase().replace(/\s+/g, " ") || "";
+
 export function pickupGroupingKey(row: PickupScheduleRow) {
-  if (normalized(row.customerId)) return `customer:${normalized(row.customerId)}`;
-  if (normalized(row.senderPhoneMasked)) return `phone:${normalized(row.senderPhoneMasked)}`;
-  const name = normalized(row.senderNameMasked);
-  const address = normalized(row.pickupAddressMasked);
-  if (name && address) return `identity:${name}|${address}`;
-  return `name:${name || row.sourceOrderId || row.waybillNo}`;
+  const phone = normalizeMaskedPhone(row.senderPhoneMasked);
+  const address = normalizeMaskedAddress(row.pickupAddressMasked);
+  if (phone && address) return `contact:${phone}|${address}`;
+  return `unique:${row.sourceOrderId || row.waybillNo || row.id}:${row.id}`;
 }
 
 export function groupPickupSchedules(rows: PickupScheduleRow[]) {
