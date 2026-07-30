@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import {
   canMutateInvoice, canReadInvoice, getInvoice, invoiceDraftSchema,
-  invoiceErrorResponse, invoiceScope, updateInvoiceDraft,
+  invoiceErrorResponse, invoiceScope, migrationRequiredResponse,
+  updateInvoiceDraft,
 } from "@/modules/invoice";
 
 type Context = { params: Promise<{ id: string }> };
@@ -29,13 +30,27 @@ export async function PATCH(request: Request, context: Context) {
     return NextResponse.json({ error: { code: "OUTLET_REQUIRED" } }, { status: 400 });
   }
   const parsed = invoiceDraftSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR" } }, { status: 400 });
+  if (!parsed.success) {
+    const itemsInvalid = parsed.error.issues.some((issue) => issue.path[0] === "itemIds");
+    return NextResponse.json(itemsInvalid ? {
+      success: false,
+      code: "INVOICE_ITEMS_REQUIRED",
+      message: "Pilih minimal satu resi untuk membuat invoice.",
+    } : {
+      success: false,
+      code: "VALIDATION_ERROR",
+      message: "Data invoice tidak valid.",
+    }, { status: 400 });
+  }
   try {
     const data = await updateInvoiceDraft({
       ...scope, actorId: session.userId, outletCode: session.outletCode,
     }, (await context.params).id, parsed.data);
     return NextResponse.json({ success: true, data });
   } catch (error) {
+    if ((error as { code?: string })?.code === "P2021") {
+      return migrationRequiredResponse();
+    }
     return invoiceErrorResponse(error);
   }
 }

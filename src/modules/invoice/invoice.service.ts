@@ -220,11 +220,11 @@ async function validatedSources(
     include: invoiceSourceInclude,
   });
   if (rows.length !== new Set(itemIds).size) {
-    throw new InvoiceServiceError("SOURCE_ITEM_INVALID");
+    throw new InvoiceServiceError("SOURCE_ITEM_NOT_ELIGIBLE");
   }
   const sources = rows.map((row) => {
     if (!isCashSettlement(row.rawPickup.settlementRaw)) {
-      throw new InvoiceServiceError("SOURCE_ITEM_INVALID");
+      throw new InvoiceServiceError("SOURCE_ITEM_NOT_ELIGIBLE");
     }
     const financial = calculatePickupFinancials(row);
     if (!financial.remainingAmount.greaterThan(0)) {
@@ -232,7 +232,7 @@ async function validatedSources(
     }
     const conflict = row.invoiceItems.find((item) => item.invoiceId !== allowedInvoiceId);
     if (conflict) {
-      throw new InvoiceServiceError("SOURCE_ALREADY_IN_INVOICE", 409, [row.waybillNo]);
+      throw new InvoiceServiceError("INVOICE_ITEM_LOCKED", 409, [row.waybillNo]);
     }
     return { row, financial, seller: sellerIdentity({
       id: row.id,
@@ -330,8 +330,11 @@ export async function createInvoiceDraft(context: Context, input: DraftInput) {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
     if (error instanceof InvoiceServiceError) throw error;
+    if ((error as { code?: string })?.code === "P2021") {
+      throw new InvoiceServiceError("DATABASE_MIGRATION_REQUIRED", 503);
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw new InvoiceServiceError("SOURCE_ALREADY_IN_INVOICE", 409);
+      throw new InvoiceServiceError("INVOICE_ITEM_LOCKED", 409);
     }
     throw new InvoiceServiceError("INVOICE_SAVE_FAILED", 500);
   }
@@ -390,8 +393,11 @@ export async function updateInvoiceDraft(
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
     if (error instanceof InvoiceServiceError) throw error;
+    if ((error as { code?: string })?.code === "P2021") {
+      throw new InvoiceServiceError("DATABASE_MIGRATION_REQUIRED", 503);
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw new InvoiceServiceError("SOURCE_ALREADY_IN_INVOICE", 409);
+      throw new InvoiceServiceError("INVOICE_ITEM_LOCKED", 409);
     }
     throw new InvoiceServiceError("INVOICE_SAVE_FAILED", 500);
   }
@@ -418,7 +424,7 @@ export async function issueInvoice(context: Context, invoiceId: string) {
       });
       if (changed.length) {
         throw new InvoiceServiceError(
-          "SOURCE_CHANGED", 409, changed.map(({ row }) => row.waybillNo),
+          "INVOICE_SOURCE_CHANGED", 409, changed.map(({ row }) => row.waybillNo),
         );
       }
       const year = invoice.invoiceDate.getUTCFullYear();

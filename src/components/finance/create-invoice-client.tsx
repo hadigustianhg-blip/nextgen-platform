@@ -11,7 +11,10 @@ import {
 } from "@/components/ui";
 import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
 import { downloadFile } from "@/lib/files/download-file";
-import { formatRupiahFromCents, sumMoney } from "./invoice.view";
+import {
+  buildInvoiceSourceItemsQuery, canSaveInvoiceDraft, formatRupiahFromCents,
+  invoiceDraftErrorMessage, selectableInvoiceItems, sumMoney,
+} from "./invoice.view";
 
 type Seller = {
   customerKey: string;
@@ -123,6 +126,7 @@ export function CreateInvoiceClient({
   const [pdfLoadingId, setPdfLoadingId] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [itemsError, setItemsError] = useState("");
   const [draftId, setDraftId] = useState<string | null>(null);
   const [currentInvoice, setCurrentInvoice] = useState<Invoice | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -186,23 +190,31 @@ export function CreateInvoiceClient({
     setDraftId(null);
     setDetailLoading(true);
     setError("");
+    setItemsError("");
+    setItems([]);
     try {
-      const query = new URLSearchParams({ ...range, customerKey: seller.customerKey });
-      if (existingInvoiceId) query.set("invoiceId", existingInvoiceId);
+      const query = buildInvoiceSourceItemsQuery({
+        ...range, customerKey: seller.customerKey, invoiceId: existingInvoiceId,
+      });
       const response = await fetch(`/api/finance/invoice-source-items?${query}`, {
         cache: "no-store",
       });
-      if (!response.ok) throw new Error();
       const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.message || payload.error?.message ||
+          "Data resi seller tidak dapat dimuat.");
+      }
       setItems(payload.data);
       setCustomerName(seller.customerName);
       setCompanyName(payload.data[0]?.companyName || "");
       setWhatsapp(payload.data[0]?.whatsapp || "");
       setEmail(payload.data[0]?.email || "");
       setAddress(payload.data[0]?.address || "");
-    } catch {
+    } catch (cause) {
       setItems([]);
-      setError("Resi seller tidak dapat dimuat.");
+      setItemsError(cause instanceof Error
+        ? cause.message
+        : "Data resi seller tidak dapat dimuat.");
     } finally {
       setDetailLoading(false);
     }
@@ -217,13 +229,20 @@ export function CreateInvoiceClient({
     });
   }
 
-  const selectable = items.filter((item) => item.selectable);
+  const selectable = selectableInvoiceItems(items);
   const allSelected = selectable.length > 0 &&
     selectable.every((item) => selectedIds.has(item.id));
   const selectedItems = items.filter((item) => selectedIds.has(item.id));
   const selectedSubtotal = sumMoney(selectedItems.map((item) => item.freightAmount));
   const selectedDiscount = sumMoney(selectedItems.map((item) => item.discountAmount));
   const selectedTotal = sumMoney(selectedItems.map((item) => item.obligationAmount));
+  const draftCanBeSaved = canSaveInvoiceDraft({
+    sellerSelected: Boolean(selectedSeller),
+    detailLoading,
+    saving,
+    selectedCount: selectedIds.size,
+    totalCents: selectedTotal,
+  });
 
   function toggleAll() {
     setSelectedIds(allSelected
@@ -252,7 +271,7 @@ export function CreateInvoiceClient({
   async function saveDraft() {
     if (saving) return;
     const payload = draftPayload();
-    if (!payload) {
+    if (!payload || selectedTotal <= 0n) {
       setError("Pilih minimal satu resi untuk membuat invoice.");
       return;
     }
@@ -268,7 +287,12 @@ export function CreateInvoiceClient({
         },
       );
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error?.message || "Invoice gagal disimpan.");
+      if (!response.ok) {
+        const code = result.code || result.error?.code;
+        throw new Error(invoiceDraftErrorMessage(
+          code, result.message || result.error?.message,
+        ));
+      }
       setDraftId(result.data.id);
       setCurrentInvoice(result.data);
       setNotice("Draft invoice berhasil disimpan.");
@@ -438,8 +462,6 @@ export function CreateInvoiceClient({
       <SectionCard title={selectedSeller ? `Invoice — ${selectedSeller.customerName}` : "Detail Seller"}>
         {!selectedSeller ? <div className="grid min-h-72 place-items-center text-center text-sm text-slate-500">
           Pilih seller untuk melihat resi Pickup Belum Bayar.
-        </div> : detailLoading ? <div className="grid min-h-72 place-items-center">
-          <LoaderCircle className="animate-spin text-blue-700" size={30}/>
         </div> : <div className="space-y-5">
           <div className="grid gap-3 md:grid-cols-2">
             <input aria-label="Nama Seller" value={customerName}
@@ -464,6 +486,67 @@ export function CreateInvoiceClient({
               className={`${nextgenControlClass} md:col-span-2`}/>
           </div>
 
+          <div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-slate-950">Daftar Resi Belum Bayar</h3>
+                <p className="text-sm text-slate-500">
+                  {detailLoading
+                    ? "Memuat resi..."
+                    : `${selectable.length} resi tersedia dari ${items.length} resi`}
+                </p>
+              </div>
+              {!detailLoading && !itemsError && selectable.length > 0 &&
+                <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold">
+                  <input aria-label="Pilih Semua" type="checkbox"
+                    checked={allSelected} onChange={toggleAll}/>
+                  Pilih Semua
+                </label>}
+            </div>
+
+            {detailLoading ? <AppCard className="grid min-h-44 place-items-center p-5">
+              <div className="text-center text-sm text-slate-600">
+                <LoaderCircle className="mx-auto mb-2 animate-spin text-blue-700" size={28}/>
+                Memuat resi...
+              </div>
+            </AppCard> : itemsError ? <AppCard className="grid min-h-44 place-items-center border-rose-200 bg-rose-50 p-5 text-center text-sm text-rose-800">
+              {itemsError}
+            </AppCard> : items.length === 0 ? <AppCard className="grid min-h-44 place-items-center p-5 text-center text-sm text-slate-500">
+              Tidak ada resi belum bayar yang dapat dibuat invoice.
+            </AppCard> : selectable.length === 0 ? <AppCard className="grid min-h-44 place-items-center border-amber-200 bg-amber-50 p-5 text-center text-sm text-amber-800">
+              Seluruh resi seller ini sedang digunakan pada draft atau invoice lain.
+            </AppCard> : <TableCard>
+              <div className="max-h-[420px] overflow-auto">
+                <table className="w-full min-w-[980px] text-left text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr><th className="px-3 py-3">Pilih</th>
+                      {["No", "Tanggal", "No Resi", "Staff Pickup", "Pengirim", "Berat", "Jumlah Ongkir", "Diskon", "Final Ongkir", "Status Invoice"]
+                        .map((label) => <th key={label} className="px-3 py-3">{label}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">{items.map((item, index) => <tr key={item.id}>
+                    <td className="px-3 py-3"><input aria-label={`Pilih ${item.waybillNumber}`}
+                      type="checkbox" disabled={!item.selectable}
+                      checked={selectedIds.has(item.id)}
+                      onChange={() => toggleItem(item.id)}/></td>
+                    <td className="px-3 py-3">{index + 1}</td>
+                    <td className="px-3 py-3">{displayDate(item.transactionDate)}</td>
+                    <td className="px-3 py-3 font-mono">{item.waybillNumber}</td>
+                    <td className="px-3 py-3">{item.pickupStaff || "—"}</td>
+                    <td className="px-3 py-3">{item.sellerName}</td>
+                    <td className="px-3 py-3">{item.weight}</td>
+                    <td className="px-3 py-3">{money(item.freightAmount)}</td>
+                    <td className="px-3 py-3">{money(item.discountAmount)}</td>
+                    <td className="px-3 py-3 font-semibold">{money(item.finalAmount)}</td>
+                    <td className="px-3 py-3">{item.draftInvoiceId
+                      ? <span className="text-amber-700">Draft existing</span>
+                      : <span className="text-emerald-700">Tersedia</span>}</td>
+                  </tr>)}</tbody>
+                </table>
+              </div>
+            </TableCard>}
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-3">
             <MetricCard label="Resi Dipilih" value={`${selectedIds.size} resi`}/>
             <MetricCard label="Subtotal" value={formatRupiahFromCents(selectedSubtotal)}/>
@@ -476,34 +559,12 @@ export function CreateInvoiceClient({
             </div>
           </AppCard>
 
-          <TableCard><div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>
-              <th className="px-3 py-3"><input aria-label="Pilih Semua" type="checkbox"
-                checked={allSelected} onChange={toggleAll}/></th>
-              {["No", "Tanggal", "No Resi", "Staff Pickup", "Pengirim", "Berat", "Jumlah Ongkir", "Diskon", "Final Ongkir", "Status Invoice"]
-                .map((label) => <th key={label} className="px-3 py-3">{label}</th>)}
-            </tr></thead>
-            <tbody className="divide-y">{items.map((item, index) => <tr key={item.id}>
-              <td className="px-3 py-3"><input aria-label={`Pilih ${item.waybillNumber}`}
-                type="checkbox" disabled={!item.selectable} checked={selectedIds.has(item.id)}
-                onChange={() => toggleItem(item.id)}/></td>
-              <td className="px-3 py-3">{index + 1}</td>
-              <td className="px-3 py-3">{displayDate(item.transactionDate)}</td>
-              <td className="px-3 py-3 font-mono">{item.waybillNumber}</td>
-              <td className="px-3 py-3">{item.pickupStaff || "—"}</td>
-              <td className="px-3 py-3">{item.sellerName}</td>
-              <td className="px-3 py-3">{item.weight}</td>
-              <td className="px-3 py-3">{money(item.freightAmount)}</td>
-              <td className="px-3 py-3">{money(item.discountAmount)}</td>
-              <td className="px-3 py-3 font-semibold">{money(item.finalAmount)}</td>
-              <td className="px-3 py-3">{item.draftInvoiceId
-                ? <span className="text-amber-700">Draft existing</span>
-                : <span className="text-emerald-700">Tersedia</span>}</td>
-            </tr>)}</tbody>
-          </table></div></TableCard>
-
           {canCreate && <div className="flex flex-wrap justify-end gap-3">
-            <button type="button" disabled={saving || !selectedIds.size}
+            {!selectedIds.size && <p className="w-full text-right text-sm text-amber-700">
+              Pilih minimal satu resi untuk membuat draft invoice.
+            </p>}
+            <button type="button"
+              disabled={!draftCanBeSaved}
               onClick={() => void saveDraft()} className={nextgenNeutralButtonClass}>
               {saving ? <LoaderCircle className="animate-spin" size={17}/> : <Save size={17}/>}
               {saving ? "Menyimpan..." : draftId ? "Perbarui Draft" : "Simpan Draft"}

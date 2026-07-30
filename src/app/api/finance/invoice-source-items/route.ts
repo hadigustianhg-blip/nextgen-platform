@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import {
   canReadInvoice, getInvoiceSourceItems, invoiceRangeSchema, invoiceScope,
+  migrationRequiredResponse,
 } from "@/modules/invoice";
 
 export async function GET(request: Request) {
@@ -16,8 +17,19 @@ export async function GET(request: Request) {
   if (!parsed.success || !parsed.data.customerKey) {
     return NextResponse.json({ error: { code: "VALIDATION_ERROR" } }, { status: 400 });
   }
-  const data = await getInvoiceSourceItems({ ...scope, ...parsed.data });
-  return NextResponse.json({ success: true, data }, {
-    headers: { "Cache-Control": "private, no-store" },
-  });
+  try {
+    const data = await getInvoiceSourceItems({ ...scope, ...parsed.data });
+    return NextResponse.json({ success: true, data }, {
+      headers: { "Cache-Control": "private, no-store" },
+    });
+  } catch (error) {
+    if ((error as { code?: string })?.code === "P2021") {
+      return migrationRequiredResponse();
+    }
+    return NextResponse.json({
+      success: false,
+      code: "SOURCE_ITEMS_FAILED",
+      message: "Data resi seller tidak dapat dimuat.",
+    }, { status: 500 });
+  }
 }

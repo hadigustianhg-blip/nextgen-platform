@@ -255,7 +255,7 @@ describe("Invoice persistence and PDF contracts", () => {
       "discountAmount", "finalAmount", "obligationAmount",
     ]) expect(service).toContain(field);
     expect(service).toContain('existing.status !== "DRAFT"');
-    expect(service).toContain("SOURCE_CHANGED");
+    expect(service).toContain("INVOICE_SOURCE_CHANGED");
   });
 
   it("creates a structured A4 PDF with invoice rows and active bank accounts", async () => {

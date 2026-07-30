@@ -1,7 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
-  formatRupiahFromCents, moneyToCents, normalizeSellerLabel, sumMoney,
+  buildInvoiceSourceItemsQuery, canSaveInvoiceDraft, formatRupiahFromCents,
+  invoiceDraftErrorMessage, moneyToCents, normalizeSellerLabel, sumMoney,
+  selectableInvoiceItems,
 } from "./invoice.view";
 
 describe("Create Invoice interface", () => {
@@ -33,6 +35,59 @@ describe("Create Invoice interface", () => {
     expect(source).not.toContain("setSelectedIds(new Set(payload.data");
   });
 
+  it("builds source-items query with the actual seller key and active dates", () => {
+    const query = buildInvoiceSourceItemsQuery({
+      startDate: "2026-07-01",
+      endDate: "2026-07-30",
+      customerKey: "name:putra",
+    });
+    expect(query.get("startDate")).toBe("2026-07-01");
+    expect(query.get("endDate")).toBe("2026-07-30");
+    expect(query.get("customerKey")).toBe("name:putra");
+  });
+
+  it("enables save only after a positive eligible selection", () => {
+    expect(canSaveInvoiceDraft({
+      sellerSelected: true, detailLoading: false, saving: false,
+      selectedCount: 0, totalCents: 0n,
+    })).toBe(false);
+    expect(canSaveInvoiceDraft({
+      sellerSelected: true, detailLoading: false, saving: false,
+      selectedCount: 1, totalCents: 10000n,
+    })).toBe(true);
+    expect(canSaveInvoiceDraft({
+      sellerSelected: true, detailLoading: false, saving: true,
+      selectedCount: 1, totalCents: 10000n,
+    })).toBe(false);
+  });
+
+  it("keeps three eligible checkbox rows and excludes a locked row from select-all", () => {
+    const items = [
+      { id: "1", selectable: true },
+      { id: "2", selectable: true },
+      { id: "3", selectable: true },
+      { id: "locked", selectable: false },
+    ];
+    expect(selectableInvoiceItems(items).map((item) => item.id)).toEqual([
+      "1", "2", "3",
+    ]);
+  });
+
+  it("maps draft and migration errors to specific safe messages", () => {
+    expect(invoiceDraftErrorMessage("INVOICE_ITEMS_REQUIRED")).toBe(
+      "Pilih minimal satu resi untuk membuat invoice.",
+    );
+    expect(invoiceDraftErrorMessage("INVOICE_ITEM_LOCKED")).toContain(
+      "draft atau invoice lain",
+    );
+    expect(invoiceDraftErrorMessage("DATABASE_MIGRATION_REQUIRED")).toContain(
+      "Hubungi administrator",
+    );
+    expect(invoiceDraftErrorMessage("UNKNOWN")).toBe(
+      "Invoice gagal disimpan. Silakan coba kembali.",
+    );
+  });
+
   it("supports save draft, update, issue, preview and void actions", async () => {
     const source = await readFile(new URL("./create-invoice-client.tsx", import.meta.url), "utf8");
     for (const text of [
@@ -40,6 +95,40 @@ describe("Create Invoice interface", () => {
       "Preview Invoice", "Void Invoice",
     ]) expect(source).toContain(text);
     expect(source).toContain('method: draftId ? "PATCH" : "POST"');
+    expect(source).toContain("if (!payload || selectedTotal <= 0n)");
+    expect(source).toContain("disabled={!draftCanBeSaved}");
+    expect(source).toContain("Pilih minimal satu resi untuk membuat draft invoice.");
+  });
+
+  it("renders explicit source item loading, empty, locked, and failure states", async () => {
+    const source = await readFile(new URL("./create-invoice-client.tsx", import.meta.url), "utf8");
+    for (const state of [
+      "Daftar Resi Belum Bayar",
+      "Memuat resi...",
+      "Tidak ada resi belum bayar yang dapat dibuat invoice.",
+      "Data resi seller tidak dapat dimuat.",
+      "Seluruh resi seller ini sedang digunakan pada draft atau invoice lain.",
+    ]) expect(source).toContain(state);
+    expect(source.indexOf("Daftar Resi Belum Bayar")).toBeLessThan(
+      source.indexOf('MetricCard label="Resi Dipilih"'),
+    );
+    expect(source).toContain("items.map((item, index)");
+    expect(source).toContain("disabled={!item.selectable}");
+    expect(source).toContain("setItemsError(cause instanceof Error");
+  });
+
+  it("serializes only string identifiers and form values in the draft payload", () => {
+    const payload = {
+      customerKey: "name:putra",
+      itemIds: ["11111111-1111-4111-8111-111111111111"],
+      invoiceDate: "2026-07-30",
+      dueDate: "2026-08-06",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-30",
+      customerName: "PUTRA",
+    };
+    expect(() => JSON.stringify(payload)).not.toThrow();
+    expect(JSON.parse(JSON.stringify(payload)).itemIds).toEqual(payload.itemIds);
   });
 
   it("implements PDF loading, double-click prevention and failure recovery", async () => {
