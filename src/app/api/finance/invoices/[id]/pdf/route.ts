@@ -53,7 +53,7 @@ export async function GET(_: Request, context: Context) {
     phase = "invoice_loaded";
     console.info("[invoice.pdf]", { requestId, invoiceId, invoiceStatus, phase });
 
-    if (["CANCELLED", "VOID"].includes(invoice.status)) {
+    if (invoice.status === "CANCELLED") {
       return pdfError(
         409,
         "INVOICE_PDF_NOT_ALLOWED",

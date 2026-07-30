@@ -88,7 +88,7 @@ describe("GET /api/finance/invoices/[id]/pdf", () => {
     });
   });
 
-  it.each(["DRAFT", "ISSUED"])(
+  it.each(["DRAFT", "ISSUED", "VOID"])(
     "generates a complete PDF response for %s",
     async (status) => {
       mocks.getInvoice.mockResolvedValueOnce(invoice(status));
@@ -117,14 +117,7 @@ describe("GET /api/finance/invoices/[id]/pdf", () => {
     );
   });
 
-  it("rejects void invoices and incomplete PDF data with specific contracts", async () => {
-    mocks.getInvoice.mockResolvedValueOnce(invoice("VOID"));
-    const voidResponse = await GET(new Request("http://localhost"), context);
-    expect(voidResponse.status).toBe(409);
-    expect(await voidResponse.json()).toMatchObject({
-      code: "INVOICE_PDF_NOT_ALLOWED",
-    });
-
+  it("rejects incomplete PDF data with a specific contract", async () => {
     mocks.getInvoice.mockResolvedValueOnce({ ...invoice(), items: [] });
     const incompleteResponse = await GET(new Request("http://localhost"), context);
     expect(incompleteResponse.status).toBe(422);

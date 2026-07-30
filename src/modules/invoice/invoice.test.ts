@@ -476,13 +476,84 @@ describe("Invoice persistence and PDF contracts", () => {
     ]);
     expect(invoicePdfFilename(invoice)).toBe("Invoice_DRAFT_Seller.pdf");
     const source = await readFile(new URL("./invoice.pdf.ts", import.meta.url), "utf8");
-    expect(source).toContain('.text("DRAFT"');
+    expect(source).toContain('status === "DRAFT" ? "DRAFT"');
     expect(source).not.toMatch(/registerFont|readFileSync|document\.image/);
     const nextConfig = await readFile(
       new URL("../../../next.config.ts", import.meta.url),
       "utf8",
     );
     expect(nextConfig).toContain('serverExternalPackages: ["pdfkit"]');
+  });
+
+  it("implements the tenant layout, status watermarks and safe layout helpers", async () => {
+    const source = await readFile(new URL("./invoice.pdf.ts", import.meta.url), "utf8");
+    for (const helper of [
+      "drawTextSafe", "drawKeyValue", "drawSummaryBox", "drawTableHeader",
+      "drawTableRow", "ensurePageSpace", "drawPaymentAccounts", "drawFooter",
+    ]) expect(source).toContain(`function ${helper}`);
+    for (const label of [
+      "DITAGIHKAN KEPADA", "NOMOR INVOICE", "TANGGAL INVOICE",
+      "JATUH TEMPO", "TOTAL TAGIHAN", "PEMBAYARAN DAPAT DILAKUKAN KE:",
+      "Informasi rekening pembayaran belum tersedia.",
+      "Invoice ini dibuat secara elektronik dan tidak memerlukan tanda tangan.",
+      "Halaman ${pageNumber} dari ${pageCount}",
+    ]) expect(source).toContain(label);
+    expect(source).toContain('status === "VOID" ? "VOID"');
+    expect(source).toContain("invoice.outlet.name");
+    expect(source).toContain("invoice.outlet.code");
+    expect(source).toContain("invoice.tenant.name");
+    expect(source).not.toMatch(/NEXTGEN|J&T CARGO SUM001A|PT HUTAMA DAYA LOGISTIK/i);
+    expect(source).not.toMatch(/registerFont|readFileSync|\/ROOT\/|node_modules\/pdfkit\/js\/data/);
+    const fontNames = [...source.matchAll(/\.font\("([^"]+)"\)/g)]
+      .map((match) => match[1]);
+    expect(new Set(fontNames)).toEqual(new Set(["Helvetica", "Helvetica-Bold"]));
+  });
+
+  it("keeps tenant identity dynamic and produces multi-page tables in order", async () => {
+    const item = {
+      transactionDate: new Date("2026-07-20T00:00:00.000Z"),
+      waybillNumber: "570500000001",
+      pickupStaff: null,
+      sellerNameSnapshot: "Pengirim dengan nama panjang untuk menguji wrap",
+      weight: decimal("2.5"),
+      freightAmount: decimal(100000),
+      discountAmount: decimal(10000),
+      finalAmount: decimal(90000),
+    };
+    const base = {
+      status: "ISSUED",
+      invoiceNumber: "INV/OUT001/2026/07/0001",
+      customerNameSnapshot: "Customer Test",
+      companyNameSnapshot: null,
+      whatsappSnapshot: null,
+      emailSnapshot: null,
+      addressSnapshot: null,
+      invoiceDate: new Date("2026-07-30T00:00:00.000Z"),
+      dueDate: new Date("2026-08-06T00:00:00.000Z"),
+      periodStart: new Date("2026-07-01T00:00:00.000Z"),
+      periodEnd: new Date("2026-07-30T00:00:00.000Z"),
+      subtotal: decimal(5_000_000),
+      discountTotal: decimal(500_000),
+      grandTotal: decimal(4_500_000),
+      notes: null,
+      items: Array.from({ length: 50 }, (_, index) => ({
+        ...item,
+        waybillNumber: String(570500000001 + index),
+      })),
+    };
+    const first = await createInvoicePdf({
+      ...base,
+      tenant: { name: "Tenant Alpha" },
+      outlet: { code: "ALPHA01", name: "Outlet Alpha" },
+    }, []);
+    const second = await createInvoicePdf({
+      ...base,
+      tenant: { name: "Tenant Beta" },
+      outlet: { code: "BETA01", name: "Outlet Beta" },
+    }, []);
+    const pageCount = (first.toString("latin1").match(/\/Type\s*\/Page\b/g) || []).length;
+    expect(pageCount).toBeGreaterThan(1);
+    expect(first.equals(second)).toBe(false);
   });
 
   it("contains no hardcoded production identity or automatic attachment claim", async () => {
