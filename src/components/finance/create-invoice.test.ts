@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildInvoiceSourceItemsQuery, canSaveInvoiceDraft, formatRupiahFromCents,
   invoiceDraftErrorMessage, moneyToCents, normalizeSellerLabel, sumMoney,
-  selectableInvoiceItems,
+  invoicePdfErrorMessage, invoiceWhatsappDisabledReason, selectableInvoiceItems,
 } from "./invoice.view";
 
 describe("Create Invoice interface", () => {
@@ -137,7 +137,14 @@ describe("Create Invoice interface", () => {
     expect(source).toContain("Membuat PDF...");
     expect(source).toContain("await downloadFile");
     expect(source).toContain('setPdfLoadingId("")');
-    expect(source).toContain("PDF invoice gagal dibuat. Silakan coba kembali.");
+    expect(source).toContain('expectedContentType: "application/pdf"');
+    expect(source).toContain('"Preview PDF"');
+    expect(invoicePdfErrorMessage(undefined)).toBe(
+      "PDF invoice gagal dibuat. Silakan coba kembali.",
+    );
+    expect(invoicePdfErrorMessage("INVOICE_PDF_DATA_INCOMPLETE")).toContain(
+      "belum lengkap",
+    );
   });
 
   it("opens WhatsApp separately and instructs manual PDF attachment", async () => {
@@ -148,6 +155,18 @@ describe("Create Invoice interface", () => {
     expect(ui).toContain('window.open(result.data.url, "_blank"');
     expect(service).toContain("Lampirkan PDF invoice yang baru diunduh");
     expect(ui).not.toMatch(/attach.*pdf/i);
+    expect(invoiceWhatsappDisabledReason({
+      status: "DRAFT",
+      whatsapp: "081234567890",
+    })).toContain("Finalisasi");
+    expect(invoiceWhatsappDisabledReason({
+      status: "ISSUED",
+      whatsapp: null,
+    })).toContain("belum diisi");
+    expect(invoiceWhatsappDisabledReason({
+      status: "ISSUED",
+      whatsapp: "123",
+    })).toContain("tidak valid");
   });
 
   it("keeps tenant/outlet scope server-side and does not send it from the client", async () => {

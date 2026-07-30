@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import {
   canMutateInvoice, canReadInvoice, getInvoice, invoiceDraftSchema,
-  invoiceErrorResponse, invoiceScope, migrationRequiredResponse,
+  invoiceErrorResponse, invoiceJsonSafe, invoiceScope, migrationRequiredResponse,
   updateInvoiceDraft,
 } from "@/modules/invoice";
 
@@ -16,7 +16,7 @@ export async function GET(_: Request, context: Context) {
   if (!scope) return NextResponse.json({ error: { code: "OUTLET_REQUIRED" } }, { status: 400 });
   const invoice = await getInvoice(scope, (await context.params).id);
   if (!invoice) return NextResponse.json({ error: { code: "INVOICE_NOT_FOUND" } }, { status: 404 });
-  return NextResponse.json({ success: true, data: invoice }, {
+  return NextResponse.json({ success: true, data: invoiceJsonSafe(invoice) }, {
     headers: { "Cache-Control": "private, no-store" },
   });
 }

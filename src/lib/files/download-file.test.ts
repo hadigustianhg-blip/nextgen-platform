@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { downloadFile } from "./download-file";
+import { DownloadFileError, downloadFile } from "./download-file";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -41,6 +41,27 @@ describe("downloadFile", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("failed", { status: 500 })));
 
     await expect(downloadFile("/api/export")).rejects.toThrow("DOWNLOAD_FAILED");
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it("does not download a JSON error returned by a PDF endpoint", async () => {
+    const click = vi.fn();
+    vi.stubGlobal("document", {
+      createElement: () => ({ click }),
+      body: { appendChild: vi.fn() },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      success: false,
+      code: "INVOICE_PDF_DATA_INCOMPLETE",
+      message: "Data invoice belum lengkap untuk membuat PDF.",
+    }, { status: 422 })));
+
+    await expect(downloadFile("/api/invoice.pdf", {
+      expectedContentType: "application/pdf",
+    })).rejects.toEqual(expect.objectContaining<Partial<DownloadFileError>>({
+      code: "INVOICE_PDF_DATA_INCOMPLETE",
+      message: "Data invoice belum lengkap untuk membuat PDF.",
+    }));
     expect(click).not.toHaveBeenCalled();
   });
 });

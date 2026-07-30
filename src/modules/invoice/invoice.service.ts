@@ -595,6 +595,20 @@ export async function getInvoice(scope: Scope, invoiceId: string) {
   });
 }
 
+export function invoiceJsonSafe(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "bigint") return value.toString();
+  if (value instanceof Date) return value.toISOString();
+  if (Prisma.Decimal.isDecimal(value)) return value.toString();
+  if (Array.isArray(value)) return value.map(invoiceJsonSafe);
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, invoiceJsonSafe(item)]),
+    );
+  }
+  return value;
+}
+
 export async function listInvoices(input: Scope & {
   search?: string;
   status?: InvoiceStatus | "";
@@ -684,13 +698,18 @@ export async function prepareInvoiceWhatsapp(context: Context, invoiceId: string
     const invoice = await tx.invoice.findFirst({
       where: {
         id: invoiceId, tenantId: context.tenantId, outletId: context.outletId,
-        status: { in: ["ISSUED", "SENT"] },
       },
       include: { _count: { select: { items: true } }, outlet: true, tenant: true },
     });
-    if (!invoice) throw new InvoiceServiceError("INVOICE_NOT_READY", 409);
+    if (!invoice) throw new InvoiceServiceError("INVOICE_NOT_FOUND", 404);
+    if (!["ISSUED", "SENT"].includes(invoice.status)) {
+      throw new InvoiceServiceError("INVOICE_NOT_ISSUED", 409);
+    }
+    if (!invoice.whatsappSnapshot?.trim()) {
+      throw new InvoiceServiceError("WHATSAPP_NUMBER_REQUIRED", 400);
+    }
     const phone = normalizeWhatsappNumber(invoice.whatsappSnapshot);
-    if (!phone) throw new InvoiceServiceError("WHATSAPP_INVALID");
+    if (!phone) throw new InvoiceServiceError("WHATSAPP_NUMBER_INVALID", 400);
     const formatDate = (value: Date) =>
       new Intl.DateTimeFormat("id-ID", {
         day: "numeric", month: "long", year: "numeric", timeZone: "UTC",

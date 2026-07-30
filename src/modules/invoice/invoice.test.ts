@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const db = vi.hoisted(() => ({
   masterPickup: { findMany: vi.fn() },
+  invoice: { findFirst: vi.fn() },
   outletBankAccount: { findMany: vi.fn() },
   $transaction: vi.fn(),
 }));
@@ -12,7 +13,9 @@ const tx = vi.hoisted(() => ({
   masterPickup: { findMany: vi.fn() },
   invoice: {
     create: vi.fn(),
+    findFirst: vi.fn(),
     findUniqueOrThrow: vi.fn(),
+    update: vi.fn(),
   },
   invoiceItem: { createMany: vi.fn() },
   auditLog: { create: vi.fn() },
@@ -23,8 +26,11 @@ import {
   getInvoiceSourceItems,
   getInvoiceSourceSellers,
   createInvoiceDraft,
+  getInvoice,
+  invoiceJsonSafe,
   normalizeSellerName,
   normalizeWhatsappNumber,
+  prepareInvoiceWhatsapp,
   sellerIdentity,
 } from "./invoice.service";
 import {
@@ -78,6 +84,7 @@ beforeEach(() => {
   db.masterPickup.findMany.mockResolvedValue([pickup()]);
   tx.masterPickup.findMany.mockResolvedValue([pickup()]);
   tx.invoice.create.mockResolvedValue({ id: "invoice-1" });
+  tx.invoice.update.mockResolvedValue({ id: "invoice-1" });
   tx.invoiceItem.createMany.mockResolvedValue({ count: 1 });
   tx.auditLog.create.mockResolvedValue({ id: "audit-1" });
   tx.invoice.findUniqueOrThrow.mockResolvedValue({ id: "invoice-1" });
@@ -251,6 +258,49 @@ describe("Invoice validation and authorization", () => {
 });
 
 describe("Invoice persistence and PDF contracts", () => {
+  it("loads invoice detail within tenant/outlet scope and maps JSON-unsafe values", async () => {
+    db.invoice.findFirst.mockResolvedValue({ id: "invoice-1" });
+    await getInvoice(scope, "invoice-1");
+    expect(db.invoice.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "invoice-1", ...scope },
+    }));
+    expect(invoiceJsonSafe({
+      amount: decimal("90000.50"),
+      createdAt: new Date("2026-07-30T00:00:00.000Z"),
+      auditId: 12n,
+    })).toEqual({
+      amount: "90000.5",
+      createdAt: "2026-07-30T00:00:00.000Z",
+      auditId: "12",
+    });
+  });
+
+  it("returns specific WhatsApp errors for draft, missing, and invalid numbers", async () => {
+    const context = {
+      ...scope,
+      actorId: "33333333-3333-4333-8333-333333333333",
+      outletCode: "OUT001",
+    };
+    tx.invoice.findFirst.mockResolvedValueOnce({
+      status: "DRAFT",
+      whatsappSnapshot: "081234567890",
+    });
+    await expect(prepareInvoiceWhatsapp(context, "invoice-1"))
+      .rejects.toMatchObject({ code: "INVOICE_NOT_ISSUED", status: 409 });
+    tx.invoice.findFirst.mockResolvedValueOnce({
+      status: "ISSUED",
+      whatsappSnapshot: null,
+    });
+    await expect(prepareInvoiceWhatsapp(context, "invoice-1"))
+      .rejects.toMatchObject({ code: "WHATSAPP_NUMBER_REQUIRED", status: 400 });
+    tx.invoice.findFirst.mockResolvedValueOnce({
+      status: "ISSUED",
+      whatsappSnapshot: "123",
+    });
+    await expect(prepareInvoiceWhatsapp(context, "invoice-1"))
+      .rejects.toMatchObject({ code: "WHATSAPP_NUMBER_INVALID", status: 400 });
+  });
+
   it("retries a serializable transaction conflict once", async () => {
     const conflict = new Prisma.PrismaClientKnownRequestError(
       "Transaction conflict",
@@ -348,6 +398,7 @@ describe("Invoice persistence and PDF contracts", () => {
 
   it("creates a structured A4 PDF with invoice rows and active bank accounts", async () => {
     const invoice = {
+      status: "ISSUED",
       invoiceNumber: "INV/OUT001/2026/07/0001",
       customerNameSnapshot: "Anggrek Cibogo",
       companyNameSnapshot: null,
@@ -376,6 +427,52 @@ describe("Invoice persistence and PDF contracts", () => {
     expect(invoicePdfFilename(invoice)).toBe(
       "Invoice_INV-OUT001-2026-07-0001_Anggrek-Cibogo.pdf",
     );
+  });
+
+  it("creates a draft PDF with null-safe fields and all stream phases", async () => {
+    const phases: string[] = [];
+    const invoice = {
+      status: "DRAFT",
+      invoiceNumber: null,
+      customerNameSnapshot: "Seller",
+      companyNameSnapshot: null,
+      addressSnapshot: null,
+      invoiceDate: new Date("2026-07-30T00:00:00.000Z"),
+      dueDate: new Date("2026-08-06T00:00:00.000Z"),
+      periodStart: new Date("2026-07-01T00:00:00.000Z"),
+      periodEnd: new Date("2026-07-30T00:00:00.000Z"),
+      subtotal: decimal(100000),
+      discountTotal: decimal(0),
+      grandTotal: decimal(100000),
+      notes: null,
+      tenant: { name: "Tenant" },
+      outlet: { code: "OUT001", name: "Outlet" },
+      items: [{
+        transactionDate: new Date("2026-07-20T00:00:00.000Z"),
+        waybillNumber: "WB001",
+        pickupStaff: null,
+        sellerNameSnapshot: "Seller",
+        weight: decimal(1),
+        freightAmount: decimal(100000),
+        discountAmount: decimal(0),
+        finalAmount: decimal(100000),
+      }],
+    };
+    const pdf = await createInvoicePdf(invoice, [], {
+      onPhase: (phase) => phases.push(phase),
+    });
+    expect(pdf.subarray(0, 4).toString()).toBe("%PDF");
+    expect(phases).toEqual([
+      "pdf_document_created",
+      "header_rendered",
+      "items_rendered",
+      "totals_rendered",
+      "pdf_finalized",
+    ]);
+    expect(invoicePdfFilename(invoice)).toBe("Invoice_DRAFT_Seller.pdf");
+    const source = await readFile(new URL("./invoice.pdf.ts", import.meta.url), "utf8");
+    expect(source).toContain('.text("DRAFT"');
+    expect(source).not.toMatch(/registerFont|readFileSync|logo/i);
   });
 
   it("contains no hardcoded production identity or automatic attachment claim", async () => {

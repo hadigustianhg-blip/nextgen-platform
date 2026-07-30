@@ -10,10 +10,11 @@ import {
   nextgenButtonClass, nextgenControlClass, nextgenNeutralButtonClass,
 } from "@/components/ui";
 import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
-import { downloadFile } from "@/lib/files/download-file";
+import { DownloadFileError, downloadFile } from "@/lib/files/download-file";
 import {
   buildInvoiceSourceItemsQuery, canSaveInvoiceDraft, formatRupiahFromCents,
-  invoiceDraftErrorMessage, selectableInvoiceItems, sumMoney,
+  invoiceDraftErrorMessage, invoicePdfErrorMessage, invoiceWhatsappDisabledReason,
+  invoiceWhatsappErrorMessage, selectableInvoiceItems, sumMoney,
 } from "./invoice.view";
 
 type Seller = {
@@ -376,9 +377,13 @@ export function CreateInvoiceClient({
     setPdfLoadingId(invoice.id);
     setError("");
     try {
-      await downloadFile(`/api/finance/invoices/${invoice.id}/pdf`);
-    } catch {
-      setError("PDF invoice gagal dibuat. Silakan coba kembali.");
+      await downloadFile(`/api/finance/invoices/${invoice.id}/pdf`, {
+        expectedContentType: "application/pdf",
+      });
+    } catch (cause) {
+      setError(cause instanceof DownloadFileError
+        ? invoicePdfErrorMessage(cause.code, cause.message)
+        : invoicePdfErrorMessage(undefined));
     } finally {
       setPdfLoadingId("");
     }
@@ -396,7 +401,12 @@ export function CreateInvoiceClient({
         },
       );
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error?.message);
+      if (!response.ok) {
+        throw new Error(invoiceWhatsappErrorMessage(
+          result.code || result.error?.code,
+          result.message || result.error?.message,
+        ));
+      }
       window.open(result.data.url, "_blank", "noopener,noreferrer");
       setNotice(result.data.attachmentInstruction);
       await loadInvoices();
@@ -610,15 +620,27 @@ export function CreateInvoiceClient({
               onClick={() => void openInvoice(invoice.id)} className={nextgenNeutralButtonClass}>
               {invoice.status === "DRAFT" ? <ReceiptText size={16}/> : <Eye size={16}/>}
             </button>
-            {canExport && ["ISSUED", "SENT", "PARTIALLY_PAID", "PAID"].includes(invoice.status) &&
+            {canExport && ["DRAFT", "ISSUED", "SENT", "PARTIALLY_PAID", "PAID"].includes(invoice.status) &&
               <button title="Export PDF" disabled={Boolean(pdfLoadingId)}
                 onClick={() => void exportPdf(invoice)} className={nextgenNeutralButtonClass}>
                 {pdfLoadingId === invoice.id ? <LoaderCircle className="animate-spin" size={16}/> : <Download size={16}/>}
-                <span>{pdfLoadingId === invoice.id ? "Membuat PDF..." : "Export PDF"}</span>
+                <span>{pdfLoadingId === invoice.id
+                  ? "Membuat PDF..."
+                  : invoice.status === "DRAFT" ? "Preview PDF" : "Export PDF"}</span>
               </button>}
-            {canWhatsapp && ["ISSUED", "SENT"].includes(invoice.status) &&
-              <button title="Kirim WhatsApp" onClick={() => void prepareWhatsapp(invoice)}
-                className={nextgenNeutralButtonClass}><MessageCircle size={16}/></button>}
+            {canWhatsapp && <button
+              title={invoiceWhatsappDisabledReason({
+                status: invoice.status,
+                whatsapp: invoice.whatsappSnapshot,
+              }) || "Kirim WhatsApp"}
+              disabled={Boolean(invoiceWhatsappDisabledReason({
+                status: invoice.status,
+                whatsapp: invoice.whatsappSnapshot,
+              }))}
+              onClick={() => void prepareWhatsapp(invoice)}
+              className={nextgenNeutralButtonClass}>
+              <MessageCircle size={16}/>
+            </button>}
             {canVoid && !["VOID", "PAID"].includes(invoice.status) &&
               <button title="Void Invoice" onClick={() => void voidSelectedInvoice(invoice)}
                 className={nextgenNeutralButtonClass}><X size={16}/></button>}
