@@ -16,7 +16,8 @@ export async function GET(request: Request, context: { params: Promise<{ groupId
   try {
     const { groupId } = await context.params;
     return NextResponse.json(await getPickupSchedulingDetail({
-      ...scope, actorId: session.userId, businessDate: parsed.data.businessDate,
+      ...scope, actorId: session.userId,
+      startDate: parsed.data.startDate, endDate: parsed.data.endDate,
       groupId, sessionOutletCode: session.outletCode,
     }), { headers: noStore });
   } catch {

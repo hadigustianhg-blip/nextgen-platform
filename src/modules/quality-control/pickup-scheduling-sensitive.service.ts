@@ -23,7 +23,8 @@ export async function fetchPickupOrderDetail(orderId: string, fetcher: typeof fe
 }
 
 export async function getPickupSchedulingDetail(input: {
-  tenantId: string; outletId: string; actorId: string; businessDate: string;
+  tenantId: string; outletId: string; actorId: string;
+  startDate: string; endDate: string;
   groupId: string; sessionOutletCode: string | null;
   fetchDetail?: typeof fetchPickupOrderDetail;
 }) {
@@ -36,7 +37,8 @@ export async function getPickupSchedulingDetail(input: {
       action: "CREATE", entityType: "PICKUP_SCHEDULING_SENSITIVE_VIEW",
       entityId: group.groupId,
       metadata: {
-        businessDate: input.businessDate, representativeWaybill: group.representativeWaybill,
+        startDate: input.startDate, endDate: input.endDate,
+        representativeWaybill: group.representativeWaybill,
         result: "SUCCESS",
       },
     },

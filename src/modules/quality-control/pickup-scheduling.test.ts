@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const memory = vi.hoisted(() => ({
   rows: [] as Array<Record<string, unknown>>,
-  stored: new Map<string, { id: string }>(),
+  stored: new Map<string, { id: string; sourceHash: string }>(),
   audits: [] as unknown[],
 }));
 const db = vi.hoisted(() => {
@@ -14,9 +14,12 @@ const db = vi.hoisted(() => {
         const key = JSON.stringify(where.tenantId_outletId_businessDate_sourceRecordKey);
         return memory.stored.get(key) || null;
       }),
-      upsert: vi.fn(async ({ where }) => {
+      upsert: vi.fn(async ({ where, create, update }) => {
         const key = JSON.stringify(where.tenantId_outletId_businessDate_sourceRecordKey);
-        const row = { id: `row-${memory.stored.size + 1}` };
+        const row = {
+          id: memory.stored.get(key)?.id || `row-${memory.stored.size + 1}`,
+          sourceHash: (memory.stored.has(key) ? update : create).sourceHash,
+        };
         memory.stored.set(key, row);
         return row;
       }),
@@ -38,9 +41,12 @@ import {
 } from "./pickup-scheduling.authorization";
 import {
   groupPickupSchedules,
+  listPickupScheduling,
+  pickupAgeLabel,
   pickupGroupingKey,
 } from "./pickup-scheduling.service";
 import {
+  fetchPickupScheduleList,
   resetPickupSchedulingLocks,
   syncPickupScheduling,
 } from "./pickup-scheduling-sync.service";
@@ -50,6 +56,11 @@ import {
   buildPickupWhatsAppUrl,
   normalizePickupPhone,
 } from "./pickup-scheduling-whatsapp";
+import { jakartaDateRange } from "@/lib/dates/jakarta-date";
+import {
+  pickupSchedulingQuerySchema,
+  pickupSchedulingSyncSchema,
+} from "./pickup-scheduling.validation";
 
 const date = new Date("2026-07-30T00:00:00.000Z");
 const row = (index: number, override: Record<string, unknown> = {}) => ({
@@ -73,6 +84,74 @@ beforeEach(() => {
   memory.stored.clear();
   memory.audits.length = 0;
   resetPickupSchedulingLocks();
+});
+
+describe("Pickup Scheduling date range", () => {
+  it("defaults to four Jakarta calendar dates ending today", () => {
+    const range = jakartaDateRange(3, new Date("2026-07-30T05:00:00.000Z"));
+    expect(range).toEqual({ startDate: "2026-07-27", endDate: "2026-07-30" });
+    expect(
+      (Date.parse(`${range.endDate}T00:00:00.000Z`) -
+        Date.parse(`${range.startDate}T00:00:00.000Z`)) /
+        86_400_000 +
+        1,
+    ).toBe(4);
+  });
+
+  it("forwards a custom range to the list-only middleware", async () => {
+    const fetcher = vi.fn(async (url: URL | RequestInfo) => {
+      const parsed = url instanceof URL ? url : new URL(String(url));
+      expect(parsed.searchParams.get("startDate")).toBe("2026-07-27");
+      expect(parsed.searchParams.get("endDate")).toBe("2026-07-30");
+      return new Response(JSON.stringify({ success: true, data: [] }));
+    });
+    await fetchPickupScheduleList("2026-07-27", "2026-07-30", fetcher);
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("rejects reversed and ranges over 31 inclusive calendar dates", () => {
+    expect(pickupSchedulingSyncSchema.safeParse({
+      startDate: "2026-07-30", endDate: "2026-07-29",
+    }).success).toBe(false);
+    expect(pickupSchedulingQuerySchema.safeParse({
+      startDate: "2026-06-01", endDate: "2026-07-02",
+    }).success).toBe(false);
+    expect(pickupSchedulingSyncSchema.safeParse({
+      startDate: "2026-02-31", endDate: "2026-03-01",
+    }).success).toBe(false);
+  });
+
+  it.each([
+    ["2026-07-30", "Hari Ini"],
+    ["2026-07-29", "1 Hari"],
+    ["2026-07-28", "2 Hari"],
+    ["2026-07-27", "3 Hari+"],
+  ])("labels %s as %s", (businessDate, label) => {
+    expect(pickupAgeLabel(businessDate, "2026-07-30")).toBe(label);
+  });
+
+  it("reads an inclusive range and groups the same customer across dates", async () => {
+    memory.rows = [
+      row(1, { businessDate: new Date("2026-07-27T00:00:00.000Z") }),
+      row(2, { businessDate: new Date("2026-07-30T00:00:00.000Z") }),
+    ];
+    const result = await listPickupScheduling({
+      tenantId: "tenant", outletId: "outlet",
+      startDate: "2026-07-27", endDate: "2026-07-30",
+      waybill: "", senderName: "", sourcePlatform: "", page: 1, pageSize: 20,
+    });
+    expect(result.groups).toHaveLength(1);
+    expect(result.summary).toMatchObject({ totalWaybills: 2, totalGroups: 1 });
+    const calls = db.rawPickupSchedule.findMany.mock.calls as unknown as
+      Array<[{ where: Record<string, unknown> }]>;
+    expect(calls[0][0].where).toMatchObject({
+      tenantId: "tenant", outletId: "outlet",
+      businessDate: {
+        gte: new Date("2026-07-27T00:00:00.000Z"),
+        lte: new Date("2026-07-30T00:00:00.000Z"),
+      },
+    });
+  });
 });
 
 describe("Pickup Scheduling grouping", () => {
@@ -127,33 +206,45 @@ describe("Pickup Scheduling sync and sensitive detail", () => {
       senderNameMasked: "S***", senderPhoneMasked: "081***",
       pickupAddressMasked: "Address ***", sourcePlatform: "TikTok",
       goodsName: "Goods", weight: 1, status: "Created", outletCode: "OUT001",
-      networkCode: "OUT001", inputTime: "2026-07-30 10:00:00", updatedTime: null,
+      networkCode: "OUT001", inputTime: "2026-07-29 10:00:00", updatedTime: null,
+      businessDate: "2026-07-29",
     };
     const first = await syncPickupScheduling({
-      tenantId: "tenant", outletId: "outlet", actorId: "user", businessDate: "2026-07-30",
+      tenantId: "tenant", outletId: "outlet", actorId: "user",
+      startDate: "2026-07-27", endDate: "2026-07-30",
       fetchList: vi.fn(async () => [record]),
     });
     const second = await syncPickupScheduling({
-      tenantId: "tenant", outletId: "outlet", actorId: "user", businessDate: "2026-07-30",
+      tenantId: "tenant", outletId: "outlet", actorId: "user",
+      startDate: "2026-07-27", endDate: "2026-07-30",
       fetchList: vi.fn(async () => [record]),
     });
     expect(first).toMatchObject({ created: 1, updated: 0 });
-    expect(second).toMatchObject({ created: 0, updated: 1 });
+    expect(second).toMatchObject({ created: 0, updated: 0, unchanged: 1 });
+    expect([...memory.stored.keys()].join("\n")).toContain("2026-07-29T00:00:00.000Z");
     const writes = JSON.stringify(db.$transaction.mock.calls);
     expect(writes).not.toContain("customerPhone");
     expect(writes).not.toContain("pickupAddress\"");
     expect(memory.audits.at(-1)).toMatchObject({ entityType: "PICKUP_SCHEDULING_SYNC" });
+    expect(memory.audits.at(-1)).toMatchObject({
+      metadata: {
+        startDate: "2026-07-27", endDate: "2026-07-30",
+        fetched: 1, created: 0, updated: 0, unchanged: 1, result: "SUCCESS",
+      },
+    });
   });
 
   it("rejects a concurrent double sync for the same tenant/outlet", async () => {
     let release!: () => void;
     const waiting = new Promise<void>((resolve) => { release = resolve; });
     const first = syncPickupScheduling({
-      tenantId: "tenant", outletId: "outlet", actorId: "user", businessDate: "2026-07-30",
+      tenantId: "tenant", outletId: "outlet", actorId: "user",
+      startDate: "2026-07-27", endDate: "2026-07-30",
       fetchList: vi.fn(async () => { await waiting; return []; }),
     });
     await expect(syncPickupScheduling({
-      tenantId: "tenant", outletId: "outlet", actorId: "user", businessDate: "2026-07-30",
+      tenantId: "tenant", outletId: "outlet", actorId: "user",
+      startDate: "2026-07-27", endDate: "2026-07-30",
       fetchList: vi.fn(async () => []),
     })).rejects.toMatchObject({ code: "SYNC_IN_PROGRESS" });
     release();
@@ -170,7 +261,7 @@ describe("Pickup Scheduling sync and sensitive detail", () => {
     const group = groupPickupSchedules(memory.rows as never[])[0];
     const result = await getPickupSchedulingDetail({
       tenantId: "tenant", outletId: "outlet", actorId: "user",
-      businessDate: "2026-07-30", groupId: group.groupId,
+      startDate: "2026-07-27", endDate: "2026-07-30", groupId: group.groupId,
       sessionOutletCode: "SESSION01", fetchDetail,
     });
     expect(fetchDetail).toHaveBeenCalledOnce();
@@ -200,6 +291,12 @@ describe("Pickup Scheduling UI and permissions", () => {
     expect(ui).toContain("expanded.has(group.groupId)");
     const beforeConfirm = ui.slice(0, ui.indexOf("async function confirm"));
     expect(beforeConfirm).not.toContain("/detail?");
+    expect(ui).toContain('aria-label="Tanggal Mulai"');
+    expect(ui).toContain('aria-label="Tanggal Akhir"');
+    expect(ui).toContain("jakartaDateRange(3)");
+    expect(ui).toContain("JSON.stringify({ startDate, endDate })");
+    expect(ui).toContain('onClick={() => void load()}');
+    expect(ui).toContain("ageLabel");
     expect(ui).toContain('anchor.rel = "noopener noreferrer"');
     expect(ui).not.toContain("localStorage");
     expect(ui).not.toContain("sessionStorage");

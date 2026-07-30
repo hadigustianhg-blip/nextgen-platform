@@ -6,10 +6,13 @@ import {
   FilterCard, MetricCard, PageHeader, TableCard, nextgenButtonClass,
   nextgenControlClass, nextgenNeutralButtonClass,
 } from "@/components/ui";
-import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
+import { jakartaDateRange } from "@/lib/dates/jakarta-date";
 import { buildPickupMessage, buildPickupWhatsAppUrl } from "@/modules/quality-control/pickup-scheduling-whatsapp";
 
-type Order = { id: string; waybill: string; source: string | null; goodsName: string | null; weight: number; status: string | null };
+type Order = {
+  id: string; waybill: string; source: string | null; goodsName: string | null;
+  weight: number; status: string | null; businessDate: string; ageLabel: string;
+};
 type Group = {
   groupId: string; sellerName: string | null; senderPhoneMasked: string | null;
   pickupAddressMasked: string | null; orders: Order[];
@@ -17,12 +20,33 @@ type Group = {
 type Result = {
   summary: { totalWaybills: number; totalGroups: number; validMaskedPhones: number };
   groups: Group[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
 };
-const empty: Result = { summary: { totalWaybills: 0, totalGroups: 0, validMaskedPhones: 0 }, groups: [] };
+const empty: Result = {
+  summary: { totalWaybills: 0, totalGroups: 0, validMaskedPhones: 0 },
+  groups: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 },
+};
+const defaultRange = jakartaDateRange(3);
+const isCalendarDate = (value: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const parsed = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return parsed.getUTCFullYear() === Number(match[1])
+    && parsed.getUTCMonth() === Number(match[2]) - 1
+    && parsed.getUTCDate() === Number(match[3]);
+};
+const validRange = (startDate: string, endDate: string) => {
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T00:00:00.000Z`);
+  return isCalendarDate(startDate) && isCalendarDate(endDate)
+    && Number.isFinite(start) && Number.isFinite(end)
+    && start <= end && (end - start) / 86_400_000 <= 30;
+};
 
 export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boolean; canConfirm: boolean }) {
-  const [businessDate, setBusinessDate] = useState(jakartaOperationalDate);
-  const [inputs, setInputs] = useState({ waybill: "", sender: "", source: "" });
+  const [startDate, setStartDate] = useState(defaultRange.startDate);
+  const [endDate, setEndDate] = useState(defaultRange.endDate);
+  const [inputs, setInputs] = useState({ waybill: "", senderName: "", sourcePlatform: "" });
   const [filters, setFilters] = useState(inputs);
   const [result, setResult] = useState(empty);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -30,37 +54,64 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
   const [syncing, setSyncing] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setFilters(inputs), 300);
+    const timer = window.setTimeout(() => {
+      setPage(1);
+      setFilters(inputs);
+    }, 300);
     return () => window.clearTimeout(timer);
   }, [inputs]);
 
   const load = useCallback(async () => {
+    if (!validRange(startDate, endDate)) {
+      setNotice("Rentang tanggal tidak valid.");
+      return;
+    }
     setLoading(true); setNotice("");
     try {
-      const query = new URLSearchParams({ businessDate, ...filters });
+      const query = new URLSearchParams({
+        startDate, endDate, ...filters, page: String(page), pageSize: "20",
+      });
       const response = await fetch(`/api/quality-control/pickup-scheduling?${query}`, { cache: "no-store" });
       if (!response.ok) throw new Error();
       setResult(await response.json());
     } catch { setNotice("Data Penjadwalan Pickup tidak dapat dimuat."); }
     finally { setLoading(false); }
-  }, [businessDate, filters]);
+  }, [endDate, filters, page, startDate]);
 
   useEffect(() => { queueMicrotask(() => void load()); }, [load]);
 
   async function sync() {
     if (syncing) return;
+    if (!validRange(startDate, endDate)) {
+      const start = Date.parse(`${startDate}T00:00:00.000Z`);
+      const end = Date.parse(`${endDate}T00:00:00.000Z`);
+      setNotice(Number.isFinite(start) && Number.isFinite(end) && end - start > 30 * 86_400_000
+        ? "Rentang maksimal 31 hari."
+        : "Rentang tanggal tidak valid.");
+      return;
+    }
     setSyncing(true); setNotice("");
     try {
       const response = await fetch("/api/quality-control/pickup-scheduling/sync", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ businessDate }),
+        body: JSON.stringify({ startDate, endDate }),
       });
-      if (!response.ok) throw new Error();
+      const body = await response.json();
+      if (!response.ok) {
+        if (response.status === 409) throw new Error("SYNC_IN_PROGRESS");
+        throw new Error(response.status >= 500 ? "SOURCE_UNAVAILABLE" : "SYNC_FAILED");
+      }
       await load();
-      setNotice("Sinkronisasi daftar pickup selesai.");
-    } catch { setNotice("Sinkronisasi gagal. Data lama tetap tersedia."); }
+      setNotice(`Sinkronisasi selesai: ${body.fetched} record sumber.`);
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      setNotice(code === "SYNC_IN_PROGRESS" ? "Sinkronisasi sedang berjalan."
+        : code === "SOURCE_UNAVAILABLE" ? "Layanan sumber sedang tidak tersedia."
+        : "Sinkronisasi gagal. Data lama tetap tersedia.");
+    }
     finally { setSyncing(false); }
   }
 
@@ -68,7 +119,7 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
     if (confirming) return;
     setConfirming(group.groupId); setNotice("");
     try {
-      const query = new URLSearchParams({ businessDate });
+      const query = new URLSearchParams({ startDate, endDate });
       const response = await fetch(`/api/quality-control/pickup-scheduling/groups/${group.groupId}/detail?${query}`, { cache: "no-store" });
       if (!response.ok) throw new Error();
       const detail = await response.json();
@@ -87,8 +138,12 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
   }
 
   const reset = () => {
-    const blank = { waybill: "", sender: "", source: "" };
+    const blank = { waybill: "", senderName: "", sourcePlatform: "" };
     setInputs(blank); setFilters(blank);
+  };
+  const preset = (daysBack: number) => {
+    const range = jakartaDateRange(daysBack);
+    setPage(1); setStartDate(range.startDate); setEndDate(range.endDate);
   };
   const toggle = (id: string) => setExpanded((current) => {
     const next = new Set(current);
@@ -106,11 +161,16 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
         </button>}
       </>}/>
     {notice && <div role="status" className="rounded-xl border bg-white px-4 py-3 text-sm">{notice}</div>}
-    <FilterCard><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-      <input aria-label="Business Date" type="date" value={businessDate} onChange={(event) => setBusinessDate(event.target.value)} className={nextgenControlClass}/>
+    <FilterCard><div className="mb-3 flex flex-wrap gap-2">
+      <button onClick={() => preset(0)} className={nextgenNeutralButtonClass}>Hari Ini</button>
+      <button onClick={() => preset(3)} className={nextgenNeutralButtonClass}>3 Hari Terakhir</button>
+      <button onClick={() => preset(7)} className={nextgenNeutralButtonClass}>7 Hari Terakhir</button>
+    </div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+      <input aria-label="Tanggal Mulai" type="date" value={startDate} onChange={(event) => { setPage(1); setStartDate(event.target.value); }} className={nextgenControlClass}/>
+      <input aria-label="Tanggal Akhir" type="date" value={endDate} onChange={(event) => { setPage(1); setEndDate(event.target.value); }} className={nextgenControlClass}/>
       <input aria-label="Search Resi" placeholder="Search Resi" value={inputs.waybill} onChange={(event) => setInputs({ ...inputs, waybill: event.target.value })} className={nextgenControlClass}/>
-      <input aria-label="Search Pengirim" placeholder="Search Pengirim" value={inputs.sender} onChange={(event) => setInputs({ ...inputs, sender: event.target.value })} className={nextgenControlClass}/>
-      <input aria-label="Search Source" placeholder="Search Source/Platform" value={inputs.source} onChange={(event) => setInputs({ ...inputs, source: event.target.value })} className={nextgenControlClass}/>
+      <input aria-label="Search Pengirim" placeholder="Search Pengirim" value={inputs.senderName} onChange={(event) => setInputs({ ...inputs, senderName: event.target.value })} className={nextgenControlClass}/>
+      <input aria-label="Search Source" placeholder="Search Source/Platform" value={inputs.sourcePlatform} onChange={(event) => setInputs({ ...inputs, sourcePlatform: event.target.value })} className={nextgenControlClass}/>
       <button onClick={reset} className={nextgenNeutralButtonClass}>Reset Filter</button>
     </div></FilterCard>
     <section className="grid gap-4 md:grid-cols-3">
@@ -134,15 +194,25 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
           {expanded.has(group.groupId) && <div className="border-t border-slate-100 p-4">
             <p className="mb-3 text-sm text-slate-500">{group.pickupAddressMasked || "Alamat pickup tersensor tidak tersedia."}</p>
             <TableCard><div className="overflow-x-auto"><table className="w-full min-w-[800px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{["No","Nomor Resi","Isi Barang","Platform","Berat","Status"].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead>
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{["No","Tanggal","Umur","Nomor Resi","Isi Barang","Platform","Berat","Status"].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead>
               <tbody className="divide-y">{group.orders.map((order, orderIndex) => <tr key={order.id}>
-                <td className="px-4 py-3">{orderIndex + 1}</td><td className="px-4 py-3 font-semibold">{order.waybill}</td>
+                <td className="px-4 py-3">{orderIndex + 1}</td><td className="px-4 py-3">{order.businessDate}</td>
+                <td className="px-4 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{order.ageLabel}</span></td>
+                <td className="px-4 py-3 font-semibold">{order.waybill}</td>
                 <td className="px-4 py-3">{order.goodsName || "—"}</td><td className="px-4 py-3">{order.source || "—"}</td>
                 <td className="px-4 py-3">{order.weight.toLocaleString("id-ID")}</td><td className="px-4 py-3">{order.status || "—"}</td>
               </tr>)}</tbody>
             </table></div></TableCard>
           </div>}
         </section>)}
+    </div>
+    <div className="flex items-center justify-between text-sm text-slate-600">
+      <span>{result.pagination.total} grup</span>
+      <div className="flex items-center gap-2">
+        <button disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)} className={nextgenNeutralButtonClass}>Sebelumnya</button>
+        <span>{page} / {Math.max(1, result.pagination.totalPages)}</span>
+        <button disabled={page >= result.pagination.totalPages || loading} onClick={() => setPage((value) => value + 1)} className={nextgenNeutralButtonClass}>Berikutnya</button>
+      </div>
     </div>
   </div>;
 }

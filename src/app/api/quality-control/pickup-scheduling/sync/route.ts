@@ -12,7 +12,10 @@ export async function POST(request: Request) {
   const parsed = pickupSchedulingSyncSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR" } }, { status: 400 });
   try {
-    return NextResponse.json(await syncPickupScheduling({ ...scope, actorId: session.userId, businessDate: parsed.data.businessDate }));
+    return NextResponse.json(await syncPickupScheduling({
+      ...scope, actorId: session.userId,
+      startDate: parsed.data.startDate, endDate: parsed.data.endDate,
+    }));
   } catch (error) {
     const conflict = error instanceof Error && "code" in error && error.code === "SYNC_IN_PROGRESS";
     return NextResponse.json({ error: { code: conflict ? "SYNC_IN_PROGRESS" : "SYNC_FAILED" } }, { status: conflict ? 409 : 502 });

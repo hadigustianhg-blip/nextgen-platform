@@ -14,7 +14,7 @@ export type PickupListRecord = {
   pickupAddressMasked: string | null; sourcePlatform: string | null;
   goodsName: string | null; weight: number; status: string | null;
   outletCode: string | null; networkCode: string | null;
-  inputTime: string | null; updatedTime: string | null;
+  businessDate: string; inputTime: string | null; updatedTime: string | null;
 };
 
 export function normalizePickupListRecord(value: unknown): PickupListRecord {
@@ -23,21 +23,29 @@ export function normalizePickupListRecord(value: unknown): PickupListRecord {
   const orderId = text(raw.orderId);
   const waybillId = text(raw.waybillId);
   const weight = Number(raw.weight || 0);
-  if (!orderId || !waybillId || !Number.isFinite(weight)) throw new Error("INVALID_LIST_RECORD");
+  const businessDate = text(raw.businessDate) || text(raw.inputTime)?.slice(0, 10);
+  if (
+    !orderId || !waybillId || !Number.isFinite(weight) ||
+    !businessDate || !/^\d{4}-\d{2}-\d{2}$/.test(businessDate)
+  ) throw new Error("INVALID_LIST_RECORD");
   return {
     orderId, waybillId, customerId: text(raw.customerId),
     senderNameMasked: text(raw.senderNameMasked), senderPhoneMasked: text(raw.senderPhoneMasked),
     pickupAddressMasked: text(raw.pickupAddressMasked), sourcePlatform: text(raw.sourcePlatform),
     goodsName: text(raw.goodsName), weight, status: text(raw.status),
     outletCode: text(raw.outletCode), networkCode: text(raw.networkCode),
-    inputTime: text(raw.inputTime), updatedTime: text(raw.updatedTime),
+    businessDate, inputTime: text(raw.inputTime), updatedTime: text(raw.updatedTime),
   };
 }
 
-export async function fetchPickupScheduleList(businessDate: string, fetcher: typeof fetch = fetch) {
+export async function fetchPickupScheduleList(
+  startDate: string,
+  endDate: string,
+  fetcher: typeof fetch = fetch,
+) {
   const url = new URL("/jfs-order-list-sync", process.env.JFS_MIDDLEWARE_URL || BASE_URL);
-  url.searchParams.set("start", `${businessDate} 00:00:00`);
-  url.searchParams.set("end", `${businessDate} 23:59:59`);
+  url.searchParams.set("startDate", startDate);
+  url.searchParams.set("endDate", endDate);
   const response = await fetcher(url, {
     cache: "no-store", headers: { accept: "application/json" },
     signal: AbortSignal.timeout(45_000),
@@ -48,24 +56,27 @@ export async function fetchPickupScheduleList(businessDate: string, fetcher: typ
 }
 
 export async function syncPickupScheduling(input: {
-  tenantId: string; outletId: string; actorId: string; businessDate: string;
+  tenantId: string; outletId: string; actorId: string;
+  startDate: string; endDate: string;
   fetchList?: typeof fetchPickupScheduleList;
 }) {
   const lockKey = `${input.tenantId}:${input.outletId}`;
   if (locks.has(lockKey)) throw Object.assign(new Error("SYNC_IN_PROGRESS"), { code: "SYNC_IN_PROGRESS" });
   locks.add(lockKey);
   try {
-    const records = await (input.fetchList || fetchPickupScheduleList)(input.businessDate);
-    const businessDate = new Date(`${input.businessDate}T00:00:00.000Z`);
+    const records = await (input.fetchList || fetchPickupScheduleList)(input.startDate, input.endDate);
     const syncedAt = new Date();
-    let created = 0; let updated = 0;
+    let created = 0; let updated = 0; let unchanged = 0;
     await prisma.$transaction(async (tx) => {
       for (const record of records) {
+        const businessDate = new Date(`${record.businessDate}T00:00:00.000Z`);
         const sourceRecordKey = `order:${record.orderId}:${record.waybillId}`;
         const unique = { tenantId: input.tenantId, outletId: input.outletId, businessDate, sourceRecordKey };
         const existing = await tx.rawPickupSchedule.findUnique({
-          where: { tenantId_outletId_businessDate_sourceRecordKey: unique }, select: { id: true },
+          where: { tenantId_outletId_businessDate_sourceRecordKey: unique },
+          select: { id: true, sourceHash: true },
         });
+        const sourceHash = hash(record);
         const data = {
           sourceOrderId: record.orderId, waybillNo: record.waybillId,
           customerId: record.customerId, senderNameMasked: record.senderNameMasked,
@@ -74,23 +85,28 @@ export async function syncPickupScheduling(input: {
           weight: new Prisma.Decimal(record.weight), sourceStatus: record.status,
           sourceOutletCode: record.outletCode, sourceNetworkCode: record.networkCode,
           sourceInputTime: record.inputTime, sourceUpdatedTime: record.updatedTime,
-          sourceHash: hash(record), syncedAt,
+          sourceHash, syncedAt,
         };
         await tx.rawPickupSchedule.upsert({
           where: { tenantId_outletId_businessDate_sourceRecordKey: unique },
           create: { ...unique, ...data }, update: data,
         });
-        if (existing) updated += 1; else created += 1;
+        if (!existing) created += 1;
+        else if (existing.sourceHash === sourceHash) unchanged += 1;
+        else updated += 1;
       }
       await tx.auditLog.create({
         data: {
           tenantId: input.tenantId, outletId: input.outletId, actorId: input.actorId,
           action: "CREATE", entityType: "PICKUP_SCHEDULING_SYNC",
-          metadata: { businessDate: input.businessDate, fetched: records.length, created, updated },
+          metadata: {
+            startDate: input.startDate, endDate: input.endDate,
+            fetched: records.length, created, updated, unchanged, result: "SUCCESS",
+          },
         },
       });
     });
-    return { success: true, fetched: records.length, created, updated };
+    return { success: true, fetched: records.length, created, updated, unchanged };
   } finally {
     locks.delete(lockKey);
   }
