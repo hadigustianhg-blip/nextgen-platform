@@ -102,4 +102,18 @@ describe("pickup navigation", () => {
       'active={pathname.startsWith("/dashboard/quality-control/sla-cut-off")}',
     );
   });
+
+  it("exposes Problem Waybill Delivery under Quality Control", async () => {
+    const source = await readFile(
+      new URL("./sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain(
+      'href="/dashboard/quality-control/problem-waybill-delivery"',
+    );
+    expect(source).toContain('label="Problem Waybill Delivery"');
+    expect(source).toContain(
+      'active={pathname.startsWith("/dashboard/quality-control/problem-waybill-delivery")}',
+    );
+  });
 });

@@ -374,6 +374,10 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
                 active={pathname.startsWith("/dashboard/quality-control/sla-cut-off")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<ShieldCheck size={17}/>} />
+              <SidebarChild href="/dashboard/quality-control/problem-waybill-delivery" label="Problem Waybill Delivery"
+                active={pathname.startsWith("/dashboard/quality-control/problem-waybill-delivery")}
+                collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
+                onNavigate={closeMobile} icon={<Truck size={17}/>} />
             </div>}
           </div>
 
