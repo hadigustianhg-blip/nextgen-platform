@@ -283,4 +283,17 @@ describe("Waybill Stuck UI and RBAC", () => {
     expect(ui).toContain("await load()");
     expect(ui).not.toContain("setInterval");
   });
+
+  it("defaults to Jakarta today, auto-loads changes, and refreshes the active date", async () => {
+    const ui = await readFile(
+      new URL("../../components/quality-control/waybill-stuck-delivery-client.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(ui).toContain('import { jakartaOperationalDate } from "@/lib/dates/jakarta-date"');
+    expect(ui).toContain("useState(jakartaOperationalDate)");
+    expect(ui).toContain("businessDate,");
+    expect(ui).toContain("queueMicrotask(() => void load())");
+    expect(ui).toContain("setBusinessDate(event.target.value)");
+    expect(ui).toContain('onClick={() => void load()}');
+  });
 });

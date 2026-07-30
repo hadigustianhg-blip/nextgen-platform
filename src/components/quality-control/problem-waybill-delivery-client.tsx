@@ -16,6 +16,7 @@ import {
   buildProblemWaybillWhatsAppUrl,
   normalizeIndonesianPhone,
 } from "@/modules/quality-control/problem-waybill-delivery-whatsapp";
+import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
 
 type Row = {
   id: string;
@@ -62,7 +63,7 @@ export function ProblemWaybillDeliveryClient({
   canViewSensitive: boolean;
 }) {
   const [result, setResult] = useState(emptyResult);
-  const [businessDate, setBusinessDate] = useState("");
+  const [businessDate, setBusinessDate] = useState(jakartaOperationalDate);
   const [waybillInput, setWaybillInput] = useState("");
   const [courierInput, setCourierInput] = useState("");
   const [waybill, setWaybill] = useState("");

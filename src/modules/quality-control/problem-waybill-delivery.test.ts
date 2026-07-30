@@ -190,6 +190,19 @@ describe("Problem Waybill permissions and WhatsApp", () => {
     expect(ui).toContain('anchor.rel = "noopener noreferrer"');
   });
 
+  it("defaults to Jakarta today, auto-loads changes, and refreshes the active date", async () => {
+    const ui = await readFile(
+      new URL("../../components/quality-control/problem-waybill-delivery-client.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(ui).toContain('import { jakartaOperationalDate } from "@/lib/dates/jakarta-date"');
+    expect(ui).toContain("useState(jakartaOperationalDate)");
+    expect(ui).toContain("businessDate,");
+    expect(ui).toContain("queueMicrotask(() => void load())");
+    expect(ui).toContain("setBusinessDate(event.target.value)");
+    expect(ui).toContain('onClick={() => void load()}');
+  });
+
   it("sets no-store on every sensitive detail response and rate-limits bursts", async () => {
     const route = await readFile(
       new URL(
