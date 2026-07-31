@@ -115,3 +115,22 @@ export const salaryAdjustmentSchema = z.object({
 export const salaryAdjustmentVoidSchema = z.object({
   reason: z.string().trim().min(5).max(500),
 });
+
+export const salaryClosingVoidSchema = z.object({
+  reason: z.string().trim().min(5).max(500),
+});
+
+export const salaryKasbonAllocationSchema = z.object({
+  operationalExpenseId: z.string().uuid(),
+  amount: z.number().finite().positive(),
+});
+
+export const salaryKasbonAllocationUpdateSchema = z.object({
+  amount: z.number().finite().positive(),
+});
+
+export const salaryAliasSchema = z.object({
+  salaryEmployeeId: z.string().uuid(),
+  sourceType: z.enum(["PICKUP", "DISPATCH", "BOTH"]),
+  aliasName: z.string().trim().min(1).max(150),
+});

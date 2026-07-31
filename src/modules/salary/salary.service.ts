@@ -11,6 +11,8 @@ import {
   SALARY_PICKUP_SOURCE,
 } from "./salary.domain";
 import { SalaryError } from "./salary.api";
+import { refreshClosingEmployeeTotals } from "./salary.closing.service";
+import { normalizeSalaryEmployeeName } from "./salary.calculation";
 
 export type SalaryScope = { tenantId: string; outletId: string };
 export type SalaryContext = SalaryScope & {
@@ -342,6 +344,78 @@ export async function listSalaryTeam(
   });
 }
 
+export async function listSalaryEmployeeAliases(scope: SalaryScope) {
+  return prisma.salaryEmployeeAlias.findMany({
+    where: {
+      tenantId: scope.tenantId,
+      outletId: scope.outletId,
+      isActive: true,
+    },
+    include: { employee: { select: { name: true } } },
+    orderBy: [{ aliasName: "asc" }, { sourceType: "asc" }],
+  });
+}
+
+export async function createSalaryEmployeeAlias(
+  context: SalaryContext,
+  input: {
+    salaryEmployeeId: string;
+    sourceType: "PICKUP" | "DISPATCH" | "BOTH";
+    aliasName: string;
+  },
+) {
+  return prisma.$transaction(async (tx) => {
+    const employee = await tx.salaryEmployee.findFirst({
+      where: {
+        id: input.salaryEmployeeId,
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+      },
+    });
+    if (!employee) throw new SalaryError("SALARY_EMPLOYEE_NOT_FOUND", 404);
+    const normalizedAlias = normalizeSalaryEmployeeName(input.aliasName);
+    const sourceTypes = input.sourceType === "BOTH"
+      ? ["PICKUP", "DISPATCH", "BOTH"] as const
+      : [input.sourceType, "BOTH"] as const;
+    const conflict = await tx.salaryEmployeeAlias.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        normalizedAlias,
+        isActive: true,
+        sourceType: { in: [...sourceTypes] },
+      },
+    });
+    if (conflict) throw new SalaryError("SALARY_ALIAS_CONFLICT", 409);
+    const alias = await tx.salaryEmployeeAlias.create({
+      data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryEmployeeId: employee.id,
+        sourceType: input.sourceType,
+        aliasName: input.aliasName,
+        normalizedAlias,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        actorId: context.actorId,
+        action: "CREATE",
+        entityType: "SALARY_EMPLOYEE_ALIAS",
+        entityId: alias.id,
+        metadata: {
+          employeeId: employee.id,
+          sourceType: input.sourceType,
+          aliasName: input.aliasName,
+        },
+      },
+    });
+    return alias;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
 export async function createSalaryEmployee(
   context: SalaryContext,
   input: {
@@ -543,7 +617,17 @@ export async function assignSalaryProfile(
 export async function listSalaryClosings(scope: SalaryScope) {
   return prisma.salaryClosing.findMany({
     where: { tenantId: scope.tenantId, outletId: scope.outletId },
-    include: { createdBy: { select: { name: true } } },
+    include: {
+      createdBy: { select: { name: true } },
+      employees: {
+        select: {
+          systemIncomeTotal: true,
+          manualAdditionTotal: true,
+          manualDeductionTotal: true,
+          netSalary: true,
+        },
+      },
+    },
     orderBy: [{ periodStart: "desc" }, { createdAt: "desc" }],
   });
 }
@@ -648,8 +732,8 @@ export async function createSalaryAdjustment(
       include: { salaryClosing: { select: { status: true } } },
     });
     if (!employee) throw new SalaryError("SALARY_SCOPE_MISMATCH", 404);
-    if (["PROCESSED", "PAID"].includes(employee.salaryClosing.status)) {
-      throw new SalaryError("SALARY_SAVE_FAILED", 409);
+    if (employee.salaryClosing.status !== "CLOSED") {
+      throw new SalaryError("SALARY_CLOSING_LOCKED", 409);
     }
     const adjustment = await tx.salaryAdjustment.create({ data: {
       tenantId: context.tenantId,
@@ -676,6 +760,7 @@ export async function createSalaryAdjustment(
         reason: input.reason,
       },
     } });
+    await refreshClosingEmployeeTotals(tx, context, employee.id);
     return adjustment;
   });
 }
@@ -693,8 +778,16 @@ export async function voidSalaryAdjustment(
         outletId: context.outletId,
         voidedAt: null,
       },
+      include: {
+        closingEmployee: {
+          include: { salaryClosing: { select: { status: true } } },
+        },
+      },
     });
     if (!adjustment) throw new SalaryError("SALARY_SCOPE_MISMATCH", 404);
+    if (adjustment.closingEmployee.salaryClosing.status !== "CLOSED") {
+      throw new SalaryError("SALARY_CLOSING_LOCKED", 409);
+    }
     const updated = await tx.salaryAdjustment.update({
       where: { id: adjustment.id },
       data: {
@@ -712,6 +805,11 @@ export async function voidSalaryAdjustment(
       entityId: adjustment.id,
       metadata: { reason },
     } });
+    await refreshClosingEmployeeTotals(
+      tx,
+      context,
+      adjustment.salaryClosingEmployeeId,
+    );
     return updated;
   });
 }

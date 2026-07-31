@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import {
   canReadSalaryClosing,
-  getSalaryClosingReview,
+  getSalaryClosingEmployeeReview,
   salaryScope,
 } from "@/modules/salary";
 
-type Context = { params: Promise<{ id: string }> };
+type Context = {
+  params: Promise<{ id: string; employeeId: string }>;
+};
 
 export async function GET(_: Request, context: Context) {
   const session = await getSession();
@@ -16,8 +18,13 @@ export async function GET(_: Request, context: Context) {
   }
   const scope = salaryScope(session);
   if (!scope) return NextResponse.json({ error: { code: "OUTLET_REQUIRED" } }, { status: 400 });
-  const data = await getSalaryClosingReview(scope, (await context.params).id);
+  const params = await context.params;
+  const data = await getSalaryClosingEmployeeReview(
+    scope,
+    params.id,
+    params.employeeId,
+  );
   return data
     ? NextResponse.json({ data })
-    : NextResponse.json({ error: { code: "SALARY_CLOSING_NOT_FOUND" } }, { status: 404 });
+    : NextResponse.json({ error: { code: "SALARY_EMPLOYEE_NOT_FOUND" } }, { status: 404 });
 }

@@ -586,11 +586,10 @@ describe("Salary domain, permissions, UI and migration contracts", () => {
     expect(setting).toContain("max-w-[960px]");
     expect(setting).toContain("overflow-y-auto");
     expect(setting).toContain("if (profileSaving) return");
-    expect(closing).toContain("min-w-[800px]");
-    expect(closing).toContain(
-      "Perhitungan salary akan tersedia pada tahap Generate Closing.",
-    );
+    expect(closing).toContain("min-w-[1180px]");
+    expect(closing).toContain("Hitung, review, dan finalisasi");
     expect(recap).toContain("Salary yang sudah diproses akan tampil di sini.");
+    expect(recap).toContain("Masuk Rekap");
     for (const route of ["salary-setting", "salary-closing", "salary-recap"]) {
       expect(sidebar).toContain(`/dashboard/finance/${route}`);
     }
