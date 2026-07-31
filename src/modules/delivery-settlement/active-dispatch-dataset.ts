@@ -1,51 +1,90 @@
 import "server-only";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { selectLatestDispatchRecords } from "./dispatch-deduplication";
+import {
+  canonicalDispatchText,
+  selectLatestDispatchRecords,
+} from "./dispatch-deduplication";
 
-export const canonicalDispatchText = (value: string | null | undefined) =>
-  (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ")
-    .toLocaleUpperCase("id-ID");
+export { canonicalDispatchText };
 
-export async function getActiveDispatchDataset(input: {
+const dispatchSelect = {
+  id: true,
+  operationalDate: true,
+  waybillNo: true,
+  courierNameRaw: true,
+  deliveryStatusRaw: true,
+  receiverName: true,
+  chargeWeight: true,
+  syncStatus: true,
+  isActive: true,
+  sourceRecordKey: true,
+  sourceFetchedAt: true,
+  dispatchAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.RawDispatchSelect;
+
+export type ActiveDispatchRecord = Prisma.RawDispatchGetPayload<{
+  select: typeof dispatchSelect;
+}>;
+
+type DispatchReader = {
+  rawDispatch: {
+    findMany(args: Prisma.RawDispatchFindManyArgs): Promise<ActiveDispatchRecord[]>;
+  };
+};
+
+export async function getActiveDispatchRecords(input: {
   tenantId: string;
   outletId: string;
-  operationalDate: Date;
+  operationalDate?: Date;
+  periodStart?: Date;
+  periodEnd?: Date;
+  status?: string;
+  courier?: string;
+  waybill?: string;
+  client?: DispatchReader;
 }) {
-  const records = await prisma.rawDispatch.findMany({
+  const operationalDate = input.operationalDate ?? (
+    input.periodStart && input.periodEnd
+      ? { gte: input.periodStart, lte: input.periodEnd }
+      : undefined
+  );
+  if (!operationalDate) throw new Error("ACTIVE_DISPATCH_DATE_REQUIRED");
+  const records = await (input.client ?? prisma as DispatchReader).rawDispatch.findMany({
     where: {
       tenantId: input.tenantId,
       outletId: input.outletId,
-      operationalDate: input.operationalDate,
+      operationalDate,
       syncStatus: "NORMALIZED",
       isActive: true,
     },
-    select: {
-      id: true,
-      operationalDate: true,
-      waybillNo: true,
-      courierNameRaw: true,
-      deliveryStatusRaw: true,
-      receiverName: true,
-      syncStatus: true,
-      isActive: true,
-      sourceRecordKey: true,
-      sourceFetchedAt: true,
-      dispatchAt: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: dispatchSelect,
     orderBy: [
       { sourceFetchedAt: "desc" },
       { dispatchAt: "desc" },
       { updatedAt: "desc" },
     ],
   });
-  const finalRecords = selectLatestDispatchRecords(records);
-  if (records.length !== finalRecords.length) {
+  const activeRecords = records.filter((record) =>
+    record.isActive && record.syncStatus === "NORMALIZED"
+  );
+  const finalRecords = selectLatestDispatchRecords(activeRecords);
+  if (activeRecords.length !== finalRecords.length) {
     console.warn("ACTIVE_DISPATCH_DUPLICATE_WAYBILL", {
-      activeRecordCount: records.length,
+      activeRecordCount: activeRecords.length,
       uniqueWaybillCount: finalRecords.length,
     });
   }
-  return finalRecords;
+  const status = canonicalDispatchText(input.status);
+  const courier = canonicalDispatchText(input.courier);
+  const waybill = canonicalDispatchText(input.waybill);
+  return finalRecords.filter((record) =>
+    (!status || canonicalDispatchText(record.deliveryStatusRaw) === status) &&
+    (!courier || canonicalDispatchText(record.courierNameRaw).includes(courier)) &&
+    (!waybill || canonicalDispatchText(record.waybillNo).includes(waybill))
+  );
 }
+
+export const getActiveDispatchDataset = getActiveDispatchRecords;

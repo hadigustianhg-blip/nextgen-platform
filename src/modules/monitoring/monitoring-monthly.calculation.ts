@@ -3,6 +3,12 @@ import {
   calculateAchievement,
   DELIVERY_TARGET,
 } from "./monitoring-daily.calculation";
+import {
+  canonicalDispatchText,
+} from "@/modules/delivery-settlement/dispatch-deduplication";
+import type {
+  ActiveDispatchRecord,
+} from "@/modules/delivery-settlement/active-dispatch-dataset";
 
 export type DailyDeliveryRow = {
   businessDate: string;
@@ -28,6 +34,35 @@ const normalizedKey = (value: string) =>
     .trim()
     .replace(/\s+/g, " ")
     .toLocaleUpperCase("id-ID");
+
+export function buildDailyActiveDeliveryRows(records: ActiveDispatchRecord[]) {
+  const groups = new Map<string, DailyDeliveryRow>();
+  for (const record of records) {
+    const businessDate = record.operationalDate.toISOString().slice(0, 10);
+    const normalizedCourier = (record.courierNameRaw ?? "")
+      .normalize("NFKC").trim().replace(/\s+/g, " ");
+    const teamName = normalizedCourier || "Team Belum Terpetakan";
+    const key = `${businessDate}\u0000${canonicalDispatchText(teamName)}`;
+    const row = groups.get(key) ?? {
+      businessDate,
+      teamName,
+      totalDelivery: 0,
+      totalTtd: 0,
+      totalPending: 0,
+    };
+    row.totalDelivery += 1;
+    if (canonicalDispatchText(record.deliveryStatusRaw) === "PENERIMAAN NORMAL") {
+      row.totalTtd += 1;
+    } else {
+      row.totalPending += 1;
+    }
+    groups.set(key, row);
+  }
+  return [...groups.values()].sort((left, right) =>
+    left.businessDate.localeCompare(right.businessDate) ||
+    left.teamName.localeCompare(right.teamName, "id-ID")
+  );
+}
 
 export function buildMonthlyDeliveryRows(rows: DailyDeliveryRow[]) {
   const groups = new Map<

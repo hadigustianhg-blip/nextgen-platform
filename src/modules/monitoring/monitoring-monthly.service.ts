@@ -2,12 +2,13 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import {
-  buildDeliveryRows,
   buildPickupRows,
   calculateAchievement,
   DELIVERY_TARGET,
 } from "./monitoring-daily.calculation";
+import { getActiveDispatchRecords } from "@/modules/delivery-settlement/active-dispatch-dataset";
 import {
+  buildDailyActiveDeliveryRows,
   buildMonthlyDeliveryRows,
   buildMonthlyPickupRows,
   paginateMonthly,
@@ -34,38 +35,15 @@ export async function getMonitoringMonthly(input: {
     syncStatus: "NORMALIZED" as const,
   };
   const [
-    deliveryTotals,
-    deliveryReceived,
-    deliveryPending,
+    deliveryRecords,
     pickupTotals,
     pickupMarketplace,
   ] = await Promise.all([
-    prisma.rawDispatch.groupBy({
-      by: ["operationalDate", "courierNameRaw"],
-      where: whereScope,
-      _count: { waybillNo: true },
-    }),
-    prisma.rawDispatch.groupBy({
-      by: ["operationalDate", "courierNameRaw"],
-      where: {
-        ...whereScope,
-        deliveryStatusRaw: {
-          equals: "Penerimaan Normal",
-          mode: "insensitive",
-        },
-      },
-      _count: { waybillNo: true },
-    }),
-    prisma.rawDispatch.groupBy({
-      by: ["operationalDate", "courierNameRaw"],
-      where: {
-        ...whereScope,
-        deliveryStatusRaw: {
-          equals: "Belum diterima",
-          mode: "insensitive",
-        },
-      },
-      _count: { waybillNo: true },
+    getActiveDispatchRecords({
+      tenantId: input.tenantId,
+      outletId: input.outletId,
+      periodStart: dateValue(input.startDate),
+      periodEnd: dateValue(input.endDate),
     }),
     prisma.rawPickup.groupBy({
       by: ["operationalDate", "staffNameRaw"],
@@ -85,7 +63,7 @@ export async function getMonitoringMonthly(input: {
   ]);
 
   const deliveryRows = buildMonthlyDeliveryRows(
-    buildDeliveryRows(deliveryTotals, deliveryReceived, deliveryPending),
+    buildDailyActiveDeliveryRows(deliveryRecords),
   );
   const pickupRows = buildMonthlyPickupRows(
     buildPickupRows(pickupTotals, pickupMarketplace),

@@ -1,5 +1,7 @@
+import { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
+  buildDailyActiveDeliveryRows,
   buildMonthlyDeliveryRows,
   buildMonthlyPickupRows,
   paginateMonthly,
@@ -7,6 +9,29 @@ import {
 import { monitoringMonthlyQuerySchema } from "./monitoring-monthly.validation";
 
 describe("Monitoring Monthly", () => {
+  it("builds daily and team metrics from unique active final dispatch records", () => {
+    const base = {
+      receiverName: null, chargeWeight: new Prisma.Decimal(1), syncStatus: "NORMALIZED" as const,
+      isActive: true, sourceFetchedAt: new Date("2026-07-31T12:00:00Z"),
+      dispatchAt: null, createdAt: new Date("2026-07-31T10:00:00Z"),
+      updatedAt: new Date("2026-07-31T12:00:00Z"),
+    };
+    const daily = buildDailyActiveDeliveryRows([
+      { ...base, id: "one", sourceRecordKey: "one", operationalDate: new Date("2026-07-30T00:00:00Z"), waybillNo: "WB-1", courierNameRaw: "Courier A", deliveryStatusRaw: " PENERIMAAN   NORMAL " },
+      { ...base, id: "two", sourceRecordKey: "two", operationalDate: new Date("2026-07-31T00:00:00Z"), waybillNo: "WB-2", courierNameRaw: "courier a", deliveryStatusRaw: "Belum diterima" },
+      { ...base, id: "three", sourceRecordKey: "three", operationalDate: new Date("2026-07-31T00:00:00Z"), waybillNo: "WB-3", courierNameRaw: null, deliveryStatusRaw: "Pereturan Penerimaan" },
+    ]);
+    const monthly = buildMonthlyDeliveryRows(daily);
+    expect(daily.reduce((sum, row) => sum + row.totalDelivery, 0)).toBe(3);
+    expect(daily.reduce((sum, row) => sum + row.totalTtd, 0)).toBe(1);
+    expect(daily.reduce((sum, row) => sum + row.totalPending, 0)).toBe(2);
+    expect(monthly.reduce((sum, row) => sum + row.totalDelivery, 0)).toBe(3);
+    expect(monthly.reduce((sum, row) => sum + row.totalTtd, 0)).toBe(1);
+    expect(monthly.reduce((sum, row) => sum + row.totalPending, 0)).toBe(2);
+    expect(monthly.find((row) => row.teamName === "Team Belum Terpetakan"))
+      .toMatchObject({ totalDelivery: 1, totalPending: 1 });
+  });
+
   it("accumulates 20 + 20 + 20 delivery into 60 with distinct active days", () => {
     const rows = buildMonthlyDeliveryRows(
       ["26", "27", "28"].map((day, index) => ({

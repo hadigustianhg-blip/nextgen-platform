@@ -11,6 +11,7 @@ import {
 } from "./salary.calculation";
 import { SalaryError } from "./salary.api";
 import type { SalaryContext, SalaryScope } from "./salary.service";
+import { getActiveDispatchRecords } from "@/modules/delivery-settlement/active-dispatch-dataset";
 
 const zero = () => new Prisma.Decimal(0);
 const dateKey = (value: Date) => value.toISOString().slice(0, 10);
@@ -159,26 +160,13 @@ export async function generateSalaryClosing(
         },
         orderBy: [{ operationalDate: "asc" }, { id: "asc" }],
       }),
-      tx.rawDispatch.findMany({
-        where: {
-          tenantId: context.tenantId,
-          outletId: context.outletId,
-          operationalDate: {
-            gte: closing.periodStart,
-            lte: closing.periodEnd,
-          },
-          syncStatus: { not: "ERROR" },
-        },
-        select: {
-          id: true,
-          sourceRecordKey: true,
-          operationalDate: true,
-          waybillNo: true,
-          courierNameRaw: true,
-          deliveryStatusRaw: true,
-          chargeWeight: true,
-        },
-        orderBy: [{ operationalDate: "asc" }, { id: "asc" }],
+      getActiveDispatchRecords({
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        periodStart: closing.periodStart,
+        periodEnd: closing.periodEnd,
+        status: "Penerimaan Normal",
+        client: tx,
       }),
       tx.operationalExpense.findMany({
         where: {

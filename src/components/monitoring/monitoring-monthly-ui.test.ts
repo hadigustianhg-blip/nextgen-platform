@@ -23,7 +23,7 @@ describe("Monitoring Monthly contracts", () => {
     expect(source).not.toContain("xl:grid-cols-2");
   });
 
-  it("uses scoped aggregate range queries without loading raw rows", async () => {
+  it("uses the shared scoped active dispatch dataset and keeps Pickup aggregated", async () => {
     const source = await readFile(
       new URL(
         "../../modules/monitoring/monitoring-monthly.service.ts",
@@ -35,9 +35,10 @@ describe("Monitoring Monthly contracts", () => {
     expect(source).toContain("outletId: input.outletId");
     expect(source).toContain("gte: dateValue(input.startDate)");
     expect(source).toContain("lte: dateValue(input.endDate)");
-    expect(source).toContain("prisma.rawDispatch.groupBy");
+    expect(source).toContain("getActiveDispatchRecords");
+    expect(source).toContain("buildDailyActiveDeliveryRows");
     expect(source).toContain("prisma.rawPickup.groupBy");
-    expect(source).not.toContain("findMany");
+    expect(source).not.toContain("prisma.rawDispatch.groupBy");
   });
 
   it("protects the API and keeps Refresh database-only", async () => {

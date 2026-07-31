@@ -10,6 +10,10 @@ export type VersionedDispatchRecord = {
 export const canonicalWaybill = (value: string | null | undefined) =>
   (value ?? "").normalize("NFKC").trim().toLocaleUpperCase("id-ID");
 
+export const canonicalDispatchText = (value: string | null | undefined) =>
+  (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ")
+    .toLocaleUpperCase("id-ID");
+
 const newestFirst = <T extends VersionedDispatchRecord>(left: T, right: T) =>
   right.sourceFetchedAt.getTime() - left.sourceFetchedAt.getTime() ||
   (right.dispatchAt?.getTime() ?? 0) - (left.dispatchAt?.getTime() ?? 0) ||
