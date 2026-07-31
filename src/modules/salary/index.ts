@@ -1,1 +1,5 @@
-// Salary module public API will be introduced with its first vertical slice.
+export * from "./salary.api";
+export * from "./salary.authorization";
+export * from "./salary.domain";
+export * from "./salary.service";
+export * from "./salary.validation";

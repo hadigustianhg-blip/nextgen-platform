@@ -423,6 +423,18 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
                 active={pathname.startsWith("/dashboard/finance/create-invoice")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<FileCheck2 size={17}/>} />
+              <SidebarChild href="/dashboard/finance/salary-setting" label="Salary Setting"
+                active={pathname.startsWith("/dashboard/finance/salary-setting")}
+                collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
+                onNavigate={closeMobile} icon={<Settings size={17}/>} />
+              <SidebarChild href="/dashboard/finance/salary-closing" label="Salary Closing"
+                active={pathname.startsWith("/dashboard/finance/salary-closing")}
+                collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
+                onNavigate={closeMobile} icon={<CalendarDays size={17}/>} />
+              <SidebarChild href="/dashboard/finance/salary-recap" label="Salary Recap"
+                active={pathname.startsWith("/dashboard/finance/salary-recap")}
+                collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
+                onNavigate={closeMobile} icon={<WalletCards size={17}/>} />
             </div>}
           </div>
 

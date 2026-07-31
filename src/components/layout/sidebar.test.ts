@@ -173,4 +173,19 @@ describe("pickup navigation", () => {
       'active={pathname.startsWith("/dashboard/finance/create-invoice")}',
     );
   });
+
+  it("exposes Salary Setting, Closing, and Recap under Finance & HR", async () => {
+    const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
+    for (const [route, label] of [
+      ["salary-setting", "Salary Setting"],
+      ["salary-closing", "Salary Closing"],
+      ["salary-recap", "Salary Recap"],
+    ]) {
+      expect(source).toContain(`href="/dashboard/finance/${route}"`);
+      expect(source).toContain(`label="${label}"`);
+      expect(source).toContain(
+        `pathname.startsWith("/dashboard/finance/${route}")`,
+      );
+    }
+  });
 });
