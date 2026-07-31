@@ -11,7 +11,13 @@ const db = vi.hoisted(() => ({
 }));
 const tx = vi.hoisted(() => ({
   masterPickup: { findMany: vi.fn() },
-  outletBankAccount: { findFirst: vi.fn() },
+  outletBankAccount: {
+    count: vi.fn(),
+    create: vi.fn(),
+    findFirst: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
+  },
   invoice: {
     create: vi.fn(),
     findFirst: vi.fn(),
@@ -27,6 +33,7 @@ import {
   getInvoiceSourceItems,
   getInvoiceSourceSellers,
   createInvoiceDraft,
+  createOutletBankAccount,
   getActiveOutletBankAccounts,
   getInvoice,
   invoiceJsonSafe,
@@ -34,6 +41,7 @@ import {
   normalizeWhatsappNumber,
   prepareInvoiceWhatsapp,
   sellerIdentity,
+  updateOutletBankAccount,
 } from "./invoice.service";
 import {
   canExportInvoice,
@@ -43,7 +51,9 @@ import {
   canReadInvoice,
   canVoidInvoice,
 } from "./invoice.authorization";
-import { invoiceDraftSchema, invoiceRangeSchema } from "./invoice.validation";
+import {
+  invoiceDraftSchema, invoiceRangeSchema, outletBankAccountSchema,
+} from "./invoice.validation";
 import { createInvoicePdf, invoicePdfFilename } from "./invoice.pdf";
 import {
   buildSenderDetailUrl,
@@ -262,12 +272,113 @@ describe("Invoice recipient detail", () => {
 });
 
 describe("Invoice outlet payment accounts", () => {
+  it("uses an additive default-account migration with one default per outlet", async () => {
+    const [schema, migration] = await Promise.all([
+      readFile(new URL("../../../prisma/schema.prisma", import.meta.url), "utf8"),
+      readFile(new URL(
+        "../../../prisma/migrations/20260731000100_add_outlet_bank_account_default/migration.sql",
+        import.meta.url,
+      ), "utf8"),
+    ]);
+    expect(schema).toContain("isDefault");
+    expect(migration).toContain('ADD COLUMN "isDefault" BOOLEAN NOT NULL DEFAULT false');
+    expect(migration).toContain('"OutletBankAccount_one_default_per_outlet_idx"');
+    expect(migration).toContain('WHERE "isDefault" = true');
+    expect(migration).not.toMatch(/DROP TABLE|DROP COLUMN/);
+  });
+
   it("loads only active accounts for the active tenant and outlet", async () => {
     db.outletBankAccount.findMany.mockResolvedValueOnce([]);
     await getActiveOutletBankAccounts(scope);
     expect(db.outletBankAccount.findMany).toHaveBeenCalledWith({
       where: { ...scope, isActive: true },
-      orderBy: [{ displayOrder: "asc" }, { bankName: "asc" }],
+      orderBy: [
+        { isDefault: "desc" },
+        { displayOrder: "asc" },
+        { bankName: "asc" },
+      ],
+      select: {
+        id: true,
+        bankName: true,
+        accountNumber: true,
+        accountHolder: true,
+        isDefault: true,
+      },
+    });
+  });
+
+  it("makes the first account default and preserves leading zeroes", async () => {
+    expect(outletBankAccountSchema.parse({
+      bankName: " Bank Test ",
+      accountNumber: " 0012 345 ",
+      accountHolder: " Outlet Test ",
+    })).toMatchObject({
+      bankName: "Bank Test",
+      accountNumber: "0012345",
+      accountHolder: "Outlet Test",
+    });
+    db.$transaction.mockImplementationOnce(async (callback) => callback(tx));
+    tx.outletBankAccount.count.mockResolvedValueOnce(0);
+    tx.outletBankAccount.create.mockImplementationOnce(async ({ data }) => ({
+      id: "account-1",
+      ...data,
+    }));
+    await createOutletBankAccount(scope, {
+      bankName: " Bank Test ",
+      accountNumber: " 0012 345 ",
+      accountHolder: " Outlet Test ",
+      isDefault: false,
+    });
+    expect(tx.outletBankAccount.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        ...scope,
+        bankName: "Bank Test",
+        accountNumber: "0012345",
+        accountHolder: "Outlet Test",
+        isActive: true,
+        isDefault: true,
+        displayOrder: 0,
+      },
+    }));
+  });
+
+  it("changes the default account atomically within the active scope", async () => {
+    db.$transaction.mockImplementationOnce(async (callback) => callback(tx));
+    tx.outletBankAccount.findFirst.mockResolvedValueOnce({
+      id: "account-2",
+      isDefault: false,
+    });
+    tx.outletBankAccount.update.mockResolvedValueOnce({
+      id: "account-2",
+      isDefault: true,
+    });
+    await updateOutletBankAccount(scope, "account-2", {
+      bankName: "Bank Two",
+      accountNumber: "0002",
+      accountHolder: "Outlet",
+      isDefault: true,
+    });
+    expect(tx.outletBankAccount.updateMany).toHaveBeenCalledWith({
+      where: { ...scope, isDefault: true },
+      data: { isDefault: false },
+    });
+    expect(tx.outletBankAccount.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "account-2" },
+      data: expect.objectContaining({ isDefault: true }),
+    }));
+  });
+
+  it("rejects editing an account from another tenant or outlet", async () => {
+    db.$transaction.mockImplementationOnce(async (callback) => callback(tx));
+    tx.outletBankAccount.findFirst.mockResolvedValueOnce(null);
+    await expect(updateOutletBankAccount(scope, "other", {
+      bankName: "Bank",
+      accountNumber: "001",
+      accountHolder: "Holder",
+      isDefault: false,
+    })).rejects.toMatchObject({
+      code: "PAYMENT_ACCOUNT_NOT_ACCESSIBLE",
+      status: 404,
     });
   });
 });

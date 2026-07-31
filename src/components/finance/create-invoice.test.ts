@@ -53,6 +53,22 @@ describe("Create Invoice interface", () => {
     expect(getFirstSelectedWaybill(items, new Set())).toBeNull();
   });
 
+  it("keeps recipient detail synchronized with the checked waybill UX", async () => {
+    const source = await readFile(
+      new URL("./create-invoice-client.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("const firstSelectedWaybill =");
+    expect(source).toContain("!selectedSeller || !firstSelectedWaybill");
+    expect(source).toContain("Detail akan diambil dari resi");
+    expect(source).toContain("Centang minimal satu resi pada daftar di bawah.");
+    expect(source).toContain("nextWaybill !== firstSelectedWaybill");
+    expect(source).toContain("setRecipientDetailWaybill(\"\")");
+    expect(source).toContain("scrollIntoView");
+    expect(source).toContain('behavior: "smooth"');
+    expect(source).not.toContain("Pilih minimal satu resi terlebih dahulu.");
+  });
+
   it("builds source-items query with the actual seller key and active dates", () => {
     const query = buildInvoiceSourceItemsQuery({
       startDate: "2026-07-01",
@@ -234,7 +250,8 @@ describe("Create Invoice interface", () => {
     for (const text of [
       "Tampilkan Detail Penerima",
       "Mengambil detail...",
-      "Detail penerima berhasil ditampilkan",
+      "Detail penerima berhasil diambil dari resi",
+      "Centang minimal satu resi pada daftar di bawah.",
       "Chat WA Customer",
       "Informasi Customer",
       "Informasi Pembayaran",
@@ -268,7 +285,10 @@ describe("Create Invoice interface", () => {
     expect(page).toContain("tenantId: session.tenantId");
     expect(page).toContain("outletId: session.outletId");
     expect(client).toContain("bankAccounts.length ? bankAccounts[0].id");
-    expect(client).toContain("disabled={bankAccounts.length === 1}");
+    expect(client).toContain("disabled={availableBankAccounts.length === 1}");
     expect(client).toContain("Rekening penerima pembayaran belum dikonfigurasi.");
+    expect(client).toContain("+ Tambah Rekening Penerima");
+    expect(client).toContain("Simpan Rekening");
+    expect(client).not.toContain("window.location.reload()");
   });
 });

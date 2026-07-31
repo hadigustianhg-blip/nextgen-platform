@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Check, ChevronRight, Download, Eye, FileCheck2, LoaderCircle,
   MessageCircle, ReceiptText, Save, Send, X,
@@ -95,6 +95,7 @@ type BankAccount = {
   bankName: string;
   accountNumber: string;
   accountHolder: string;
+  isDefault: boolean;
 };
 
 const today = jakartaOperationalDate();
@@ -145,6 +146,8 @@ export function CreateInvoiceClient({
   const [pdfLoadingId, setPdfLoadingId] = useState("");
   const [recipientLoadingId, setRecipientLoadingId] = useState("");
   const [recipientLoadedId, setRecipientLoadedId] = useState("");
+  const [recipientDetailWaybill, setRecipientDetailWaybill] = useState("");
+  const [recipientHelper, setRecipientHelper] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [itemsError, setItemsError] = useState("");
@@ -159,9 +162,22 @@ export function CreateInvoiceClient({
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   const [recipientCity, setRecipientCity] = useState("");
+  const [availableBankAccounts, setAvailableBankAccounts] = useState(bankAccounts);
   const [selectedBankAccountId, setSelectedBankAccountId] = useState(
     bankAccounts.length ? bankAccounts[0].id : "",
   );
+  const [bankModalOpen, setBankModalOpen] = useState(false);
+  const [editingBankAccountId, setEditingBankAccountId] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [accountHolder, setAccountHolder] = useState("");
+  const [makeDefaultAccount, setMakeDefaultAccount] = useState(
+    bankAccounts.length === 0,
+  );
+  const [bankSaving, setBankSaving] = useState(false);
+  const [bankError, setBankError] = useState("");
+  const [highlightWaybills, setHighlightWaybills] = useState(false);
+  const waybillTableRef = useRef<HTMLDivElement>(null);
   const [invoiceDate, setInvoiceDate] = useState(today);
   const [dueDate, setDueDate] = useState(plusDays(today, 7));
   const [notes, setNotes] = useState("");
@@ -213,6 +229,12 @@ export function CreateInvoiceClient({
     setSelectedSeller(seller);
     setSelectedIds(new Set());
     setDraftId(null);
+    setCustomerName(seller.customerName);
+    setWhatsapp("");
+    setRecipientCity("");
+    setRecipientDetailWaybill("");
+    setRecipientLoadedId("");
+    setRecipientHelper("");
     setDetailLoading(true);
     setError("");
     setItemsError("");
@@ -236,6 +258,9 @@ export function CreateInvoiceClient({
       setEmail(payload.data[0]?.email || "");
       setAddress(payload.data[0]?.address || "");
       setRecipientCity("");
+      setRecipientDetailWaybill("");
+      setRecipientLoadedId("");
+      setRecipientHelper("");
     } catch (cause) {
       setItems([]);
       setItemsError(cause instanceof Error
@@ -247,12 +272,10 @@ export function CreateInvoiceClient({
   }
 
   function toggleItem(id: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    updateSelectedIds(next);
   }
 
   const selectable = selectableInvoiceItems(items);
@@ -262,7 +285,8 @@ export function CreateInvoiceClient({
   const selectedSubtotal = sumMoney(selectedItems.map((item) => item.freightAmount));
   const selectedDiscount = sumMoney(selectedItems.map((item) => item.discountAmount));
   const selectedTotal = sumMoney(selectedItems.map((item) => item.obligationAmount));
-  const selectedBankAccount = bankAccounts.find(
+  const firstSelectedWaybill = getFirstSelectedWaybill(items, selectedIds);
+  const selectedBankAccount = availableBankAccounts.find(
     (account) => account.id === selectedBankAccountId,
   ) ?? null;
   const draftCanBeSaved = canSaveInvoiceDraft({
@@ -274,9 +298,24 @@ export function CreateInvoiceClient({
   });
 
   function toggleAll() {
-    setSelectedIds(allSelected
+    updateSelectedIds(allSelected
       ? new Set()
       : new Set(selectable.map((item) => item.id)));
+  }
+
+  function updateSelectedIds(next: Set<string>) {
+    const nextWaybill = getFirstSelectedWaybill(items, next);
+    if (nextWaybill !== firstSelectedWaybill && recipientDetailWaybill) {
+      setRecipientDetailWaybill("");
+      setRecipientLoadedId("");
+      setRecipientCity("");
+      setCustomerName(selectedSeller?.customerName ?? "");
+      setWhatsapp(items[0]?.whatsapp || "");
+      setRecipientHelper(nextWaybill
+        ? `Pilihan resi berubah. Ambil ulang detail dari resi ${nextWaybill}.`
+        : "Centang minimal satu resi pada daftar di bawah.");
+    }
+    setSelectedIds(next);
   }
 
   function draftPayload() {
@@ -385,7 +424,7 @@ export function CreateInvoiceClient({
       setEmail(invoice.emailSnapshot || "");
       setAddress(invoice.addressSnapshot || "");
       setRecipientCity(invoice.recipientCity || "");
-      setSelectedBankAccountId(bankAccounts.find((account) =>
+      setSelectedBankAccountId(availableBankAccounts.find((account) =>
         account.bankName === invoice.transferBankName &&
         account.accountNumber === invoice.transferAccountNumber &&
         account.accountHolder === invoice.transferAccountHolder
@@ -405,7 +444,7 @@ export function CreateInvoiceClient({
       setEmail(invoice.emailSnapshot || "");
       setAddress(invoice.addressSnapshot || "");
       setRecipientCity(invoice.recipientCity || "");
-      setSelectedBankAccountId(bankAccounts.find((account) =>
+      setSelectedBankAccountId(availableBankAccounts.find((account) =>
         account.bankName === invoice.transferBankName &&
         account.accountNumber === invoice.transferAccountNumber &&
         account.accountHolder === invoice.transferAccountHolder
@@ -464,9 +503,10 @@ export function CreateInvoiceClient({
 
   async function showSelectedRecipientDetail() {
     if (recipientLoadingId) return;
-    const waybillNo = getFirstSelectedWaybill(items, selectedIds);
+    const waybillNo = firstSelectedWaybill;
     if (!waybillNo) {
-      setError("Pilih minimal satu resi terlebih dahulu.");
+      setRecipientHelper("Centang minimal satu resi pada daftar di bawah.");
+      focusWaybillTable();
       return;
     }
     setRecipientLoadingId("form");
@@ -484,14 +524,95 @@ export function CreateInvoiceClient({
       setCustomerName(result.data.recipientName || customerName);
       setWhatsapp(result.data.recipientPhone || whatsapp);
       setRecipientCity(result.data.recipientCity || "");
+      setRecipientDetailWaybill(result.data.waybillNo);
       setRecipientLoadedId("form");
-      setNotice("Detail penerima berhasil ditampilkan");
+      setRecipientHelper(
+        `Detail penerima berhasil diambil dari resi ${result.data.waybillNo}.`,
+      );
     } catch (cause) {
       setError(cause instanceof Error
         ? cause.message
         : "Gagal mengambil detail penerima.");
     } finally {
       setRecipientLoadingId("");
+    }
+  }
+
+  function focusWaybillTable() {
+    waybillTableRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    setHighlightWaybills(true);
+    window.setTimeout(() => setHighlightWaybills(false), 1_500);
+  }
+
+  function openBankModal(account?: BankAccount) {
+    setEditingBankAccountId(account?.id ?? "");
+    setBankName(account?.bankName ?? "");
+    setAccountNumber(account?.accountNumber ?? "");
+    setAccountHolder(account?.accountHolder ?? "");
+    setMakeDefaultAccount(account?.isDefault ??
+      availableBankAccounts.length === 0);
+    setBankError("");
+    setBankModalOpen(true);
+  }
+
+  async function refreshBankAccounts(preferredId?: string) {
+    const response = await fetch("/api/finance/outlet-bank-accounts", {
+      cache: "no-store",
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error?.message ||
+        "Daftar rekening penerima tidak dapat dimuat.");
+    }
+    setAvailableBankAccounts(result.data);
+    const nextId = preferredId && result.data.some(
+      (account: BankAccount) => account.id === preferredId,
+    )
+      ? preferredId
+      : result.data[0]?.id ?? "";
+    setSelectedBankAccountId(nextId);
+  }
+
+  async function saveBankAccount() {
+    if (bankSaving) return;
+    if (!bankName.trim() || !accountNumber.trim() || !accountHolder.trim()) {
+      setBankError("Nama bank, nomor rekening, dan atas nama wajib diisi.");
+      return;
+    }
+    setBankSaving(true);
+    setBankError("");
+    try {
+      const response = await fetch(
+        editingBankAccountId
+          ? `/api/finance/outlet-bank-accounts/${editingBankAccountId}`
+          : "/api/finance/outlet-bank-accounts",
+        {
+        method: editingBankAccountId ? "PATCH" : "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          bankName,
+          accountNumber,
+          accountHolder,
+          isDefault: makeDefaultAccount,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error?.message ||
+          "Rekening penerima gagal disimpan.");
+      }
+      await refreshBankAccounts(result.data.id);
+      setBankModalOpen(false);
+      setNotice("Rekening penerima berhasil disimpan.");
+    } catch (cause) {
+      setBankError(cause instanceof Error
+        ? cause.message
+        : "Rekening penerima gagal disimpan.");
+    } finally {
+      setBankSaving(false);
     }
   }
 
@@ -623,27 +744,48 @@ export function CreateInvoiceClient({
                 onChange={(event) => setRecipientCity(event.target.value)}
                 className={nextgenControlClass}/>
             </div>
-            <button type="button"
-              disabled={recipientLoadingId === "form"}
-              onClick={() => void showSelectedRecipientDetail()}
-              className={nextgenNeutralButtonClass}>
-              {recipientLoadingId === "form" &&
-                <LoaderCircle className="animate-spin" size={17}/>}
-              {recipientLoadingId === "form"
-                ? "Mengambil detail..."
-                : recipientLoadedId === "form"
-                  ? "Detail penerima berhasil ditampilkan"
+            <div>
+              <button type="button"
+                disabled={!selectedSeller || !firstSelectedWaybill ||
+                  recipientLoadingId === "form"}
+                onClick={() => void showSelectedRecipientDetail()}
+                className={nextgenNeutralButtonClass}>
+                {recipientLoadingId === "form" &&
+                  <LoaderCircle className="animate-spin" size={17}/>}
+                {recipientLoadingId === "form"
+                  ? "Mengambil detail..."
                   : "Tampilkan Detail Penerima"}
-            </button>
+              </button>
+              <p className="mt-2 text-sm text-slate-500">
+                {recipientLoadingId === "form"
+                  ? "Mengambil detail..."
+                  : recipientHelper ||
+                    (firstSelectedWaybill
+                      ? `Detail akan diambil dari resi ${firstSelectedWaybill}.`
+                      : "Centang minimal satu resi pada daftar di bawah.")}
+              </p>
+              {!firstSelectedWaybill && <button type="button"
+                onClick={focusWaybillTable}
+                className="mt-1 text-sm font-semibold text-blue-700 hover:underline">
+                Lihat daftar resi
+              </button>}
+            </div>
           </AppCard>
 
           <AppCard className="space-y-4 rounded-2xl border border-slate-200 p-4 shadow-sm">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
               Informasi Pembayaran
             </p>
-            {bankAccounts.length === 0 ? <div role="status"
-              className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              Rekening penerima pembayaran belum dikonfigurasi.
+            {availableBankAccounts.length === 0 ? <div className="space-y-3">
+              <div role="status"
+                className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Rekening penerima pembayaran belum dikonfigurasi.
+              </div>
+              {canCreate && <button type="button"
+                onClick={() => openBankModal()}
+                className={nextgenNeutralButtonClass}>
+                + Tambah Rekening Penerima
+              </button>}
             </div> : <>
               <label className="block text-sm font-semibold text-slate-700">
                 Rekening Penerima
@@ -651,8 +793,8 @@ export function CreateInvoiceClient({
                   value={selectedBankAccountId}
                   onChange={(event) => setSelectedBankAccountId(event.target.value)}
                   className={`${nextgenControlClass} mt-1`}
-                  disabled={bankAccounts.length === 1}>
-                  {bankAccounts.map((account) => <option key={account.id} value={account.id}>
+                  disabled={availableBankAccounts.length === 1}>
+                  {availableBankAccounts.map((account) => <option key={account.id} value={account.id}>
                     {account.bankName} · {account.accountNumber} · {account.accountHolder}
                   </option>)}
                 </select>
@@ -668,6 +810,11 @@ export function CreateInvoiceClient({
                   <p className="mt-1 font-semibold text-slate-950">{value || "—"}</p>
                 </div>)}
               </div>
+              {canCreate && selectedBankAccount && <button type="button"
+                onClick={() => openBankModal(selectedBankAccount)}
+                className={nextgenNeutralButtonClass}>
+                Ubah
+              </button>}
             </>}
           </AppCard>
 
@@ -730,7 +877,10 @@ export function CreateInvoiceClient({
             </div>
           </AppCard>}
 
-          <div>
+          <div ref={waybillTableRef}
+            className={`rounded-2xl transition ${
+              highlightWaybills ? "ring-4 ring-blue-300 ring-offset-4" : ""
+            }`}>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="font-bold text-slate-950">Daftar Resi Belum Bayar</h3>
@@ -882,6 +1032,72 @@ export function CreateInvoiceClient({
         </tr>)}</tbody>
       </table></div>
     </SectionCard>
+
+    {bankModalOpen && <div
+      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
+      <ModalCard className="w-full max-w-lg">
+        <div className="flex items-center justify-between border-b p-5">
+          <div>
+            <p className="text-sm text-slate-500">Informasi Pembayaran</p>
+            <h2 className="text-xl font-bold">
+              {editingBankAccountId
+                ? "Ubah Rekening Penerima"
+                : "Tambah Rekening Penerima"}
+            </h2>
+          </div>
+          <button type="button" disabled={bankSaving}
+            onClick={() => setBankModalOpen(false)}><X/></button>
+        </div>
+        <div className="space-y-4 p-5">
+          {bankError && <div role="alert"
+            className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            {bankError}
+          </div>}
+          <label className="block text-sm font-semibold text-slate-700">
+            Nama Bank
+            <input aria-label="Nama Bank Rekening Penerima" value={bankName}
+              maxLength={100}
+              onChange={(event) => setBankName(event.target.value)}
+              className={`${nextgenControlClass} mt-1`}/>
+          </label>
+          <label className="block text-sm font-semibold text-slate-700">
+            Nomor Rekening
+            <input aria-label="Nomor Rekening Penerima"
+              value={accountNumber} maxLength={100}
+              inputMode="numeric"
+              onChange={(event) => setAccountNumber(event.target.value)}
+              className={`${nextgenControlClass} mt-1`}/>
+          </label>
+          <label className="block text-sm font-semibold text-slate-700">
+            Atas Nama
+            <input aria-label="Atas Nama Rekening Penerima"
+              value={accountHolder} maxLength={200}
+              onChange={(event) => setAccountHolder(event.target.value)}
+              className={`${nextgenControlClass} mt-1`}/>
+          </label>
+          <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-200 px-3 text-sm font-semibold">
+            <input type="checkbox" checked={makeDefaultAccount}
+              disabled={editingBankAccountId !== "" &&
+                Boolean(selectedBankAccount?.isDefault)}
+              onChange={(event) => setMakeDefaultAccount(event.target.checked)}/>
+            Jadikan rekening utama
+          </label>
+        </div>
+        <div className="flex justify-end gap-3 border-t p-4">
+          <button type="button" disabled={bankSaving}
+            onClick={() => setBankModalOpen(false)}
+            className={nextgenNeutralButtonClass}>
+            Batal
+          </button>
+          <button type="button" disabled={bankSaving}
+            onClick={() => void saveBankAccount()}
+            className={nextgenButtonClass}>
+            {bankSaving && <LoaderCircle className="animate-spin" size={17}/>}
+            {bankSaving ? "Menyimpan..." : "Simpan Rekening"}
+          </button>
+        </div>
+      </ModalCard>
+    </div>}
 
     {currentInvoice && currentInvoice.status !== "DRAFT" &&
       <InvoicePreview invoice={currentInvoice} onClose={() => setCurrentInvoice(null)}

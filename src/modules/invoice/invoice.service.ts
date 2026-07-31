@@ -821,6 +821,103 @@ export async function prepareInvoiceWhatsapp(context: Context, invoiceId: string
 export async function getActiveOutletBankAccounts(scope: Scope) {
   return prisma.outletBankAccount.findMany({
     where: { ...scope, isActive: true },
-    orderBy: [{ displayOrder: "asc" }, { bankName: "asc" }],
+    orderBy: [
+      { isDefault: "desc" },
+      { displayOrder: "asc" },
+      { bankName: "asc" },
+    ],
+    select: {
+      id: true,
+      bankName: true,
+      accountNumber: true,
+      accountHolder: true,
+      isDefault: true,
+    },
   });
+}
+
+export async function createOutletBankAccount(
+  scope: Scope,
+  input: {
+    bankName: string;
+    accountNumber: string;
+    accountHolder: string;
+    isDefault: boolean;
+  },
+) {
+  return prisma.$transaction(async (tx) => {
+    const activeCount = await tx.outletBankAccount.count({
+      where: { ...scope, isActive: true },
+    });
+    const makeDefault = activeCount === 0 || input.isDefault;
+    if (makeDefault) {
+      await tx.outletBankAccount.updateMany({
+        where: { ...scope, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+    return tx.outletBankAccount.create({
+      data: {
+        ...scope,
+        bankName: input.bankName.trim(),
+        accountNumber: input.accountNumber.replace(/\s+/g, ""),
+        accountHolder: input.accountHolder.trim(),
+        isActive: true,
+        isDefault: makeDefault,
+        displayOrder: makeDefault ? 0 : activeCount,
+      },
+      select: {
+        id: true,
+        bankName: true,
+        accountNumber: true,
+        accountHolder: true,
+        isDefault: true,
+      },
+    });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function updateOutletBankAccount(
+  scope: Scope,
+  accountId: string,
+  input: {
+    bankName: string;
+    accountNumber: string;
+    accountHolder: string;
+    isDefault: boolean;
+  },
+) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.outletBankAccount.findFirst({
+      where: { id: accountId, ...scope, isActive: true },
+      select: { id: true, isDefault: true },
+    });
+    if (!existing) {
+      throw new InvoiceServiceError("PAYMENT_ACCOUNT_NOT_ACCESSIBLE", 404);
+    }
+    const makeDefault = existing.isDefault || input.isDefault;
+    if (input.isDefault && !existing.isDefault) {
+      await tx.outletBankAccount.updateMany({
+        where: { ...scope, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+    return tx.outletBankAccount.update({
+      where: { id: existing.id },
+      data: {
+        bankName: input.bankName.trim(),
+        accountNumber: input.accountNumber.replace(/\s+/g, ""),
+        accountHolder: input.accountHolder.trim(),
+        isDefault: makeDefault,
+        ...(makeDefault ? { displayOrder: 0 } : {}),
+      },
+      select: {
+        id: true,
+        bankName: true,
+        accountNumber: true,
+        accountHolder: true,
+        isDefault: true,
+      },
+    });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

@@ -61,3 +61,11 @@ export const invoiceWhatsappSchema = z.object({
 export const invoiceVoidSchema = z.object({
   reason: z.string().trim().min(3).max(500),
 });
+
+export const outletBankAccountSchema = z.object({
+  bankName: z.string().trim().min(1).max(100),
+  accountNumber: z.string().trim().min(1).max(100)
+    .transform((value) => value.replace(/\s+/g, "")),
+  accountHolder: z.string().trim().min(1).max(200),
+  isDefault: z.boolean().optional().default(false),
+});

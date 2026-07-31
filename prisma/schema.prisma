@@ -1007,10 +1007,11 @@ model OutletBankAccount {
   accountHolder String
   displayOrder  Int      @default(0)
   isActive      Boolean  @default(true)
+  isDefault     Boolean  @default(false)
   createdAt     DateTime @default(now()) @db.Timestamptz(3)
   updatedAt     DateTime @updatedAt @db.Timestamptz(3)
   tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   outlet        Outlet   @relation(fields: [outletId], references: [id], onDelete: Restrict)
 
-  @@index([tenantId, outletId, isActive, displayOrder])
+  @@index([tenantId, outletId, isActive, isDefault, displayOrder])
 }
