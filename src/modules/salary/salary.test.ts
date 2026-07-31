@@ -15,6 +15,7 @@ const tx = vi.hoisted(() => ({
     update: vi.fn(),
   },
   salaryProfileSetting: { create: vi.fn(), upsert: vi.fn() },
+  salaryClosingProfileSnapshot: { findFirst: vi.fn() },
   salaryEmployee: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
   employeeSalaryAssignment: {
     create: vi.fn(), findFirst: vi.fn(), update: vi.fn(),
@@ -37,6 +38,7 @@ import {
   createSalaryEmployee,
   createSalaryProfile,
   isSalaryEligibleDispatchStatus,
+  isSalarySettlement,
   listSalaryClosings,
   listSalaryProfiles,
   salaryAssignmentSchema,
@@ -47,6 +49,8 @@ import {
   salaryProfileSchema,
   salaryScope,
   salaryTeamSchema,
+  updateSalaryEmployee,
+  updateSalaryProfile,
 } from ".";
 
 const scope = { tenantId: "tenant-1", outletId: "outlet-1" };
@@ -99,6 +103,7 @@ beforeEach(() => {
     setting: {},
   });
   tx.salaryProfileSetting.create.mockResolvedValue({ id: "setting-1" });
+  tx.salaryClosingProfileSnapshot.findFirst.mockResolvedValue(null);
   tx.auditLog.create.mockResolvedValue({ id: 1n });
 });
 
@@ -188,6 +193,58 @@ describe("Salary profile validation and persistence", () => {
     expect(parsed.basicDailySalary).toBeNull();
     expect(parsed.pickupRegularRevenuePercentage).toBe(5.25);
   });
+
+  it("updates a scoped active profile and records previous and changed values", async () => {
+    tx.salaryProfile.findFirst.mockResolvedValueOnce({
+      id: "profile-1",
+      ...profileInput,
+      status: "ACTIVE",
+      effectiveFrom: new Date("2026-08-01T00:00:00.000Z"),
+      effectiveTo: null,
+    });
+    tx.salaryProfile.update.mockResolvedValueOnce({ id: "profile-1" });
+    await updateSalaryProfile(context, "profile-1", {
+      ...profileInput,
+      name: "Driver 2026 Revisi",
+    });
+    expect(tx.salaryClosingProfileSnapshot.findFirst).toHaveBeenCalledWith({
+      where: {
+        tenantId: scope.tenantId,
+        outletId: scope.outletId,
+        salaryProfileId: "profile-1",
+        salaryClosing: {
+          status: { in: ["CLOSED", "PROCESSED", "PAID"] },
+        },
+      },
+      select: { id: true },
+    });
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorId: context.actorId,
+        entityType: "SALARY_PROFILE",
+        entityId: "profile-1",
+        metadata: expect.objectContaining({
+          previous: expect.objectContaining({ name: "Driver 2026" }),
+          changed: expect.objectContaining({ name: "Driver 2026 Revisi" }),
+        }),
+      }),
+    });
+  });
+
+  it("locks a profile used by a final closing without changing its snapshot", async () => {
+    tx.salaryProfile.findFirst.mockResolvedValueOnce({
+      id: "profile-1",
+      ...profileInput,
+      status: "ACTIVE",
+    });
+    tx.salaryClosingProfileSnapshot.findFirst.mockResolvedValueOnce({
+      id: "snapshot-1",
+    });
+    await expect(updateSalaryProfile(context, "profile-1", profileInput))
+      .rejects.toMatchObject({ code: "SALARY_PROFILE_FINALIZED", status: 409 });
+    expect(tx.salaryProfile.update).not.toHaveBeenCalled();
+    expect(tx.salaryProfileSetting.upsert).not.toHaveBeenCalled();
+  });
 });
 
 describe("Salary team and assignment", () => {
@@ -212,6 +269,62 @@ describe("Salary team and assignment", () => {
       effectiveFrom: "2026-08-01",
       effectiveTo: "2026-07-31",
     }).success).toBe(false);
+  });
+
+  it("updates team fields and preserves WhatsApp leading zero", async () => {
+    tx.salaryEmployee.findFirst.mockResolvedValueOnce({
+      id: "employee-1",
+      name: "Team Lama",
+      division: "DRIVER",
+      whatsapp: "0811111111",
+      status: "ACTIVE",
+    });
+    tx.salaryEmployee.update.mockResolvedValueOnce({
+      id: "employee-1",
+      name: "Team Baru",
+      division: "DRIVER",
+      whatsapp: "081234567890",
+      status: "INACTIVE",
+    });
+    const result = await updateSalaryEmployee(context, "employee-1", {
+      name: "Team Baru",
+      division: "DRIVER",
+      whatsapp: "081234567890",
+      status: "INACTIVE",
+    });
+    expect(result.whatsapp).toBe("081234567890");
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        entityType: "SALARY_EMPLOYEE",
+        metadata: expect.objectContaining({
+          previous: expect.objectContaining({ name: "Team Lama" }),
+          changed: expect.objectContaining({ name: "Team Baru" }),
+        }),
+      }),
+    });
+  });
+
+  it("rejects a division change that conflicts with an active assignment", async () => {
+    tx.salaryEmployee.findFirst.mockResolvedValueOnce({
+      id: "employee-1",
+      name: "Driver",
+      division: "DRIVER",
+      whatsapp: null,
+      status: "ACTIVE",
+    });
+    tx.employeeSalaryAssignment.findFirst.mockResolvedValueOnce({
+      id: "assignment-1",
+    });
+    await expect(updateSalaryEmployee(context, "employee-1", {
+      name: "Driver",
+      division: "ADMIN",
+      whatsapp: null,
+      status: "ACTIVE",
+    })).rejects.toMatchObject({
+      code: "SALARY_EMPLOYEE_ASSIGNMENT_CONFLICT",
+      status: 409,
+    });
+    expect(tx.salaryEmployee.update).not.toHaveBeenCalled();
   });
 
   it("assigns only a scoped employee to a scoped active profile", async () => {
@@ -407,6 +520,16 @@ describe("Salary domain, permissions, UI and migration contracts", () => {
     expect(isSalaryEligibleDispatchStatus(value)).toBe(expected);
   });
 
+  it.each([
+    ["DFOD", "DFOD"],
+    ["dfod", "DFOD"],
+    [" DFOD ", "DFOD"],
+    [" tunai ", "Tunai"],
+    ["BULANAN", "Bulanan"],
+  ] as const)("normalizes settlement %j to canonical %j", (value, canonical) => {
+    expect(isSalarySettlement(value, canonical)).toBe(true);
+  });
+
   it("keeps canonical labels and division master data outside the frontend", () => {
     expect(SALARY_DISPATCH_STATUS).toBe("Penerimaan Normal");
     expect(salaryDivisionLabels.THREE_WHEEL_DRIVER).toBe("Driver Roda Tiga");
@@ -450,6 +573,18 @@ describe("Salary domain, permissions, UI and migration contracts", () => {
     ]);
     expect(setting).toContain("overflow-x-auto");
     expect(setting).toContain("Aktifkan Salary Profile");
+    expect(setting).toContain("Edit Salary Profile");
+    expect(setting).toContain("Edit Team");
+    expect(setting).toContain("Salary profile berhasil diperbarui.");
+    expect(setting).not.toContain("Periode Berlaku");
+    expect(setting).not.toContain("RAW_PICKUP");
+    expect(setting).not.toContain("RAW_DISPATCH");
+    for (const label of [
+      "Dispatch", "Pickup", "Penerimaan Normal", "DFOD", "Tunai", "Bulanan",
+      "Freight",
+    ]) expect(setting).toContain(label);
+    expect(setting).toContain("max-w-[960px]");
+    expect(setting).toContain("overflow-y-auto");
     expect(setting).toContain("if (profileSaving) return");
     expect(closing).toContain("min-w-[800px]");
     expect(closing).toContain(

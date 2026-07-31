@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { Check, LoaderCircle, Plus, Search, X } from "lucide-react";
 import {
   AppCard,
@@ -25,6 +25,12 @@ const divisions = [
 ] as const;
 const divisionLabel = (value: string) =>
   divisions.find(([key]) => key === value)?.[1] ?? value;
+const profileStatusLabel: Record<string, string> = {
+  DRAFT: "Draft",
+  ACTIVE: "Aktif",
+  INACTIVE: "Tidak Aktif",
+  ARCHIVED: "Diarsipkan",
+};
 
 type Profile = {
   id: string;
@@ -92,6 +98,32 @@ const emptyProfile = (): ProfileForm => ({
   ...Object.fromEntries(numericFields.map(([key]) => [key, ""])),
 } as ProfileForm);
 
+function NumericField({
+  field, label, form, setForm, errors, unit, helper,
+}: {
+  field: NumericKey;
+  label: string;
+  form: ProfileForm;
+  setForm: Dispatch<SetStateAction<ProfileForm>>;
+  errors: Record<string, string[]>;
+  unit?: string;
+  helper?: string;
+}) {
+  return <label className="block text-sm font-semibold text-slate-700">
+    {label}
+    <div className="relative mt-1">
+      {unit && <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-slate-500">{unit}</span>}
+      <input type="number" min="0" step="any" value={form[field]}
+        onChange={(event) => setForm((current) => ({
+          ...current, [field]: event.target.value,
+        }))}
+        className={`${nextgenControlClass} ${unit ? "pl-10" : ""}`}/>
+    </div>
+    {helper && <span className="mt-1 block text-xs font-normal leading-5 text-slate-500">{helper}</span>}
+    {errors[field]?.[0] && <span className="mt-1 block text-xs font-normal text-rose-700">{errors[field][0]}</span>}
+  </label>;
+}
+
 export function SalarySettingClient({ canManage }: { canManage: boolean }) {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [team, setTeam] = useState<Employee[]>([]);
@@ -112,7 +144,11 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
   const [teamDivision, setTeamDivision] = useState("ADMIN");
   const [teamWhatsapp, setTeamWhatsapp] = useState("");
   const [teamStatus, setTeamStatus] = useState("ACTIVE");
-  const [editingTeamId, setEditingTeamId] = useState("");
+  const [editingTeam, setEditingTeam] = useState<Employee | null>(null);
+  const [editTeamName, setEditTeamName] = useState("");
+  const [editTeamDivision, setEditTeamDivision] = useState("ADMIN");
+  const [editTeamWhatsapp, setEditTeamWhatsapp] = useState("");
+  const [editTeamStatus, setEditTeamStatus] = useState("ACTIVE");
   const [teamSaving, setTeamSaving] = useState(false);
   const [assignmentEmployee, setAssignmentEmployee] = useState<Employee | null>(null);
   const [assignmentProfileId, setAssignmentProfileId] = useState("");
@@ -153,6 +189,7 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
       key,
       profileForm[key] === "" ? null : Number(profileForm[key]),
     ]));
+    const isEditing = Boolean(editingProfileId);
     try {
       const response = await fetch(
         editingProfileId
@@ -180,7 +217,9 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
       setProfileOpen(false);
       setEditingProfileId("");
       setProfileForm(emptyProfile());
-      setNotice("Salary profile berhasil disimpan.");
+      setNotice(isEditing
+        ? "Salary profile berhasil diperbarui."
+        : "Salary profile berhasil disimpan.");
       await loadData();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Salary profile gagal disimpan.");
@@ -234,12 +273,8 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
     }
     setTeamSaving(true);
     try {
-      const response = await fetch(
-        editingTeamId
-          ? `/api/finance/salary/team/${editingTeamId}`
-          : "/api/finance/salary/team",
-        {
-        method: editingTeamId ? "PATCH" : "POST",
+      const response = await fetch("/api/finance/salary/team", {
+        method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           name: teamName,
@@ -252,11 +287,54 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
       setTeamName("");
       setTeamWhatsapp("");
       setTeamStatus("ACTIVE");
-      setEditingTeamId("");
       setNotice("Informasi team berhasil disimpan.");
       await loadData();
     } catch {
       setError("Informasi team gagal disimpan.");
+    } finally {
+      setTeamSaving(false);
+    }
+  }
+
+  function openEditTeam(employee: Employee) {
+    setEditingTeam(employee);
+    setEditTeamName(employee.name);
+    setEditTeamDivision(employee.division);
+    setEditTeamWhatsapp(employee.whatsapp || "");
+    setEditTeamStatus(employee.status);
+    setError("");
+  }
+
+  async function saveTeamEdit() {
+    if (!editingTeam || teamSaving) return;
+    if (!editTeamName.trim()) {
+      setError("Nama Team wajib diisi.");
+      return;
+    }
+    setTeamSaving(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/finance/salary/team/${editingTeam.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: editTeamName,
+          division: editTeamDivision,
+          whatsapp: editTeamWhatsapp || null,
+          status: editTeamStatus,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error?.message || "Informasi team gagal diperbarui.");
+      }
+      setEditingTeam(null);
+      setNotice("Informasi team berhasil diperbarui.");
+      await loadData();
+    } catch (cause) {
+      setError(cause instanceof Error
+        ? cause.message
+        : "Informasi team gagal diperbarui.");
     } finally {
       setTeamSaving(false);
     }
@@ -350,14 +428,14 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
         <button type="button" disabled={teamSaving} onClick={() => void addTeam()}
           className={nextgenButtonClass}>
           {teamSaving ? <LoaderCircle className="animate-spin" size={17}/> : <Plus size={17}/>}
-          {teamSaving ? "Menyimpan..." : editingTeamId ? "Simpan Team" : "Tambah Team"}
+          {teamSaving ? "Menyimpan..." : "Tambah Team"}
         </button>
       </AppCard>}
       <TableCard className="mt-4">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-sm">
+          <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>
-              {["Nama Team", "Divisi", "Nomor WhatsApp", "Status", "Salary Profile", "Periode Berlaku", "Aksi"]
+              {["Nama Team", "Divisi", "Nomor WhatsApp", "Status", "Salary Profile", "Aksi"]
                 .map((label) => <th key={label} className="px-3 py-3">{label}</th>)}
             </tr></thead>
             <tbody className="divide-y">{team.map((employee) => {
@@ -368,17 +446,9 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
                 <td className="px-3 py-3">{employee.whatsapp || "—"}</td>
                 <td className="px-3 py-3">{employee.status === "ACTIVE" ? "Aktif" : "Tidak Aktif"}</td>
                 <td className="px-3 py-3">{assignment?.salaryProfile.name || "Belum diassign"}</td>
-                <td className="px-3 py-3">{assignment
-                  ? `${assignment.effectiveFrom.slice(0, 10)} — ${assignment.effectiveTo?.slice(0, 10) || "Sekarang"}`
-                  : "—"}</td>
                 <td className="px-3 py-3">{canManage && <div className="flex gap-2">
-                  <button type="button" onClick={() => {
-                    setEditingTeamId(employee.id);
-                    setTeamName(employee.name);
-                    setTeamDivision(employee.division);
-                    setTeamWhatsapp(employee.whatsapp || "");
-                    setTeamStatus(employee.status);
-                  }} className={nextgenNeutralButtonClass}>Edit</button>
+                  <button type="button" onClick={() => openEditTeam(employee)}
+                    className={nextgenNeutralButtonClass}>Edit</button>
                   <button type="button" onClick={() => {
                     setAssignmentEmployee(employee);
                     setAssignmentProfileId("");
@@ -409,25 +479,26 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
             <td className="px-3 py-3">v{profile.version}</td>
             <td className="px-3 py-3">{profile.effectiveFrom.slice(0, 10)}</td>
             <td className="px-3 py-3">{profile.effectiveTo?.slice(0, 10) || "—"}</td>
-            <td className="px-3 py-3">{profile.status}</td>
-            <td className="px-3 py-3">{canManage && profile.status === "DRAFT" &&
+            <td className="px-3 py-3">{profileStatusLabel[profile.status] ?? profile.status}</td>
+            <td className="px-3 py-3">{canManage &&
               <div className="flex gap-2">
                 <button type="button" onClick={() => editProfile(profile)}
                   className={nextgenNeutralButtonClass}>Edit</button>
-                <button type="button" onClick={() => setActivationTarget(profile)}
-                  className={nextgenNeutralButtonClass}><Check size={16}/>Aktifkan</button>
+                {profile.status === "DRAFT" && <button type="button"
+                  onClick={() => setActivationTarget(profile)}
+                  className={nextgenNeutralButtonClass}><Check size={16}/>Aktifkan</button>}
               </div>}</td>
           </tr>)}</tbody>
         </table>
       </div></TableCard>
     </SectionCard>
 
-    {profileOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4">
-      <ModalCard className="max-w-5xl">
-        <div className="flex items-center justify-between border-b p-5">
+    {profileOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-3 sm:p-4">
+      <ModalCard className="flex max-h-[92vh] max-w-[960px] flex-col overflow-hidden">
+        <div className="flex shrink-0 items-center justify-between border-b p-5">
           <div><p className="text-sm text-slate-500">Salary Setting</p>
             <h2 className="text-xl font-bold">
-              {editingProfileId ? "Ubah Salary Profile" : "Tambah Salary Profile"}
+              {editingProfileId ? "Edit Salary Profile" : "Tambah Salary Profile"}
             </h2></div>
           <button type="button" disabled={profileSaving}
             onClick={() => {
@@ -436,14 +507,13 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
               setProfileForm(emptyProfile());
             }}><X/></button>
         </div>
-        <div className="space-y-5 p-5">
-          <div className="grid gap-3 md:grid-cols-3">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
+          <AppCard className="p-4">
+            <h3 className="mb-4 font-bold">Informasi Dasar</h3>
+            <div className="grid gap-4 md:grid-cols-2">
             {[
               ["code", "Kode Profile", "text"],
               ["name", "Nama Profile", "text"],
-              ["effectiveFrom", "Berlaku Mulai", "date"],
-              ["effectiveTo", "Berlaku Sampai", "date"],
-              ["version", "Version", "number"],
             ].map(([key, label, type]) => <label key={key}
               className="text-sm font-semibold text-slate-700">{label}
               <input type={type} value={profileForm[key as keyof typeof profileForm]}
@@ -460,41 +530,118 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
                 {divisions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
               </select>
             </label>
-            <label className="text-sm font-semibold text-slate-700 md:col-span-3">Deskripsi
+            <label className="text-sm font-semibold text-slate-700">Version
+              <input type="number" min="1" value={profileForm.version}
+                onChange={(event) => setProfileForm((current) => ({
+                  ...current, version: event.target.value,
+                }))} className={`${nextgenControlClass} mt-1`}/>
+              {fieldErrors.version?.[0] && <span className="text-xs text-rose-700">{fieldErrors.version[0]}</span>}
+            </label>
+            {[
+              ["effectiveFrom", "Berlaku Mulai"],
+              ["effectiveTo", "Berlaku Sampai"],
+            ].map(([key, label]) => <label key={key}
+              className="text-sm font-semibold text-slate-700">{label}
+              <input type="date" value={profileForm[key as "effectiveFrom" | "effectiveTo"]}
+                onChange={(event) => setProfileForm((current) => ({
+                  ...current, [key]: event.target.value,
+                }))} className={`${nextgenControlClass} mt-1`}/>
+              {fieldErrors[key]?.[0] && <span className="text-xs text-rose-700">{fieldErrors[key][0]}</span>}
+            </label>)}
+            <label className="text-sm font-semibold text-slate-700 md:col-span-2">Deskripsi
               <textarea value={profileForm.description}
                 onChange={(event) => setProfileForm((current) => ({
                   ...current, description: event.target.value,
                 }))} className={`${nextgenControlClass} mt-1`}/>
             </label>
-          </div>
-          {[
-            ["Salary Basic", numericFields.slice(0, 3)],
-            ["Insentif Delivery", numericFields.slice(3, 9)],
-            ["Insentif Pickup", numericFields.slice(9, 12)],
-            ["Insentif Harian", numericFields.slice(12)],
-          ].map(([title, fields]) => <AppCard key={String(title)} className="p-4">
-            <h3 className="mb-3 font-bold">{String(title)}</h3>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {(fields as typeof numericFields[number][]).map(([key, label]) =>
-                <label key={key} className="text-sm font-semibold text-slate-700">{label}
-                  <input type="number" min="0" step="any"
-                    value={profileForm[key]}
-                    onChange={(event) => setProfileForm((current) => ({
-                      ...current, [key]: event.target.value,
-                    }))} className={`${nextgenControlClass} mt-1`}/>
-                  {fieldErrors[key]?.[0] && <span className="text-xs text-rose-700">{fieldErrors[key][0]}</span>}
-                </label>)}
             </div>
-          </AppCard>)}
-          <AppCard className="grid gap-3 bg-slate-50 p-4 sm:grid-cols-2">
-            <div><p className="text-xs text-slate-500">Sumber Delivery</p>
-              <p className="font-semibold">RAW_DISPATCH</p>
-              <p className="text-sm">Status yang dihitung: Penerimaan Normal</p></div>
-            <div><p className="text-xs text-slate-500">Sumber Pickup</p>
-              <p className="font-semibold">RAW_PICKUP</p></div>
+          </AppCard>
+          <AppCard className="p-4">
+            <h3 className="mb-4 font-bold">Salary Basic</h3>
+            <div className="grid gap-4 md:grid-cols-3">
+              <NumericField field="basicDailySalary" label="Basic Salary Harian" unit="Rp"
+                form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+              <NumericField field="overtimeRate" label="Lembur" unit="Rp"
+                form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+              <NumericField field="fixedAllowance" label="Tunjangan Tetap" unit="Rp"
+                form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+            </div>
+          </AppCard>
+          <AppCard className="space-y-5 p-4">
+            <h3 className="font-bold">Insentif Delivery</h3>
+            <div>
+              <h4 className="mb-3 text-sm font-bold">Perhitungan Berdasarkan Berat</h4>
+              <div className="grid gap-4 md:grid-cols-3">
+                <NumericField field="deliveryPerKgAmount" label="Nominal Per Kg" unit="Rp"
+                  form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+                <NumericField field="deliveryPerKgMinWeight" label="Minimal Berat" unit="kg"
+                  form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+                <NumericField field="deliveryPerKgMaxWeight" label="Maksimal Berat" unit="kg"
+                  form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+              </div>
+            </div>
+            <div>
+              <h4 className="mb-3 text-sm font-bold">Perhitungan Berdasarkan Waybill</h4>
+              <div className="grid gap-4 md:grid-cols-3">
+                <NumericField field="deliveryPerWaybillAmount" label="Nominal Per Waybill" unit="Rp"
+                  form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+                <NumericField field="deliveryPerWaybillMinWeight" label="Minimal Berat" unit="kg"
+                  form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+                <NumericField field="deliveryPerWaybillMaxWeight" label="Maksimal Berat" unit="kg"
+                  form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+              </div>
+            </div>
+          </AppCard>
+          <AppCard className="p-4">
+            <h3 className="mb-4 font-bold">Insentif Pickup</h3>
+            <div className="grid gap-4 md:grid-cols-3">
+              <NumericField field="pickupRegularRevenuePercentage" label="Pickup Reguler Omset (%)"
+                helper="Persentase dari Freight untuk settlement DFOD dan Tunai."
+                form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+              <NumericField field="pickupRegularPerWaybillAmount" label="Pickup Reguler Per Waybill" unit="Rp"
+                helper="Nominal tetap per waybill reguler jika digunakan."
+                form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+              <NumericField field="pickupMarketplacePerWaybillAmount" label="Pickup Marketplace Per Waybill" unit="Rp"
+                helper="Nominal tetap per waybill dengan settlement Bulanan."
+                form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+            </div>
+          </AppCard>
+          <AppCard className="space-y-5 p-4">
+            <h3 className="font-bold">Insentif Harian</h3>
+            <div>
+              <h4 className="mb-3 text-sm font-bold">Insentif BBM</h4>
+              <div className="grid gap-4 md:grid-cols-2">
+                <NumericField field="dailyFuelMinDeliveryWaybill" label="Minimal Waybill BBM"
+                  form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+                <NumericField field="dailyFuelAmount" label="Nominal BBM" unit="Rp"
+                  form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+              </div>
+            </div>
+            <div>
+              <h4 className="mb-3 text-sm font-bold">Extra Delivery</h4>
+              <div className="grid gap-4 md:grid-cols-2">
+                <NumericField field="dailyExtraMinDeliveryWaybill" label="Minimal Waybill Extra Delivery"
+                  form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+                <NumericField field="dailyExtraAmount" label="Nominal Extra Delivery" unit="Rp"
+                  form={profileForm} setForm={setProfileForm} errors={fieldErrors}/>
+              </div>
+            </div>
+          </AppCard>
+          <AppCard className="grid gap-4 bg-slate-50 p-4 md:grid-cols-2">
+            <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sumber Delivery</p>
+              <p className="mt-1 font-bold">Dispatch</p>
+              <p className="mt-2 text-sm">Hanya data dengan status &quot;Penerimaan Normal&quot; yang akan dihitung.</p>
+            </div>
+            <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sumber Pickup</p>
+              <p className="mt-1 font-bold">Pickup</p>
+              <div className="mt-2 space-y-2 text-sm">
+                <p><strong>Pickup Reguler</strong><br/>Settlement: DFOD dan Tunai<br/>Dasar omzet: Freight</p>
+                <p><strong>Pickup Marketplace</strong><br/>Settlement: Bulanan<br/>Perhitungan: per waybill</p>
+              </div>
+            </div>
           </AppCard>
         </div>
-        <div className="flex justify-end gap-3 border-t p-4">
+        <div className="flex shrink-0 justify-end gap-3 border-t bg-white p-4">
           <button type="button" disabled={profileSaving}
             onClick={() => {
               setProfileOpen(false);
@@ -504,7 +651,9 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
           <button type="button" disabled={profileSaving}
             onClick={() => void saveProfile()} className={nextgenButtonClass}>
             {profileSaving && <LoaderCircle className="animate-spin" size={17}/>}
-            {profileSaving ? "Menyimpan..." : "Simpan Salary Profile"}
+            {profileSaving ? "Menyimpan..." : editingProfileId
+              ? "Simpan Perubahan"
+              : "Simpan Salary Profile"}
           </button>
         </div>
       </ModalCard>
@@ -521,6 +670,56 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
             onClick={() => void activateProfile()} className={nextgenButtonClass}>
             {activationSaving && <LoaderCircle className="animate-spin" size={17}/>}
             {activationSaving ? "Mengaktifkan..." : "Aktifkan"}
+          </button>
+        </div>
+      </ModalCard>
+    </div>}
+
+    {editingTeam && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4">
+      <ModalCard className="max-w-xl">
+        <div className="flex items-center justify-between border-b p-5">
+          <div>
+            <p className="text-sm text-slate-500">Informasi Team</p>
+            <h2 className="text-xl font-bold">Edit Team</h2>
+          </div>
+          <button type="button" disabled={teamSaving}
+            aria-label="Tutup Edit Team" onClick={() => setEditingTeam(null)}><X/></button>
+        </div>
+        <div className="grid gap-4 p-5 sm:grid-cols-2">
+          <label className="text-sm font-semibold text-slate-700 sm:col-span-2">Nama Team
+            <input value={editTeamName}
+              onChange={(event) => setEditTeamName(event.target.value)}
+              className={`${nextgenControlClass} mt-1`}/>
+          </label>
+          <label className="text-sm font-semibold text-slate-700">Divisi
+            <select value={editTeamDivision}
+              onChange={(event) => setEditTeamDivision(event.target.value)}
+              className={`${nextgenControlClass} mt-1`}>
+              {divisions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+          </label>
+          <label className="text-sm font-semibold text-slate-700">Status
+            <select value={editTeamStatus}
+              onChange={(event) => setEditTeamStatus(event.target.value)}
+              className={`${nextgenControlClass} mt-1`}>
+              <option value="ACTIVE">Aktif</option>
+              <option value="INACTIVE">Tidak Aktif</option>
+            </select>
+          </label>
+          <label className="text-sm font-semibold text-slate-700 sm:col-span-2">Nomor WhatsApp
+            <input value={editTeamWhatsapp}
+              onChange={(event) => setEditTeamWhatsapp(event.target.value)}
+              className={`${nextgenControlClass} mt-1`}/>
+          </label>
+        </div>
+        <div className="flex justify-end gap-3 border-t p-4">
+          <button type="button" disabled={teamSaving}
+            onClick={() => setEditingTeam(null)}
+            className={nextgenNeutralButtonClass}>Batal</button>
+          <button type="button" disabled={teamSaving}
+            onClick={() => void saveTeamEdit()} className={nextgenButtonClass}>
+            {teamSaving && <LoaderCircle className="animate-spin" size={17}/>}
+            {teamSaving ? "Menyimpan..." : "Simpan Perubahan"}
           </button>
         </div>
       </ModalCard>

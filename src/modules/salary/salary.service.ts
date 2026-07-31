@@ -78,6 +78,37 @@ const settingData = (scope: SalaryScope, input: ProfileInput) => ({
   dispatchRequiredStatus: SALARY_DISPATCH_STATUS,
 });
 
+const salarySettingAuditKeys = [
+  "basicDailySalary",
+  "overtimeRate",
+  "fixedAllowance",
+  "deliveryPerKgAmount",
+  "deliveryPerKgMinWeight",
+  "deliveryPerKgMaxWeight",
+  "deliveryPerWaybillAmount",
+  "deliveryPerWaybillMinWeight",
+  "deliveryPerWaybillMaxWeight",
+  "pickupRegularRevenuePercentage",
+  "pickupRegularPerWaybillAmount",
+  "pickupMarketplacePerWaybillAmount",
+  "dailyFuelMinDeliveryWaybill",
+  "dailyFuelAmount",
+  "dailyExtraMinDeliveryWaybill",
+  "dailyExtraAmount",
+] as const;
+
+function settingAuditData(value: object | null | undefined) {
+  const record = (value ?? {}) as Record<string, unknown>;
+  return Object.fromEntries(salarySettingAuditKeys.map((key) => {
+    const current = record[key];
+    return [key, current == null
+      ? null
+      : typeof current === "object"
+        ? String(current)
+        : current];
+  }));
+}
+
 const profileInclude = { setting: true } as const;
 
 export async function listSalaryProfiles(scope: SalaryScope) {
@@ -166,10 +197,25 @@ export async function updateSalaryProfile(
         tenantId: context.tenantId,
         outletId: context.outletId,
       },
+      include: { setting: true },
     });
     if (!existing) throw new SalaryError("SALARY_PROFILE_NOT_FOUND", 404);
-    if (existing.status !== "DRAFT") {
+    if (!["DRAFT", "ACTIVE"].includes(existing.status)) {
       throw new SalaryError("SALARY_PROFILE_CONFLICT", 409);
+    }
+    const finalizedSnapshot = await tx.salaryClosingProfileSnapshot.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryProfileId: existing.id,
+        salaryClosing: {
+          status: { in: ["CLOSED", "PROCESSED", "PAID"] },
+        },
+      },
+      select: { id: true },
+    });
+    if (finalizedSnapshot) {
+      throw new SalaryError("SALARY_PROFILE_FINALIZED", 409);
     }
     await tx.salaryProfile.update({
       where: { id: existing.id },
@@ -200,7 +246,28 @@ export async function updateSalaryProfile(
       action: "UPDATE",
       entityType: "SALARY_PROFILE",
       entityId: existing.id,
-      metadata: { code: input.code, version: input.version },
+      metadata: {
+        previous: {
+          code: existing.code,
+          name: existing.name,
+          division: existing.division,
+          description: existing.description,
+          effectiveFrom: existing.effectiveFrom,
+          effectiveTo: existing.effectiveTo,
+          version: existing.version,
+        },
+        changed: {
+          code: input.code,
+          name: input.name,
+          division: input.division,
+          description: input.description || null,
+          effectiveFrom: input.effectiveFrom,
+          effectiveTo: input.effectiveTo || null,
+          version: input.version,
+        },
+        previousSetting: settingAuditData(existing.setting),
+        changedSetting: settingAuditData(input),
+      },
     } });
     return tx.salaryProfile.findUniqueOrThrow({
       where: { id: existing.id },
@@ -325,6 +392,22 @@ export async function updateSalaryEmployee(
       },
     });
     if (!existing) throw new SalaryError("SALARY_EMPLOYEE_NOT_FOUND", 404);
+    if (existing.division !== input.division) {
+      const incompatibleAssignment =
+        await tx.employeeSalaryAssignment.findFirst({
+          where: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            employeeId: existing.id,
+            status: "ACTIVE",
+            salaryProfile: { division: { not: input.division } },
+          },
+          select: { id: true },
+        });
+      if (incompatibleAssignment) {
+        throw new SalaryError("SALARY_EMPLOYEE_ASSIGNMENT_CONFLICT", 409);
+      }
+    }
     const employee = await tx.salaryEmployee.update({
       where: { id: existing.id },
       data: {
@@ -342,9 +425,18 @@ export async function updateSalaryEmployee(
       entityType: "SALARY_EMPLOYEE",
       entityId: employee.id,
       metadata: {
-        previousStatus: existing.status,
-        nextStatus: employee.status,
-        division: employee.division,
+        previous: {
+          name: existing.name,
+          division: existing.division,
+          whatsapp: existing.whatsapp,
+          status: existing.status,
+        },
+        changed: {
+          name: employee.name,
+          division: employee.division,
+          whatsapp: employee.whatsapp,
+          status: employee.status,
+        },
       },
     } });
     return employee;

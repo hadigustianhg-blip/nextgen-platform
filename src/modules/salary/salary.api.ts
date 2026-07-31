@@ -9,7 +9,11 @@ export class SalaryError extends Error {
 const messages: Record<string, string> = {
   SALARY_PROFILE_NOT_FOUND: "Salary profile tidak ditemukan.",
   SALARY_PROFILE_CONFLICT: "Kode dan versi salary profile sudah digunakan.",
+  SALARY_PROFILE_FINALIZED:
+    "Salary profile sudah digunakan pada closing dan tidak dapat diubah. Buat profile versi baru.",
   SALARY_EMPLOYEE_NOT_FOUND: "Team tidak ditemukan.",
+  SALARY_EMPLOYEE_ASSIGNMENT_CONFLICT:
+    "Divisi team tidak sesuai dengan salary profile aktif. Tutup atau ganti assignment terlebih dahulu.",
   SALARY_ASSIGNMENT_OVERLAP: "Periode salary assignment bertumpang tindih.",
   SALARY_SCOPE_MISMATCH: "Data salary tidak tersedia pada outlet aktif.",
   SALARY_CLOSING_OVERLAP: "Periode salary closing bertumpang tindih.",
