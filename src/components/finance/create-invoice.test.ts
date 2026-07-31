@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   buildInvoiceSourceItemsQuery, canSaveInvoiceDraft, formatRupiahFromCents,
+  billingAddressAfterRecipient,
   invoiceDraftErrorMessage, moneyToCents, normalizeSellerLabel, sumMoney,
   invoicePdfErrorMessage, invoiceWhatsappDisabledReason, selectableInvoiceItems,
   buildRecipientWhatsappMessage, buildRecipientWhatsappUrl,
@@ -67,6 +68,23 @@ describe("Create Invoice interface", () => {
     expect(source).toContain("scrollIntoView");
     expect(source).toContain('behavior: "smooth"');
     expect(source).not.toContain("Pilih minimal satu resi terlebih dahulu.");
+  });
+
+  it("fills an empty billing address from recipient city without overwriting an address", async () => {
+    expect(billingAddressAfterRecipient("", "Kab Sumedang")).toBe("Kab Sumedang");
+    expect(billingAddressAfterRecipient("   ", " Kab Sumedang ")).toBe(
+      "Kab Sumedang",
+    );
+    expect(billingAddressAfterRecipient(
+      "Jalan Existing No. 1",
+      "Kab Sumedang",
+    )).toBe("Jalan Existing No. 1");
+    const source = await readFile(
+      new URL("./create-invoice-client.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("setAddress((current)");
+    expect(source).toContain('setAddress("")');
   });
 
   it("builds source-items query with the actual seller key and active dates", () => {

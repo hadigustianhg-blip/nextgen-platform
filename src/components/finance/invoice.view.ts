@@ -48,6 +48,15 @@ export function getFirstSelectedWaybill(
   return items.find((item) => selectedIds.has(item.id))?.waybillNumber ?? null;
 }
 
+export function billingAddressAfterRecipient(
+  currentAddress: string,
+  recipientCity: string | null | undefined,
+) {
+  return currentAddress.trim()
+    ? currentAddress
+    : recipientCity?.trim() || currentAddress;
+}
+
 export function canSaveInvoiceDraft(input: {
   sellerSelected: boolean;
   detailLoading: boolean;

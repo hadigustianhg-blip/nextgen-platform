@@ -16,7 +16,8 @@ import {
   invoiceDraftErrorMessage, invoicePdfErrorMessage, invoiceWhatsappDisabledReason,
   invoiceWhatsappErrorMessage, selectableInvoiceItems, sumMoney,
   buildRecipientWhatsappMessage, buildRecipientWhatsappUrl,
-  getFirstSelectedWaybill, invoiceRecipientDetailErrorMessage,
+  billingAddressAfterRecipient, getFirstSelectedWaybill,
+  invoiceRecipientDetailErrorMessage,
 } from "./invoice.view";
 
 type Seller = {
@@ -231,6 +232,7 @@ export function CreateInvoiceClient({
     setDraftId(null);
     setCustomerName(seller.customerName);
     setWhatsapp("");
+    setAddress("");
     setRecipientCity("");
     setRecipientDetailWaybill("");
     setRecipientLoadedId("");
@@ -524,6 +526,8 @@ export function CreateInvoiceClient({
       setCustomerName(result.data.recipientName || customerName);
       setWhatsapp(result.data.recipientPhone || whatsapp);
       setRecipientCity(result.data.recipientCity || "");
+      setAddress((current) =>
+        billingAddressAfterRecipient(current, result.data.recipientCity));
       setRecipientDetailWaybill(result.data.waybillNo);
       setRecipientLoadedId("form");
       setRecipientHelper(

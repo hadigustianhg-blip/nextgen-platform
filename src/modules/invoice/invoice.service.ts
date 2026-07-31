@@ -369,7 +369,12 @@ async function paymentAccountSnapshot(
     };
   }
   const account = await tx.outletBankAccount.findFirst({
-    where: { id: bankAccountId, ...scope, isActive: true },
+    where: {
+      id: bankAccountId,
+      tenantId: scope.tenantId,
+      outletId: scope.outletId,
+      isActive: true,
+    },
     select: { bankName: true, accountNumber: true, accountHolder: true },
   });
   if (!account) throw new InvoiceServiceError("PAYMENT_ACCOUNT_NOT_ACCESSIBLE", 404);

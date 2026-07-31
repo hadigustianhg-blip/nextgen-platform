@@ -704,6 +704,102 @@ describe("Invoice persistence and PDF contracts", () => {
     infoLog.mockRestore();
   });
 
+  it("completes a draft transaction without leaking actor context into the bank query", async () => {
+    const actorId = "33333333-3333-4333-8333-333333333333";
+    const bankAccountId = "44444444-4444-4444-8444-444444444444";
+    tx.outletBankAccount.findFirst.mockResolvedValueOnce({
+      bankName: "Bank Outlet",
+      accountNumber: "00123456789",
+      accountHolder: "Outlet Holder",
+    });
+    const infoLog = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await expect(createInvoiceDraft({
+      ...scope,
+      actorId,
+      outletCode: "OUT001",
+      requestId: "recipient-bank-draft",
+    }, {
+      customerKey: "name:anggrek cibogo",
+      customerName: "Recipient Test",
+      recipientName: "Recipient Test",
+      recipientPhone: "081234567890",
+      recipientCity: "Kab Sumedang",
+      address: "Kab Sumedang",
+      bankAccountId,
+      invoiceDate: "2026-07-30",
+      dueDate: "2026-08-06",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-30",
+      itemIds: ["11111111-1111-4111-8111-111111111111"],
+    })).resolves.toEqual({ id: "invoice-1" });
+
+    expect(tx.outletBankAccount.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: bankAccountId,
+        tenantId: scope.tenantId,
+        outletId: scope.outletId,
+        isActive: true,
+      },
+      select: {
+        bankName: true,
+        accountNumber: true,
+        accountHolder: true,
+      },
+    });
+    const bankWhere = tx.outletBankAccount.findFirst.mock.calls[0][0].where;
+    expect(bankWhere).not.toHaveProperty("actorId");
+    expect(bankWhere).not.toHaveProperty("outletCode");
+    expect(bankWhere).not.toHaveProperty("requestId");
+
+    expect(tx.invoice.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        addressSnapshot: "Kab Sumedang",
+        recipientName: "Recipient Test",
+        recipientPhone: "081234567890",
+        recipientCity: "Kab Sumedang",
+        transferBankName: "Bank Outlet",
+        transferAccountNumber: "00123456789",
+        transferAccountHolder: "Outlet Holder",
+        createdByUserId: actorId,
+      }),
+    });
+    expect(tx.invoiceItem.createMany).toHaveBeenCalledOnce();
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorId,
+        entityType: "CREATE_INVOICE_DRAFT",
+      }),
+    });
+    infoLog.mockRestore();
+  });
+
+  it("keeps business validation transactional and does not write a partial draft", async () => {
+    tx.masterPickup.findMany.mockResolvedValueOnce([
+      pickup({ senderName: "Different Seller" }),
+    ]);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const infoLog = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    await expect(createInvoiceDraft({
+      ...scope,
+      actorId: "33333333-3333-4333-8333-333333333333",
+      outletCode: "OUT001",
+    }, {
+      customerKey: "name:anggrek cibogo",
+      customerName: "Anggrek Cibogo",
+      invoiceDate: "2026-07-30",
+      dueDate: "2026-08-06",
+      periodStart: "2026-07-01",
+      periodEnd: "2026-07-30",
+      itemIds: ["11111111-1111-4111-8111-111111111111"],
+    })).rejects.toMatchObject({ code: "SOURCE_SELLER_MISMATCH" });
+    expect(tx.invoice.create).not.toHaveBeenCalled();
+    expect(tx.invoiceItem.createMany).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+    errorLog.mockRestore();
+    infoLog.mockRestore();
+  });
+
   it("uses race-safe item locks, serializable transactions and atomic sequence updates", async () => {
     const [schema, migration, service] = await Promise.all([
       readFile(new URL("../../../prisma/schema.prisma", import.meta.url), "utf8"),
