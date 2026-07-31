@@ -136,7 +136,7 @@ export async function syncDeliverySettlement(
       fetchSource("/jfs-dispatch", operationalDate),
       fetchSource("/jfs-cod", operationalDate),
     ]);
-    let dispatchCreated = 0, dispatchUpdated = 0, dispatchUnchanged = 0;
+    let dispatchCreated = 0, dispatchUpdated = 0, dispatchUnchanged = 0, dispatchInactive = 0;
     let codCreated = 0, codUpdated = 0, duplicate = 0, anomaly = 0;
     const parsedDispatches: DispatchSourceRecord[] = [];
     for (const rawValue of dispatchEnvelope.data) {
@@ -149,7 +149,7 @@ export async function syncDeliverySettlement(
     duplicate += dispatchOverlapDuplicate;
 
     await prisma.$transaction(async (tx) => {
-      await tx.rawDispatch.updateMany({
+      const missingDispatches = await tx.rawDispatch.updateMany({
         where: {
           tenantId: context.tenantId,
           outletId: context.outletId,
@@ -161,6 +161,7 @@ export async function syncDeliverySettlement(
         },
         data: { isActive: false },
       });
+      dispatchInactive += missingDispatches?.count ?? 0;
       for (const record of uniqueDispatches) {
         const key = `v2:dispatch:${record.waybillNo.trim()}`;
         const hash = sourceHash(record);
@@ -180,7 +181,7 @@ export async function syncDeliverySettlement(
           codValue: decimal(record.codValue), goodsDescription: record.barang || null,
           isActive: true,
         };
-        await tx.rawDispatch.updateMany({
+        const supersededDispatches = await tx.rawDispatch.updateMany({
           where: {
             tenantId: context.tenantId,
             outletId: context.outletId,
@@ -191,6 +192,7 @@ export async function syncDeliverySettlement(
           },
           data: { isActive: false },
         });
+        dispatchInactive += supersededDispatches?.count ?? 0;
         if (!existing) {
           await tx.rawDispatch.create({ data: { tenantId: context.tenantId, outletId: context.outletId, sourceRecordKey: key, firstSeenRunId: run.id, ...common } });
           dispatchCreated += 1;
@@ -320,6 +322,7 @@ export async function syncDeliverySettlement(
         updated: dispatchUpdated,
         unchanged: dispatchUnchanged,
         duplicateIgnored: dispatchOverlapDuplicate,
+        inactiveVersions: dispatchInactive,
       },
       cod: { fetched: codEnvelope.total, created: codCreated, updated: codUpdated },
       duplicate, anomaly,

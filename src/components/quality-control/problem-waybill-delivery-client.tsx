@@ -127,9 +127,20 @@ export function ProblemWaybillDeliveryClient({
         headers: { "content-type": "application/json" },
         body: JSON.stringify(businessDate ? { operationalDate: businessDate } : {}),
       });
+      const payload = await response.json();
       if (!response.ok) throw new Error();
-      setNotice("Sinkronisasi Dispatch berhasil.");
+      const dispatch = payload.data?.dispatch ?? {};
+      const successNotice = [
+        "Sinkronisasi Dispatch berhasil:",
+        `received ${dispatch.fetched ?? 0}`,
+        `unique ${dispatch.unique ?? 0}`,
+        `created ${dispatch.created ?? 0}`,
+        `updated ${dispatch.updated ?? 0}`,
+        `duplicate ignored ${dispatch.duplicateIgnored ?? 0}`,
+        `inactive versions ${dispatch.inactiveVersions ?? 0}`,
+      ].join(" · ");
       await load();
+      setNotice(successNotice);
     } catch {
       setNotice("Sinkronisasi Dispatch gagal. Data lama tetap dipertahankan.");
     } finally {
@@ -192,7 +203,7 @@ export function ProblemWaybillDeliveryClient({
       <PageHeader
         eyebrow="Quality Control"
         title="Problem Waybill Delivery"
-        description="Monitoring waybill dispatch berstatus Belum Diterima dan verifikasi kendala penerima."
+        description="Monitoring waybill aktif dengan status Belum diterima dan verifikasi kendala penerima."
         actions={
           <>
             <button className={nextgenNeutralButtonClass} disabled={loading || syncing} onClick={() => void load()}>
@@ -220,7 +231,7 @@ export function ProblemWaybillDeliveryClient({
             <option value="desc">Terbaru</option><option value="asc">Terlama</option>
           </select>
         </div>
-        <span className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">Status: Belum Diterima</span>
+        <span className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">Status: Belum diterima</span>
       </FilterCard>
       <section className="grid gap-4 md:grid-cols-3">
         <MetricCard label="Total Belum Diterima" value={result.summary.totalBelumDiterima.toLocaleString("id-ID")} />
@@ -229,7 +240,7 @@ export function ProblemWaybillDeliveryClient({
       </section>
       <TableCard footer={<div className="flex items-center justify-between"><span>{result.pagination.total} waybill</span><div className="flex gap-2"><button disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)} className="rounded-lg border px-3 py-1.5 disabled:opacity-40">Sebelumnya</button><span className="px-2 py-1.5">{page} / {Math.max(1, result.pagination.totalPages)}</span><button disabled={page >= result.pagination.totalPages || loading} onClick={() => setPage((value) => value + 1)} className="rounded-lg border px-3 py-1.5 disabled:opacity-40">Berikutnya</button></div></div>}>
         <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm"><thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500"><tr>{["Business Date","Waybill","Nama Kurir","Penerima","Status","Updated At","Aksi"].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead>
-          <tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan={7} className="py-14 text-center text-slate-500"><LoaderCircle className="mx-auto mb-2 animate-spin"/>Memuat data…</td></tr> : result.data.length === 0 ? <tr><td colSpan={7} className="py-14 text-center text-slate-500"><ShieldAlert className="mx-auto mb-2"/>Belum ada waybill berstatus Belum Diterima.</td></tr> : result.data.map((row) => <tr key={row.id}><td className="px-4 py-3">{formatDate(row.businessDate)}</td><td className="px-4 py-3 font-semibold">{row.waybill}</td><td className="px-4 py-3">{row.courierName ?? "—"}</td><td className="px-4 py-3">{row.receiverNameMasked ?? "—"}</td><td className="px-4 py-3"><span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">{row.status}</span></td><td className="px-4 py-3">{formatDateTime(row.lastUpdatedAt)}</td><td className="px-4 py-3">{canViewSensitive ? <button onClick={() => void openDetail(row.waybill)} className="inline-flex items-center gap-1 font-semibold text-blue-600"><Eye size={16}/>Lihat Detail</button> : "—"}</td></tr>)}</tbody>
+          <tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan={7} className="py-14 text-center text-slate-500"><LoaderCircle className="mx-auto mb-2 animate-spin"/>Memuat data…</td></tr> : result.data.length === 0 ? <tr><td colSpan={7} className="py-14 text-center text-slate-500"><ShieldAlert className="mx-auto mb-2"/>Tidak ada waybill berstatus Belum diterima pada tanggal ini.</td></tr> : result.data.map((row) => <tr key={row.id}><td className="px-4 py-3">{formatDate(row.businessDate)}</td><td className="px-4 py-3 font-semibold">{row.waybill}</td><td className="px-4 py-3">{row.courierName?.trim() || "Team Belum Terpetakan"}</td><td className="px-4 py-3">{row.receiverNameMasked ?? "—"}</td><td className="px-4 py-3"><span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">{row.status}</span></td><td className="px-4 py-3">{formatDateTime(row.lastUpdatedAt)}</td><td className="px-4 py-3">{canViewSensitive ? <button onClick={() => void openDetail(row.waybill)} className="inline-flex items-center gap-1 font-semibold text-blue-600"><Eye size={16}/>Lihat Detail</button> : "—"}</td></tr>)}</tbody>
         </table></div>
       </TableCard>
       {selectedWaybill && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4" role="dialog" aria-modal="true" aria-label="Detail Waybill"><ModalCard className="max-w-2xl">

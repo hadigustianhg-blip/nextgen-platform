@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { resolveOperationalBusinessDate } from "@/modules/operational-settlement/operational-settlement.service";
+import { getActiveDispatchDataset } from "@/modules/delivery-settlement/active-dispatch-dataset";
 import {
   buildDeliveryMonitoring,
   buildPickupRows,
@@ -55,27 +56,10 @@ export async function getMonitoringDaily(input: {
     pickupTotals,
     pickupMarketplace,
   ] = await Promise.all([
-    prisma.rawDispatch.findMany({
-      where: { ...whereScope, isActive: true },
-      select: {
-        id: true,
-        operationalDate: true,
-        waybillNo: true,
-        courierNameRaw: true,
-        deliveryStatusRaw: true,
-        syncStatus: true,
-        isActive: true,
-        sourceRecordKey: true,
-        sourceFetchedAt: true,
-        dispatchAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-      orderBy: [
-        { sourceFetchedAt: "desc" },
-        { dispatchAt: "desc" },
-        { updatedAt: "desc" },
-      ],
+    getActiveDispatchDataset({
+      tenantId: input.tenantId,
+      outletId: input.outletId,
+      operationalDate,
     }),
     prisma.rawPickup.groupBy({
       by: ["operationalDate", "staffNameRaw"],

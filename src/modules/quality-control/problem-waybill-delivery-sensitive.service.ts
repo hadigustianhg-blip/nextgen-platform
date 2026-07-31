@@ -1,5 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/db/prisma";
+import { selectLatestDispatchRecords } from "@/modules/delivery-settlement/dispatch-deduplication";
+import { isBelumDiterima } from "./problem-waybill-delivery.service";
 
 const DEFAULT_BASE_URL = "https://jfs-middleware-v2-production.up.railway.app";
 
@@ -114,19 +116,30 @@ export async function getProblemWaybillSensitiveDetail(input: {
         metadata: { result },
       },
     });
-  const row = await prisma.rawDispatch.findFirst({
+  const rows = await prisma.rawDispatch.findMany({
     where: {
       tenantId: input.tenantId,
       outletId: input.outletId,
       waybillNo: input.waybill,
+      syncStatus: "NORMALIZED",
+      isActive: true,
     },
-    select: { waybillNo: true, deliveryStatusRaw: true },
+    select: {
+      id: true,
+      waybillNo: true,
+      deliveryStatusRaw: true,
+      sourceFetchedAt: true,
+      dispatchAt: true,
+      updatedAt: true,
+      createdAt: true,
+    },
   });
+  const row = selectLatestDispatchRecords(rows)[0];
   if (!row) {
     await audit("FAILED");
     throw new SensitiveDetailError("NOT_FOUND");
   }
-  if (row.deliveryStatusRaw?.normalize("NFKC").trim().toLocaleUpperCase("id-ID") !== "BELUM DITERIMA") {
+  if (!isBelumDiterima(row.deliveryStatusRaw)) {
     await audit("FAILED");
     throw new SensitiveDetailError("STATUS_CHANGED");
   }
@@ -134,7 +147,7 @@ export async function getProblemWaybillSensitiveDetail(input: {
     const raw = await fetchSensitiveDetail(row.waybillNo, { fetcher: input.fetcher });
     const detail = normalizeSensitiveDetail(raw, {
       waybill: row.waybillNo,
-      currentStatus: row.deliveryStatusRaw,
+      currentStatus: "Belum diterima",
     });
     await audit("SUCCESS");
     return detail;
