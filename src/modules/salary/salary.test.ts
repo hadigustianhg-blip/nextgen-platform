@@ -411,6 +411,45 @@ describe("Salary team and assignment", () => {
     });
   });
 
+  it("backdates the same active profile to the closing period after submit", async () => {
+    tx.salaryEmployee.findFirst.mockResolvedValueOnce({
+      id: "employee-1", division: "DRIVER",
+    });
+    tx.salaryProfile.findFirst.mockResolvedValueOnce({
+      id: "profile-1", division: "DRIVER",
+    });
+    tx.employeeSalaryAssignment.findFirst
+      .mockResolvedValueOnce({
+        id: "assignment-current",
+        salaryProfileId: "profile-1",
+        effectiveFrom: new Date("2026-07-31T00:00:00.000Z"),
+        effectiveTo: null,
+      })
+      .mockResolvedValueOnce(null);
+    tx.employeeSalaryAssignment.update.mockResolvedValueOnce({
+      id: "assignment-current",
+      salaryProfileId: "profile-1",
+      effectiveFrom: new Date("2026-07-01T00:00:00.000Z"),
+    });
+    await assignSalaryProfile(context, "employee-1", {
+      salaryProfileId: "profile-1",
+      effectiveFrom: "2026-07-01",
+    });
+    expect(tx.employeeSalaryAssignment.update).toHaveBeenCalledWith({
+      where: { id: "assignment-current" },
+      data: { effectiveFrom: new Date("2026-07-01T00:00:00.000Z") },
+    });
+    expect(tx.employeeSalaryAssignment.create).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        entityType: "SALARY_ASSIGNMENT",
+        metadata: expect.objectContaining({
+          operation: "BACKDATE_ACTIVE_ASSIGNMENT",
+        }),
+      }),
+    });
+  });
+
   it("rejects overlapping historical assignment periods", async () => {
     tx.salaryEmployee.findFirst.mockResolvedValueOnce({
       id: "employee-1", division: "DRIVER",

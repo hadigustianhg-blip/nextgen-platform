@@ -4,6 +4,9 @@ import {
   calculateEmployeeSalary,
   createSalaryEmployeeMatcher,
   normalizeSalaryEmployeeName,
+  parseSalaryMoney,
+  parseSalaryWeight,
+  resolveSalaryAssignmentOnDate,
   type SalaryCalculationSetting,
   type SalaryDispatchSource,
   type SalaryPickupSource,
@@ -70,7 +73,7 @@ describe("salary employee matching", () => {
     expect(match("ridwan kusnawan", "PICKUP").employeeId).toBe("employee-1");
     expect(match("Ridwan", "PICKUP")).toMatchObject({
       employeeId: null,
-      reason: "EMPLOYEE_NOT_MAPPED",
+      reason: "EMPLOYEE_NOT_MATCHED",
     });
   });
 
@@ -84,6 +87,108 @@ describe("salary employee matching", () => {
       employeeId: null,
       reason: "AMBIGUOUS_NAME",
     });
+  });
+});
+
+describe("salary profile resolution by operational date", () => {
+  const date = (value: string) => new Date(`${value}T00:00:00.000Z`);
+  const candidate = (overrides: Partial<{
+    effectiveFrom: string;
+    effectiveTo: string | null;
+    status: "ACTIVE" | "INACTIVE";
+    profileStatus: "DRAFT" | "ACTIVE" | "INACTIVE" | "ARCHIVED";
+    profileFrom: string;
+    profileTo: string | null;
+    setting: object | null;
+  }> = {}) => ({
+    effectiveFrom: date(overrides.effectiveFrom ?? "2026-07-01"),
+    effectiveTo: overrides.effectiveTo === undefined
+      ? null
+      : overrides.effectiveTo ? date(overrides.effectiveTo) : null,
+    status: overrides.status ?? "ACTIVE",
+    salaryProfile: {
+      status: overrides.profileStatus ?? "ACTIVE",
+      effectiveFrom: date(overrides.profileFrom ?? "2026-07-01"),
+      effectiveTo: overrides.profileTo === undefined
+        ? null
+        : overrides.profileTo ? date(overrides.profileTo) : null,
+      division: "MOTORIST",
+      setting: overrides.setting === undefined ? {} : overrides.setting,
+    },
+  });
+  const activityDate = date("2026-07-29");
+
+  it.each([
+    ["2026-07-01", null],
+    ["2026-07-29", null],
+    ["2026-07-30", "PROFILE_NOT_ASSIGNED"],
+  ])("resolves assignment starting %s", (effectiveFrom, reason) => {
+    expect(resolveSalaryAssignmentOnDate(
+      [candidate({ effectiveFrom })],
+      activityDate,
+      "MOTORIST",
+    ).reason).toBe(reason);
+  });
+
+  it("rejects an assignment ending before the operational date", () => {
+    expect(resolveSalaryAssignmentOnDate(
+      [candidate({ effectiveTo: "2026-07-28" })],
+      activityDate,
+      "MOTORIST",
+    ).reason).toBe("PROFILE_NOT_ASSIGNED");
+  });
+
+  it.each([
+    [{ profileStatus: "INACTIVE" as const }, "PROFILE_NOT_ACTIVE"],
+    [{ profileFrom: "2026-07-30" }, "PROFILE_NOT_EFFECTIVE"],
+    [{ profileTo: "2026-07-28" }, "PROFILE_NOT_EFFECTIVE"],
+    [{ setting: null }, "PROFILE_SETTING_NOT_FOUND"],
+  ])("rejects invalid profile state %#", (overrides, reason) => {
+    expect(resolveSalaryAssignmentOnDate(
+      [candidate(overrides)],
+      activityDate,
+      "MOTORIST",
+    ).reason).toBe(reason);
+  });
+
+  it("uses operationalDate and accepts effectiveTo null", () => {
+    const resolution = resolveSalaryAssignmentOnDate(
+      [candidate({ effectiveFrom: "2026-07-29", effectiveTo: null })],
+      activityDate,
+      "MOTORIST",
+    );
+    expect(resolution.reason).toBeNull();
+    expect(resolution.assignment).not.toBeNull();
+  });
+});
+
+describe("salary Decimal parsing", () => {
+  it.each([
+    [100000, "100000"],
+    ["100000", "100000"],
+    ["100000.00", "100000"],
+    ["100.000", "100000"],
+    ["Rp 100.000", "100000"],
+    ["100,000", "100000"],
+  ])("parses money %s without JavaScript float", (input, expected) => {
+    expect(parseSalaryMoney(input)?.toString()).toBe(expected);
+  });
+
+  it.each([
+    [10, "10"],
+    ["10", "10"],
+    ["10.00", "10"],
+    ["10 kg", "10"],
+    ["10,5", "10.5"],
+  ])("parses weight %s as Decimal", (input, expected) => {
+    expect(parseSalaryWeight(input)?.toString()).toBe(expected);
+  });
+
+  it("returns null for missing or unreadable values", () => {
+    expect(parseSalaryMoney(null)).toBeNull();
+    expect(parseSalaryMoney("")).toBeNull();
+    expect(parseSalaryWeight(null)).toBeNull();
+    expect(parseSalaryWeight("")).toBeNull();
   });
 });
 
@@ -220,7 +325,24 @@ describe("salary pickup calculation", () => {
     expect(excluded.sources).toEqual(expect.arrayContaining([
       expect.objectContaining({ exclusionReason: "SETTLEMENT_NOT_ELIGIBLE" }),
       expect.objectContaining({
-        exclusionReason: "INVALID_FREIGHT_FOR_PERCENTAGE",
+        exclusionReason: "INVALID_FREIGHT",
+      }),
+    ]));
+  });
+
+  it("marks missing Freight and weight with distinct reasons", () => {
+    const result = calculateEmployeeSalary({
+      pickups: [{ ...pickup("p-null"), freight: null }],
+      dispatches: [{ ...dispatch("d-null"), weight: null }],
+    });
+    expect(result.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceRecordId: "p-null",
+        exclusionReason: "INVALID_FREIGHT",
+      }),
+      expect.objectContaining({
+        sourceRecordId: "d-null",
+        exclusionReason: "INVALID_WEIGHT",
       }),
     ]));
   });

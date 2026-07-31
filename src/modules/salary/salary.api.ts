@@ -24,6 +24,8 @@ const messages: Record<string, string> = {
   SALARY_CLOSING_EMPTY: "Salary closing belum memiliki hasil perhitungan team.",
   SALARY_CLOSING_HAS_WARNINGS:
     "Data yang belum terpetakan harus diselesaikan sebelum salary diproses.",
+  SALARY_CLOSING_HAS_PROFILE_WARNINGS:
+    "Masih ada team yang belum memiliki Salary Profile pada periode ini. Perbaiki assignment lalu hitung ulang.",
   SALARY_SOURCE_ALREADY_USED:
     "Data operasional sudah digunakan pada salary closing lain.",
   SALARY_NEGATIVE_NET:

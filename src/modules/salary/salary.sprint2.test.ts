@@ -71,6 +71,9 @@ describe("Salary Sprint 2 schema, migration and UI contracts", () => {
       "Tambah Penghasilan",
       "Tambah Potongan",
       "Atur Kasbon",
+      "Perbaiki Profile Team",
+      "Terapkan mulai awal periode closing",
+      "Atur Salary Profile",
       "Rincian Perhitungan",
       "Salary sudah diproses dan dikunci.",
     ]) expect([detail, recap].join("\n")).toContain(text);
@@ -87,6 +90,15 @@ describe("Salary Sprint 2 schema, migration and UI contracts", () => {
     expect(visibleUi).not.toMatch(
       /\bwindow\.(alert|prompt|confirm)\s*\(/,
     );
+    expect(detail).not.toContain("{row.exclusionReason}");
+    for (const label of [
+      "Salary Profile belum ditetapkan atau belum berlaku.",
+      "Nama team belum terhubung dengan Informasi Team.",
+      "Pengaturan salary profile belum lengkap.",
+      "Nilai Freight tidak dapat dibaca.",
+      "Nilai berat tidak dapat dibaca.",
+      "Berat tidak masuk rentang insentif yang ditentukan.",
+    ]) expect(detail).toContain(label);
   });
 
   it("keeps calculation constants out of production UI defaults", async () => {

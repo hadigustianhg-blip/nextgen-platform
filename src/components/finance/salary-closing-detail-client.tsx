@@ -82,6 +82,41 @@ type Source = {
   rate: string | null;
   amount: string | null;
 };
+type WarningAssignment = {
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  status: string;
+  salaryProfile: {
+    id: string;
+    name: string;
+    version: number;
+    status: string;
+    effectiveFrom: string;
+    effectiveTo: string | null;
+  };
+};
+type WarningSource = {
+  id: string;
+  sourceType: "PICKUP" | "DISPATCH";
+  sourceDate: string;
+  waybillNumber: string | null;
+  employeeNameRaw: string | null;
+  exclusionReason: string | null;
+  matchedEmployee: {
+    id: string;
+    name: string;
+    division: string;
+    assignments: WarningAssignment[];
+  } | null;
+};
+type AvailableProfile = {
+  id: string;
+  name: string;
+  version: number;
+  division: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+};
 type Closing = {
   id: string;
   closingNumber: string;
@@ -94,14 +129,8 @@ type Closing = {
   calculationWarningCount: number;
   createdBy: { name: string };
   employees: Employee[];
-  sourceRecords: Array<{
-    id: string;
-    sourceType: string;
-    sourceDate: string;
-    waybillNumber: string | null;
-    employeeNameRaw: string | null;
-    exclusionReason: string | null;
-  }>;
+  sourceRecords: WarningSource[];
+  availableProfiles: AvailableProfile[];
 };
 
 const rupiah = (value: string | number) =>
@@ -124,6 +153,20 @@ const divisionLabel: Record<string, string> = {
   THREE_WHEEL_DRIVER: "Driver Roda Tiga",
   MOTORIST: "Motoris",
   DRIVER: "Driver",
+};
+const sourceReasonLabel: Record<string, string> = {
+  PROFILE_NOT_ASSIGNED: "Salary Profile belum ditetapkan atau belum berlaku.",
+  PROFILE_NOT_ACTIVE: "Salary Profile tidak aktif.",
+  PROFILE_NOT_EFFECTIVE: "Salary Profile belum atau tidak lagi berlaku pada tanggal aktivitas.",
+  PROFILE_SETTING_NOT_FOUND: "Pengaturan salary profile belum lengkap.",
+  EMPLOYEE_NOT_MATCHED: "Nama team belum terhubung dengan Informasi Team.",
+  EMPLOYEE_NOT_MAPPED: "Nama team belum terhubung dengan Informasi Team.",
+  INVALID_FREIGHT: "Nilai Freight tidak dapat dibaca.",
+  INVALID_FREIGHT_FOR_PERCENTAGE: "Nilai Freight tidak dapat dibaca.",
+  INVALID_WEIGHT: "Nilai berat tidak dapat dibaca.",
+  OUTSIDE_WEIGHT_RANGE: "Berat tidak masuk rentang insentif yang ditentukan.",
+  AMBIGUOUS_ALIAS: "Alias team terhubung ke lebih dari satu team.",
+  AMBIGUOUS_NAME: "Nama team terhubung ke lebih dari satu team.",
 };
 const adjustmentCategories = {
   ADDITION: ["Bonus", "Insentif", "Lembur", "Koreksi Penghasilan", "Lainnya"],
@@ -151,6 +194,11 @@ export function SalaryClosingDetailClient({
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [profileRepairOpen, setProfileRepairOpen] = useState(false);
+  const [profileEdits, setProfileEdits] = useState<Record<string, {
+    profileId: string;
+    effectiveFrom: string;
+  }>>({});
   const [kasbonOpen, setKasbonOpen] = useState(false);
   const [eligibleKasbon, setEligibleKasbon] = useState<EligibleKasbon[]>([]);
   const [selectedKasbonId, setSelectedKasbonId] = useState("");
@@ -237,6 +285,38 @@ export function SalaryClosingDetailClient({
       await loadClosing();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Proses salary gagal.");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function saveProfileAssignment(employeeId: string) {
+    const edit = profileEdits[employeeId];
+    if (!edit?.profileId || !edit.effectiveFrom || actionLoading) {
+      setError("Pilih Salary Profile dan tanggal berlaku.");
+      return;
+    }
+    setActionLoading(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/finance/salary/team/${employeeId}/assignment`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(edit),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok) throw new Error(
+        result.error?.message || "Assignment Salary Profile gagal disimpan.",
+      );
+      setNotice("Assignment tersimpan. Jalankan Hitung Ulang untuk memperbarui salary.");
+      await loadClosing();
+    } catch (cause) {
+      setError(cause instanceof Error
+        ? cause.message
+        : "Assignment Salary Profile gagal disimpan.");
     } finally {
       setActionLoading(false);
     }
@@ -402,6 +482,32 @@ export function SalaryClosingDetailClient({
     workDays: 0, pickup: 0, dispatch: 0, system: 0,
     addition: 0, deduction: 0, net: 0, kasbon: 0,
   });
+  const profileIssueGroups = [...closing.sourceRecords.reduce((groups, source) => {
+    if (!source.matchedEmployee ||
+      !source.exclusionReason?.startsWith("PROFILE_")) return groups;
+    const employee = source.matchedEmployee;
+    const existing = groups.get(employee.id) ?? {
+      employee,
+      pickupCount: 0,
+      dispatchCount: 0,
+      firstActivityDate: source.sourceDate,
+      reasons: new Set<string>(),
+    };
+    if (source.sourceType === "PICKUP") existing.pickupCount += 1;
+    else existing.dispatchCount += 1;
+    if (source.sourceDate < existing.firstActivityDate) {
+      existing.firstActivityDate = source.sourceDate;
+    }
+    existing.reasons.add(source.exclusionReason);
+    groups.set(employee.id, existing);
+    return groups;
+  }, new Map<string, {
+    employee: NonNullable<WarningSource["matchedEmployee"]>;
+    pickupCount: number;
+    dispatchCount: number;
+    firstActivityDate: string;
+    reasons: Set<string>;
+  }>()).values()];
 
   return <div className="space-y-6">
     <PageHeader eyebrow="Finance & HR" title={closing.closingNumber}
@@ -459,6 +565,19 @@ export function SalaryClosingDetailClient({
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
         Pickup: {closing.sourceRecords.filter((row) => row.sourceType === "PICKUP").length} record · Dispatch: {closing.sourceRecords.filter((row) => row.sourceType === "DISPATCH").length} record
       </div>
+      {!readOnly && canManage && profileIssueGroups.length > 0 &&
+        <button type="button" onClick={() => {
+          setProfileEdits(Object.fromEntries(profileIssueGroups.map((group) => {
+            const assignment = group.employee.assignments[0];
+            return [group.employee.id, {
+              profileId: assignment?.salaryProfile.id ?? "",
+              effectiveFrom: closing.periodStart.slice(0, 10),
+            }];
+          })));
+          setProfileRepairOpen(true);
+        }} className={`${nextgenButtonClass} mt-3`}>
+          Perbaiki Profile Team
+        </button>}
       <TableCard className="mt-3"><div className="overflow-x-auto">
         <table className="w-full min-w-[700px] text-left text-sm">
           <thead><tr>{["Tanggal", "Sumber", "Nama Sumber", "Waybill", "Alasan"]
@@ -468,7 +587,10 @@ export function SalaryClosingDetailClient({
             <td className="px-3 py-3">{row.sourceType === "PICKUP" ? "Pickup" : "Dispatch"}</td>
             <td className="px-3 py-3">{row.employeeNameRaw || "—"}</td>
             <td className="px-3 py-3">{row.waybillNumber || "—"}</td>
-            <td className="px-3 py-3">{row.exclusionReason}</td>
+            <td className="px-3 py-3">
+              {sourceReasonLabel[row.exclusionReason ?? ""] ??
+                "Data belum dapat dihitung."}
+            </td>
           </tr>)}</tbody>
         </table>
       </div></TableCard>
@@ -686,6 +808,123 @@ export function SalaryClosingDetailClient({
             {actionLoading && <LoaderCircle className="animate-spin" size={16}/>}
             Simpan Potongan
           </button>
+        </div>
+      </ModalCard>
+    </div>}
+
+    {profileRepairOpen && <div className="fixed inset-0 z-[65] grid place-items-center bg-slate-950/55 p-3">
+      <ModalCard className="max-w-7xl">
+        <div className="flex items-center justify-between border-b p-5">
+          <div>
+            <h2 className="text-xl font-bold">Perbaiki Profile Team</h2>
+            <p className="text-sm text-slate-500">
+              Satu assignment berlaku untuk seluruh aktivitas team pada tanggal yang tercakup.
+            </p>
+          </div>
+          <button type="button" disabled={actionLoading}
+            aria-label="Tutup Perbaiki Profile Team"
+            onClick={() => setProfileRepairOpen(false)}><X/></button>
+        </div>
+        <div className="max-h-[72vh] overflow-auto p-5">
+          <table className="w-full min-w-[1250px] text-left text-sm">
+            <thead><tr>
+              {["Nama Team", "Divisi", "Pickup", "Dispatch", "Profile Saat Ini",
+                "Tanggal Assignment", "Tanggal Aktivitas", "Mulai Closing", "Masalah",
+                "Profile Baru", "Tanggal Berlaku", "Aksi"]
+                .map((label) => <th key={label} className="px-3 py-3">{label}</th>)}
+            </tr></thead>
+            <tbody className="divide-y">{profileIssueGroups.map((group) => {
+              const assignment = group.employee.assignments[0];
+              const edit = profileEdits[group.employee.id] ?? {
+                profileId: "",
+                effectiveFrom: closing.periodStart.slice(0, 10),
+              };
+              return <tr key={group.employee.id}>
+                <td className="px-3 py-3 font-semibold">{group.employee.name}</td>
+                <td className="px-3 py-3">
+                  {divisionLabel[group.employee.division] ?? group.employee.division}
+                </td>
+                <td className="px-3 py-3">{group.pickupCount}</td>
+                <td className="px-3 py-3">{group.dispatchCount}</td>
+                <td className="px-3 py-3">
+                  {assignment
+                    ? `${assignment.salaryProfile.name} v${assignment.salaryProfile.version}`
+                    : "Belum ada"}
+                </td>
+                <td className="px-3 py-3">
+                  {assignment?.effectiveFrom.slice(0, 10) ?? "—"}
+                </td>
+                <td className="px-3 py-3">
+                  {group.firstActivityDate.slice(0, 10)}
+                </td>
+                <td className="px-3 py-3">{closing.periodStart.slice(0, 10)}</td>
+                <td className="max-w-64 px-3 py-3">
+                  {[...group.reasons].map((reason) =>
+                    sourceReasonLabel[reason] ?? "Profile belum dapat digunakan."
+                  ).join(" ")}
+                </td>
+                <td className="px-3 py-3">
+                  <select aria-label={`Salary Profile ${group.employee.name}`}
+                    value={edit.profileId}
+                    onChange={(event) => setProfileEdits((current) => ({
+                      ...current,
+                      [group.employee.id]: {
+                        ...edit,
+                        profileId: event.target.value,
+                      },
+                    }))}
+                    className={`${nextgenControlClass} min-w-56`}>
+                    <option value="">Pilih Profile</option>
+                    {closing.availableProfiles
+                      .filter((profile) =>
+                        profile.division === group.employee.division
+                      )
+                      .map((profile) => <option key={profile.id} value={profile.id}>
+                        {profile.name} · v{profile.version}
+                      </option>)}
+                  </select>
+                </td>
+                <td className="px-3 py-3">
+                  <input aria-label={`Tanggal Berlaku ${group.employee.name}`}
+                    type="date" value={edit.effectiveFrom}
+                    onChange={(event) => setProfileEdits((current) => ({
+                      ...current,
+                      [group.employee.id]: {
+                        ...edit,
+                        effectiveFrom: event.target.value,
+                      },
+                    }))}
+                    className={nextgenControlClass}/>
+                  <button type="button" className="mt-1 text-xs font-semibold text-blue-700"
+                    onClick={() => setProfileEdits((current) => ({
+                      ...current,
+                      [group.employee.id]: {
+                        ...edit,
+                        effectiveFrom: closing.periodStart.slice(0, 10),
+                      },
+                    }))}>
+                    Terapkan mulai awal periode closing
+                  </button>
+                </td>
+                <td className="px-3 py-3">
+                  <button type="button" disabled={actionLoading}
+                    onClick={() => void saveProfileAssignment(group.employee.id)}
+                    className={nextgenButtonClass}>
+                    {actionLoading && <LoaderCircle className="animate-spin" size={16}/>}
+                    Atur Salary Profile
+                  </button>
+                </td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+        <div className="flex justify-between gap-3 border-t p-4 text-sm">
+          <p className="text-slate-500">
+            Setelah assignment selesai, tutup modal lalu klik Hitung Ulang.
+          </p>
+          <button type="button" disabled={actionLoading}
+            onClick={() => setProfileRepairOpen(false)}
+            className={nextgenNeutralButtonClass}>Selesai</button>
         </div>
       </ModalCard>
     </div>}

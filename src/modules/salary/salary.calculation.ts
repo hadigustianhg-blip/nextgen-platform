@@ -19,6 +19,116 @@ const inRange = (
 ) => min != null && max != null &&
   value.greaterThanOrEqualTo(min) && value.lessThanOrEqualTo(max);
 
+export function parseSalaryMoney(
+  value: Prisma.Decimal.Value | null | undefined,
+) {
+  if (value == null || value === "") return null;
+  if (Prisma.Decimal.isDecimal(value)) return new Prisma.Decimal(value);
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? new Prisma.Decimal(value) : null;
+  }
+  let normalized = String(value)
+    .trim()
+    .replace(/^rp\s*/i, "")
+    .replace(/\s+/g, "");
+  if (!normalized) return null;
+  if (normalized.includes(".") && normalized.includes(",")) {
+    normalized = normalized.lastIndexOf(",") > normalized.lastIndexOf(".")
+      ? normalized.replace(/\./g, "").replace(",", ".")
+      : normalized.replace(/,/g, "");
+  } else if (/^-?\d{1,3}([.,]\d{3})+$/.test(normalized)) {
+    normalized = normalized.replace(/[.,]/g, "");
+  } else {
+    normalized = normalized.replace(",", ".");
+  }
+  try {
+    const parsed = new Prisma.Decimal(normalized);
+    return parsed.isFinite() ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseSalaryWeight(
+  value: Prisma.Decimal.Value | null | undefined,
+) {
+  if (value == null || value === "") return null;
+  if (Prisma.Decimal.isDecimal(value)) return new Prisma.Decimal(value);
+  const normalized = String(value)
+    .trim()
+    .replace(/\s*kg$/i, "")
+    .replace(",", ".");
+  try {
+    const parsed = new Prisma.Decimal(normalized);
+    return parsed.isFinite() ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export type SalaryProfileResolutionReason =
+  | "PROFILE_NOT_ASSIGNED"
+  | "PROFILE_NOT_ACTIVE"
+  | "PROFILE_NOT_EFFECTIVE"
+  | "PROFILE_SETTING_NOT_FOUND";
+
+export type SalaryAssignmentCandidate<TSetting = unknown> = {
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+  status: "ACTIVE" | "INACTIVE";
+  salaryProfile: {
+    status: "DRAFT" | "ACTIVE" | "INACTIVE" | "ARCHIVED";
+    effectiveFrom: Date;
+    effectiveTo: Date | null;
+    division: string;
+    setting: TSetting | null;
+  };
+};
+
+export function resolveSalaryAssignmentOnDate<
+  T extends SalaryAssignmentCandidate,
+>(
+  assignments: T[],
+  operationalDate: Date,
+  employeeDivision: string,
+): { assignment: T | null; reason: SalaryProfileResolutionReason | null } {
+  const assignment = assignments
+    .filter((candidate) =>
+      candidate.effectiveFrom <= operationalDate &&
+      (!candidate.effectiveTo || candidate.effectiveTo >= operationalDate)
+    )
+    .sort((left, right) =>
+      right.effectiveFrom.getTime() - left.effectiveFrom.getTime()
+    )[0];
+  if (!assignment) {
+    return { assignment: null, reason: "PROFILE_NOT_ASSIGNED" };
+  }
+  const historicalAssignment = assignment.status === "INACTIVE" &&
+    assignment.effectiveTo != null;
+  if (
+    (!historicalAssignment && assignment.status !== "ACTIVE") ||
+    assignment.salaryProfile.status !== "ACTIVE"
+  ) {
+    return { assignment: null, reason: "PROFILE_NOT_ACTIVE" };
+  }
+  if (
+    assignment.salaryProfile.effectiveFrom > operationalDate ||
+    (
+      assignment.salaryProfile.effectiveTo != null &&
+      assignment.salaryProfile.effectiveTo < operationalDate
+    )
+  ) {
+    return { assignment: null, reason: "PROFILE_NOT_EFFECTIVE" };
+  }
+  if (assignment.salaryProfile.division !== employeeDivision) {
+    return { assignment: null, reason: "PROFILE_NOT_ASSIGNED" };
+  }
+  if (!assignment.salaryProfile.setting) {
+    return { assignment: null, reason: "PROFILE_SETTING_NOT_FOUND" };
+  }
+  return { assignment, reason: null };
+}
+
 export function normalizeSalaryEmployeeName(
   value: string | null | undefined,
 ) {
@@ -74,7 +184,7 @@ export function createSalaryEmployeeMatcher(employees: EmployeeMatchInput[]) {
     }
     return {
       employeeId: null,
-      reason: exactMatches.size > 1 ? "AMBIGUOUS_NAME" : "EMPLOYEE_NOT_MAPPED",
+      reason: exactMatches.size > 1 ? "AMBIGUOUS_NAME" : "EMPLOYEE_NOT_MATCHED",
     };
   };
 }
@@ -111,12 +221,12 @@ type BaseSource = {
 
 export type SalaryPickupSource = BaseSource & {
   settlement: string | null;
-  freight: Prisma.Decimal;
+  freight: Prisma.Decimal | null;
 };
 
 export type SalaryDispatchSource = BaseSource & {
   status: string | null;
-  weight: Prisma.Decimal;
+  weight: Prisma.Decimal | null;
 };
 
 export type SalaryCalculatedComponent = {
@@ -283,7 +393,7 @@ export function calculateEmployeeSalary(input: {
       });
       continue;
     }
-    if (source.weight.lessThan(0)) {
+    if (!source.weight || source.weight.lessThan(0)) {
       sources.push({
         sourceType: "DISPATCH",
         sourceRecordId: source.id,
@@ -408,29 +518,42 @@ export function calculateEmployeeSalary(input: {
       });
       continue;
     }
+    if (regular && !source.freight) {
+      sources.push({
+        sourceType: "PICKUP",
+        sourceRecordId: source.id,
+        calculationStatus: "EXCLUDED",
+        exclusionReason: "INVALID_FREIGHT",
+        calculationType: null,
+        rate: null,
+        amount: null,
+      });
+      continue;
+    }
     if (regular) {
+      const freight = source.freight!;
       total.regularCount += 1;
       const canonical = isSalarySettlement(source.settlement, "DFOD")
         ? "DFOD"
         : "Tunai";
       total.settlements[canonical] = (total.settlements[canonical] ?? 0) + 1;
-      if (source.freight.greaterThanOrEqualTo(0)) {
-        total.regularFreight = total.regularFreight.plus(source.freight);
+      if (freight.greaterThanOrEqualTo(0)) {
+        total.regularFreight = total.regularFreight.plus(freight);
         if (positive(setting.pickupRegularRevenuePercentage)) {
           total.regularPercentageAmount =
             total.regularPercentageAmount.plus(money(
-              source.freight
+              freight
                 .times(setting.pickupRegularRevenuePercentage!)
                 .dividedBy(100),
             ));
         }
       }
-      const percentageEligible = source.freight.greaterThanOrEqualTo(0) &&
+      const percentageEligible = freight.greaterThanOrEqualTo(0) &&
         positive(setting.pickupRegularRevenuePercentage);
       const perWaybillEligible =
         positive(setting.pickupRegularPerWaybillAmount);
       const sourceAmount = (percentageEligible
-        ? money(source.freight
+        ? money(freight
           .times(setting.pickupRegularRevenuePercentage!)
           .dividedBy(100))
         : zero()).plus(
@@ -442,8 +565,8 @@ export function calculateEmployeeSalary(input: {
         calculationStatus: percentageEligible || perWaybillEligible
           ? "INCLUDED"
           : "EXCLUDED",
-        exclusionReason: source.freight.lessThan(0)
-          ? "INVALID_FREIGHT_FOR_PERCENTAGE"
+        exclusionReason: freight.lessThan(0)
+          ? "INVALID_FREIGHT"
           : percentageEligible || perWaybillEligible
             ? null
             : "RATE_NOT_CONFIGURED",

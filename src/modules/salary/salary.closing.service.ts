@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import {
   calculateEmployeeSalary,
   createSalaryEmployeeMatcher,
+  resolveSalaryAssignmentOnDate,
   type SalaryCalculationSetting,
   type SalaryDispatchSource,
   type SalaryPickupSource,
@@ -52,16 +53,6 @@ const settingForCalculation = (assignment: {
     ...setting,
   };
 };
-
-function assignmentOnDate<T extends {
-  effectiveFrom: Date;
-  effectiveTo: Date | null;
-}>(assignments: T[], date: Date) {
-  return assignments.find((assignment) =>
-    assignment.effectiveFrom <= date &&
-    (!assignment.effectiveTo || assignment.effectiveTo >= date)
-  );
-}
 
 async function refreshClosingEmployeeTotals(
   tx: Transaction,
@@ -142,14 +133,6 @@ export async function generateSalaryClosing(
         include: {
           aliases: { where: { isActive: true } },
           assignments: {
-            where: {
-              effectiveFrom: { lte: closing.periodEnd },
-              OR: [
-                { effectiveTo: null },
-                { effectiveTo: { gte: closing.periodStart } },
-              ],
-              salaryProfile: { status: "ACTIVE" },
-            },
             include: { salaryProfile: { include: { setting: true } } },
             orderBy: { effectiveFrom: "asc" },
           },
@@ -318,22 +301,24 @@ export async function generateSalaryClosing(
           "PICKUP",
           source,
           source.staffNameRaw,
-          match.reason ?? "EMPLOYEE_NOT_MAPPED",
+          match.reason ?? "EMPLOYEE_NOT_MATCHED",
         );
         continue;
       }
       const employee = employeeById.get(match.employeeId)!;
-      const assignment = assignmentOnDate(
+      const resolved = resolveSalaryAssignmentOnDate(
         employee.assignments,
         source.operationalDate,
+        employee.division,
       );
+      const assignment = resolved.assignment;
       const setting = assignment ? settingForCalculation(assignment) : null;
-      if (!assignment || !setting || assignment.salaryProfile.division !== employee.division) {
+      if (!assignment || !setting) {
         addUnmatched(
           "PICKUP",
           source,
           source.staffNameRaw,
-          "PROFILE_NOT_ASSIGNED",
+          resolved.reason ?? "PROFILE_SETTING_NOT_FOUND",
           employee.id,
         );
         continue;
@@ -359,22 +344,24 @@ export async function generateSalaryClosing(
           "DISPATCH",
           source,
           source.courierNameRaw,
-          match.reason ?? "EMPLOYEE_NOT_MAPPED",
+          match.reason ?? "EMPLOYEE_NOT_MATCHED",
         );
         continue;
       }
       const employee = employeeById.get(match.employeeId)!;
-      const assignment = assignmentOnDate(
+      const resolved = resolveSalaryAssignmentOnDate(
         employee.assignments,
         source.operationalDate,
+        employee.division,
       );
+      const assignment = resolved.assignment;
       const setting = assignment ? settingForCalculation(assignment) : null;
-      if (!assignment || !setting || assignment.salaryProfile.division !== employee.division) {
+      if (!assignment || !setting) {
         addUnmatched(
           "DISPATCH",
           source,
           source.courierNameRaw,
-          "PROFILE_NOT_ASSIGNED",
+          resolved.reason ?? "PROFILE_SETTING_NOT_FOUND",
           employee.id,
         );
         continue;
@@ -694,32 +681,75 @@ export async function getSalaryClosingReview(
   scope: SalaryScope,
   closingId: string,
 ) {
-  return prisma.salaryClosing.findFirst({
-    where: {
-      id: closingId,
-      tenantId: scope.tenantId,
-      outletId: scope.outletId,
-    },
-    include: {
-      createdBy: { select: { name: true } },
-      processedBy: { select: { name: true } },
-      employees: {
-        orderBy: { employeeNameSnapshot: "asc" },
-        include: {
-          components: { orderBy: { componentName: "asc" } },
-          adjustments: { orderBy: { createdAt: "desc" } },
-          kasbonAllocations: {
-            where: { status: { not: "VOID" } },
-            include: { operationalExpense: true },
+  const [closing, availableProfiles] = await Promise.all([
+    prisma.salaryClosing.findFirst({
+      where: {
+        id: closingId,
+        tenantId: scope.tenantId,
+        outletId: scope.outletId,
+      },
+      include: {
+        createdBy: { select: { name: true } },
+        processedBy: { select: { name: true } },
+        employees: {
+          orderBy: { employeeNameSnapshot: "asc" },
+          include: {
+            components: { orderBy: { componentName: "asc" } },
+            adjustments: { orderBy: { createdAt: "desc" } },
+            kasbonAllocations: {
+              where: { status: { not: "VOID" } },
+              include: { operationalExpense: true },
+            },
+          },
+        },
+        sourceRecords: {
+          where: { calculationStatus: "UNMATCHED", isActive: true },
+          orderBy: [{ sourceDate: "asc" }, { sourceType: "asc" }],
+          include: {
+            matchedEmployee: {
+              select: {
+                id: true,
+                name: true,
+                division: true,
+                assignments: {
+                  orderBy: { effectiveFrom: "desc" },
+                  include: {
+                    salaryProfile: {
+                      select: {
+                        id: true,
+                        name: true,
+                        version: true,
+                        status: true,
+                        effectiveFrom: true,
+                        effectiveTo: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       },
-      sourceRecords: {
-        where: { calculationStatus: "UNMATCHED", isActive: true },
-        orderBy: [{ sourceDate: "asc" }, { sourceType: "asc" }],
+    }),
+    prisma.salaryProfile.findMany({
+      where: {
+        tenantId: scope.tenantId,
+        outletId: scope.outletId,
+        status: "ACTIVE",
       },
-    },
-  });
+      select: {
+        id: true,
+        name: true,
+        version: true,
+        division: true,
+        effectiveFrom: true,
+        effectiveTo: true,
+      },
+      orderBy: [{ name: "asc" }, { version: "desc" }],
+    }),
+  ]);
+  return closing ? { ...closing, availableProfiles } : null;
 }
 
 export async function listSalaryClosingEmployeeSources(
@@ -799,7 +829,7 @@ export async function processSalaryClosing(
         employees: true,
         sourceRecords: {
           where: { isActive: true, calculationStatus: "UNMATCHED" },
-          select: { id: true },
+          select: { id: true, exclusionReason: true },
         },
       },
     });
@@ -811,7 +841,20 @@ export async function processSalaryClosing(
       throw new SalaryError("SALARY_CLOSING_EMPTY", 409);
     }
     if (closing.sourceRecords.length) {
-      throw new SalaryError("SALARY_CLOSING_HAS_WARNINGS", 409);
+      const profileReasons = new Set([
+        "PROFILE_NOT_ASSIGNED",
+        "PROFILE_NOT_ACTIVE",
+        "PROFILE_NOT_EFFECTIVE",
+        "PROFILE_SETTING_NOT_FOUND",
+      ]);
+      throw new SalaryError(
+        closing.sourceRecords.some((row) =>
+          row.exclusionReason && profileReasons.has(row.exclusionReason)
+        )
+          ? "SALARY_CLOSING_HAS_PROFILE_WARNINGS"
+          : "SALARY_CLOSING_HAS_WARNINGS",
+        409,
+      );
     }
     if (closing.employees.some((employee) => employee.netSalary.lessThan(0))) {
       throw new SalaryError("SALARY_NEGATIVE_NET", 409);

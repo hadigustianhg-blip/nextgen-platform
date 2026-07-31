@@ -568,6 +568,42 @@ export async function assignSalaryProfile(
       },
       orderBy: { effectiveFrom: "desc" },
     });
+    if (
+      active &&
+      active.salaryProfileId === profile.id &&
+      active.effectiveFrom >= start
+    ) {
+      const priorOverlap = await tx.employeeSalaryAssignment.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          employeeId: employee.id,
+          id: { not: active.id },
+          effectiveFrom: { lte: active.effectiveTo ?? new Date("9999-12-31") },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: start } }],
+        },
+      });
+      if (priorOverlap) throw new SalaryError("SALARY_ASSIGNMENT_OVERLAP", 409);
+      const assignment = await tx.employeeSalaryAssignment.update({
+        where: { id: active.id },
+        data: { effectiveFrom: start },
+      });
+      await tx.auditLog.create({ data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        actorId: context.actorId,
+        action: "UPDATE",
+        entityType: "SALARY_ASSIGNMENT",
+        entityId: assignment.id,
+        metadata: {
+          employeeId: employee.id,
+          salaryProfileId: profile.id,
+          effectiveFrom: input.effectiveFrom,
+          operation: "BACKDATE_ACTIVE_ASSIGNMENT",
+        },
+      } });
+      return assignment;
+    }
     if (active && active.effectiveFrom >= start) {
       throw new SalaryError("SALARY_ASSIGNMENT_OVERLAP", 409);
     }
