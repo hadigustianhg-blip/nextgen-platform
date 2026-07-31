@@ -385,6 +385,25 @@ async function paymentAccountSnapshot(
   };
 }
 
+async function paymentContactSnapshot(
+  tx: Prisma.TransactionClient,
+  scope: Scope,
+) {
+  const outlet = await tx.outlet.findFirst({
+    where: {
+      id: scope.outletId,
+      tenantId: scope.tenantId,
+    },
+    select: {
+      adminWhatsapp: true,
+      tenant: { select: { adminWhatsapp: true } },
+    },
+  });
+  return outlet?.adminWhatsapp?.trim() ||
+    outlet?.tenant.adminWhatsapp?.trim() ||
+    null;
+}
+
 export async function createInvoiceDraft(context: Context, input: DraftInput) {
   const maxAttempts = 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -405,6 +424,7 @@ export async function createInvoiceDraft(context: Context, input: DraftInput) {
         const paymentAccount = await paymentAccountSnapshot(
           tx, context, input.bankAccountId,
         );
+        const paymentContactPhone = await paymentContactSnapshot(tx, context);
         logCreateInvoice(context, step, {
           attempt,
           itemCount: sources.length,
@@ -424,6 +444,7 @@ export async function createInvoiceDraft(context: Context, input: DraftInput) {
             recipientName: input.recipientName || null,
             recipientPhone: input.recipientPhone || null,
             recipientCity: input.recipientCity || null,
+            paymentContactPhone,
             ...paymentAccount,
             invoiceDate: date(input.invoiceDate),
             dueDate: date(input.dueDate),
@@ -518,6 +539,7 @@ export async function updateInvoiceDraft(
       const paymentAccount = await paymentAccountSnapshot(
         tx, context, input.bankAccountId,
       );
+      const paymentContactPhone = await paymentContactSnapshot(tx, context);
       await tx.invoiceItem.deleteMany({ where: { invoiceId } });
       await tx.invoice.update({
         where: { id: invoiceId },
@@ -531,6 +553,7 @@ export async function updateInvoiceDraft(
           recipientName: input.recipientName || null,
           recipientPhone: input.recipientPhone || null,
           recipientCity: input.recipientCity || null,
+          paymentContactPhone,
           ...paymentAccount,
           invoiceDate: date(input.invoiceDate),
           dueDate: date(input.dueDate),
@@ -733,7 +756,7 @@ export async function voidInvoice(
     });
     const result = await tx.invoice.update({
       where: { id: invoiceId },
-      data: { status: "VOID", voidedAt: new Date(), notes: reason },
+      data: { status: "VOID", voidedAt: new Date(), voidReason: reason },
       include: invoiceInclude,
     });
     await tx.auditLog.create({ data: {
@@ -743,10 +766,48 @@ export async function voidInvoice(
       metadata: {
         invoiceNumber: invoice.invoiceNumber,
         customerKey: invoice.customerKey,
+        previousStatus: invoice.status,
+        nextStatus: "VOID",
+        reason,
         result: "SUCCESS",
       },
     } });
     return result;
+  });
+}
+
+export async function getInvoiceOutletSettings(scope: Scope) {
+  const outlet = await prisma.outlet.findFirst({
+    where: { id: scope.outletId, tenantId: scope.tenantId },
+    select: {
+      adminWhatsapp: true,
+      tenant: { select: { adminWhatsapp: true } },
+    },
+  });
+  if (!outlet) throw new InvoiceServiceError("OUTLET_REQUIRED", 404);
+  return {
+    adminWhatsapp: outlet.adminWhatsapp,
+    tenantAdminWhatsapp: outlet.tenant.adminWhatsapp,
+    effectiveAdminWhatsapp:
+      outlet.adminWhatsapp?.trim() ||
+      outlet.tenant.adminWhatsapp?.trim() ||
+      null,
+  };
+}
+
+export async function updateInvoiceOutletSettings(
+  scope: Scope,
+  adminWhatsapp: string | null,
+) {
+  const existing = await prisma.outlet.findFirst({
+    where: { id: scope.outletId, tenantId: scope.tenantId },
+    select: { id: true },
+  });
+  if (!existing) throw new InvoiceServiceError("OUTLET_REQUIRED", 404);
+  return prisma.outlet.update({
+    where: { id: existing.id },
+    data: { adminWhatsapp: adminWhatsapp?.trim() || null },
+    select: { adminWhatsapp: true },
   });
 }
 

@@ -7,6 +7,7 @@ import {
   invoicePdfErrorMessage, invoiceWhatsappDisabledReason, selectableInvoiceItems,
   buildRecipientWhatsappMessage, buildRecipientWhatsappUrl,
   getFirstSelectedWaybill, invoiceRecipientDetailErrorMessage,
+  invoiceVoidReasonError,
   normalizeRecipientWhatsapp,
 } from "./invoice.view";
 
@@ -70,7 +71,7 @@ describe("Create Invoice interface", () => {
     expect(source).not.toContain("Pilih minimal satu resi terlebih dahulu.");
   });
 
-  it("fills an empty billing address from recipient city without overwriting an address", async () => {
+  it("always replaces the seller address with recipient city after detail succeeds", async () => {
     expect(billingAddressAfterRecipient("", "Kab Sumedang")).toBe("Kab Sumedang");
     expect(billingAddressAfterRecipient("   ", " Kab Sumedang ")).toBe(
       "Kab Sumedang",
@@ -78,13 +79,50 @@ describe("Create Invoice interface", () => {
     expect(billingAddressAfterRecipient(
       "Jalan Existing No. 1",
       "Kab Sumedang",
-    )).toBe("Jalan Existing No. 1");
+    )).toBe("Kab Sumedang");
     const source = await readFile(
       new URL("./create-invoice-client.tsx", import.meta.url),
       "utf8",
     );
     expect(source).toContain("setAddress((current)");
     expect(source).toContain('setAddress("")');
+  });
+
+  it("validates void reasons and uses the custom NEXTGEN modal", async () => {
+    expect(invoiceVoidReasonError("")).toBe("Alasan pembatalan wajib diisi.");
+    expect(invoiceVoidReasonError("   ")).toBe("Alasan pembatalan wajib diisi.");
+    expect(invoiceVoidReasonError("abc")).toBe(
+      "Alasan pembatalan minimal 5 karakter.",
+    );
+    expect(invoiceVoidReasonError(" Alasan valid ")).toBeNull();
+    expect(invoiceVoidReasonError("x".repeat(501))).toBe(
+      "Alasan pembatalan maksimal 500 karakter.",
+    );
+    const source = await readFile(
+      new URL("./create-invoice-client.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toMatch(/\bwindow\.(prompt|confirm|alert)\s*\(/);
+    expect(source).toContain("Batalkan Invoice");
+    expect(source).toContain("Alasan Pembatalan");
+    expect(source).toContain("Tuliskan alasan pembatalan invoice");
+    expect(source).toContain("Membatalkan...");
+    expect(source).toContain('event.key === "Escape"');
+    expect(source).toContain("event.target === event.currentTarget");
+    expect(source).toContain("if (!voidInvoiceTarget || voidSaving) return");
+    expect(source).toContain("setInvoices((current)");
+    expect(source).not.toContain("window.location");
+  });
+
+  it("configures the outlet payment contact outside the invoice payload", async () => {
+    const source = await readFile(
+      new URL("./create-invoice-client.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("WhatsApp Admin Outlet");
+    expect(source).toContain("/api/finance/invoice-outlet-settings");
+    expect(source).toContain("Kontak outlet ini disimpan sebagai snapshot");
+    expect(source).not.toMatch(/adminWhatsapp:\s*["'](?:08|62|\+62)/);
   });
 
   it("builds source-items query with the actual seller key and active dates", () => {

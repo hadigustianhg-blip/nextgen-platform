@@ -153,6 +153,7 @@ export async function fetchInvoiceRecipientDetail(
       recipientName: recipient.recipientName,
       recipientPhone: recipient.recipientPhone,
       recipientCity: recipient.recipientCity,
+      addressSnapshot: recipient.recipientCity,
     },
   });
   if (updated.count !== 1) {

@@ -112,6 +112,7 @@ model Tenant {
   id                         String                      @id @default(uuid()) @db.Uuid
   name                       String
   slug                       String                      @unique
+  adminWhatsapp              String?
   status                     TenantStatus                @default(ACTIVE)
   timezone                   String                      @default("Asia/Jakarta")
   createdAt                  DateTime                    @default(now())
@@ -151,6 +152,7 @@ model Outlet {
   tenantId                   String                      @db.Uuid
   code                       String
   name                       String
+  adminWhatsapp              String?
   isActive                   Boolean                     @default(true)
   createdAt                  DateTime                    @default(now())
   updatedAt                  DateTime                    @updatedAt
@@ -924,6 +926,7 @@ model Invoice {
   recipientName         String?
   recipientPhone        String?
   recipientCity         String?
+  paymentContactPhone   String?
   transferBankName      String?
   transferAccountNumber String?
   transferAccountHolder String?
@@ -940,6 +943,7 @@ model Invoice {
   sentAt                DateTime?     @db.Timestamptz(3)
   paidAt                DateTime?     @db.Timestamptz(3)
   voidedAt              DateTime?     @db.Timestamptz(3)
+  voidReason            String?
   createdByUserId       String        @db.Uuid
   createdAt             DateTime      @default(now()) @db.Timestamptz(3)
   updatedAt             DateTime      @updatedAt @db.Timestamptz(3)

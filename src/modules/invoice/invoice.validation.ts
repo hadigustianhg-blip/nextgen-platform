@@ -59,7 +59,11 @@ export const invoiceWhatsappSchema = z.object({
 });
 
 export const invoiceVoidSchema = z.object({
-  reason: z.string().trim().min(3).max(500),
+  reason: z.string().trim().min(5).max(500),
+});
+
+export const invoiceOutletSettingsSchema = z.object({
+  adminWhatsapp: z.string().trim().max(30).nullable(),
 });
 
 export const outletBankAccountSchema = z.object({

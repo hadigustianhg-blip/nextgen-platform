@@ -12,6 +12,7 @@ type PdfInvoice = {
   recipientName?: string | null;
   recipientPhone?: string | null;
   recipientCity?: string | null;
+  paymentContactPhone?: string | null;
   invoiceDate: Date;
   dueDate: Date;
   periodStart: Date;
@@ -264,8 +265,8 @@ function drawPaymentAccounts(
   bankAccounts: BankAccount[],
 ) {
   const accountHeight = bankAccounts.length ? bankAccounts.length * 42 : 20;
-  const paymentPhone = invoice.recipientPhone || invoice.whatsappSnapshot;
-  const notesHeight = paymentPhone ? 38 : 26;
+  const paymentContactPhone = invoice.paymentContactPhone?.trim() || null;
+  const notesHeight = paymentContactPhone ? 38 : 26;
   ensurePageSpace(doc, invoice, 42 + accountHeight + notesHeight);
   const startY = doc.y;
   doc.font("Helvetica-Bold").fontSize(9).fillColor(PRIMARY)
@@ -304,9 +305,9 @@ function drawPaymentAccounts(
       doc.y + 5,
       { width: CONTENT_WIDTH },
     );
-  if (paymentPhone) {
+  if (paymentContactPhone) {
     doc.text(
-      `Setelah pembayaran dilakukan, mohon mengirimkan bukti transfer ke nomor WhatsApp ${paymentPhone}.`,
+      `Setelah pembayaran dilakukan, mohon mengirimkan bukti transfer ke WhatsApp Admin: ${paymentContactPhone}.`,
       PAGE.margin,
       doc.y + 3,
       { width: CONTENT_WIDTH },
@@ -391,7 +392,9 @@ function drawInvoiceHeader(doc: PDFKit.PDFDocument, invoice: PdfInvoice) {
     invoice.recipientCity,
     invoice.recipientPhone ? `WA: ${invoice.recipientPhone}` : null,
     invoice.emailSnapshot ? `Email: ${invoice.emailSnapshot}` : null,
-  ].filter((value): value is string => Boolean(value?.trim()));
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .filter((value, index, values) => values.indexOf(value) === index);
   doc.font("Helvetica").fontSize(8).fillColor(MUTED)
     .text(customerLines.join("\n") || "Informasi customer belum lengkap.", PAGE.margin, doc.y + 3, {
       width: 245, height: 54, ellipsis: true,

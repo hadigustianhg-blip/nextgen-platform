@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check, ChevronRight, Download, Eye, FileCheck2, LoaderCircle,
   MessageCircle, ReceiptText, Save, Send, X,
@@ -17,7 +17,7 @@ import {
   invoiceWhatsappErrorMessage, selectableInvoiceItems, sumMoney,
   buildRecipientWhatsappMessage, buildRecipientWhatsappUrl,
   billingAddressAfterRecipient, getFirstSelectedWaybill,
-  invoiceRecipientDetailErrorMessage,
+  invoiceRecipientDetailErrorMessage, invoiceVoidReasonError,
 } from "./invoice.view";
 
 type Seller = {
@@ -182,6 +182,39 @@ export function CreateInvoiceClient({
   const [invoiceDate, setInvoiceDate] = useState(today);
   const [dueDate, setDueDate] = useState(plusDays(today, 7));
   const [notes, setNotes] = useState("");
+  const [adminWhatsapp, setAdminWhatsapp] = useState("");
+  const [adminWhatsappSaving, setAdminWhatsappSaving] = useState(false);
+  const [voidInvoiceTarget, setVoidInvoiceTarget] = useState<Invoice | null>(null);
+  const [voidReason, setVoidReason] = useState("");
+  const [voidError, setVoidError] = useState("");
+  const [voidSaving, setVoidSaving] = useState(false);
+
+  useEffect(() => {
+    void fetch("/api/finance/invoice-outlet-settings", { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((result) => {
+        if (result?.data) {
+          setAdminWhatsapp(
+            result.data.adminWhatsapp ||
+            result.data.tenantAdminWhatsapp ||
+            "",
+          );
+        }
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!voidInvoiceTarget) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !voidSaving) {
+        setVoidInvoiceTarget(null);
+        setVoidReason("");
+        setVoidError("");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [voidInvoiceTarget, voidSaving]);
 
   async function loadInvoices(search = invoiceSearch, status = invoiceStatus) {
     const query = new URLSearchParams({
@@ -313,6 +346,7 @@ export function CreateInvoiceClient({
       setRecipientCity("");
       setCustomerName(selectedSeller?.customerName ?? "");
       setWhatsapp(items[0]?.whatsapp || "");
+      setAddress(items[0]?.address || "");
       setRecipientHelper(nextWaybill
         ? `Pilihan resi berubah. Ambil ulang detail dari resi ${nextWaybill}.`
         : "Centang minimal satu resi pada daftar di bawah.");
@@ -489,7 +523,11 @@ export function CreateInvoiceClient({
         throw new Error(invoiceRecipientDetailErrorMessage(result.error?.code));
       }
       setCurrentInvoice((current) => current?.id === invoice.id
-        ? { ...current, ...result.data }
+        ? {
+            ...current,
+            ...result.data,
+            addressSnapshot: result.data.recipientCity || null,
+          }
         : current);
       setRecipientLoadedId(invoice.id);
       setNotice("Detail penerima ditampilkan.");
@@ -620,6 +658,27 @@ export function CreateInvoiceClient({
     }
   }
 
+  async function saveAdminWhatsapp() {
+    if (adminWhatsappSaving) return;
+    setAdminWhatsappSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/finance/invoice-outlet-settings", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ adminWhatsapp: adminWhatsapp.trim() || null }),
+      });
+      if (!response.ok) throw new Error();
+      const result = await response.json();
+      setAdminWhatsapp(result.data.adminWhatsapp || "");
+      setNotice("WhatsApp Admin outlet berhasil disimpan.");
+    } catch {
+      setError("WhatsApp Admin outlet gagal disimpan.");
+    } finally {
+      setAdminWhatsappSaving(false);
+    }
+  }
+
   function chatRecipient(invoice: Invoice) {
     const message = buildRecipientWhatsappMessage({
       recipientName: invoice.recipientName,
@@ -665,18 +724,59 @@ export function CreateInvoiceClient({
     }
   }
 
-  async function voidSelectedInvoice(invoice: Invoice) {
-    const reason = window.prompt("Alasan pembatalan invoice:");
-    if (!reason) return;
-    const response = await fetch(`/api/finance/invoices/${invoice.id}/void`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ reason }),
-    });
-    if (!response.ok) setError("Invoice gagal dibatalkan.");
-    else {
-      setCurrentInvoice(null);
+  function openVoidModal(invoice: Invoice) {
+    setVoidInvoiceTarget(invoice);
+    setVoidReason("");
+    setVoidError("");
+  }
+
+  function closeVoidModal() {
+    if (voidSaving) return;
+    setVoidInvoiceTarget(null);
+    setVoidReason("");
+    setVoidError("");
+  }
+
+  async function submitVoidInvoice() {
+    if (!voidInvoiceTarget || voidSaving) return;
+    const validationError = invoiceVoidReasonError(voidReason);
+    if (validationError) {
+      setVoidError(validationError);
+      return;
+    }
+    setVoidSaving(true);
+    setVoidError("");
+    try {
+      const response = await fetch(
+        `/api/finance/invoices/${voidInvoiceTarget.id}/void`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reason: voidReason.trim() }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        setVoidError(result.error?.code === "INVOICE_LOCKED"
+          ? "Invoice ini tidak dapat dibatalkan pada status saat ini."
+          : "Invoice gagal dibatalkan.");
+        return;
+      }
+      const invoiceNumber =
+        voidInvoiceTarget.invoiceNumber || "Draft invoice";
+      setCurrentInvoice((current) => current?.id === result.data.id
+        ? result.data
+        : current);
+      setInvoices((current) => current.map((invoice) =>
+        invoice.id === result.data.id ? { ...invoice, ...result.data } : invoice));
+      setNotice(`Invoice ${invoiceNumber} berhasil dibatalkan.`);
+      setVoidInvoiceTarget(null);
+      setVoidReason("");
       await Promise.all([loadInvoices(), loadSellers()]);
+    } catch {
+      setVoidError("Invoice gagal dibatalkan.");
+    } finally {
+      setVoidSaving(false);
     }
   }
 
@@ -820,6 +920,34 @@ export function CreateInvoiceClient({
                 Ubah
               </button>}
             </>}
+            <div className="border-t border-slate-200 pt-4">
+              <label className="block text-sm font-semibold text-slate-700">
+                WhatsApp Admin Outlet
+                <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    aria-label="WhatsApp Admin Outlet"
+                    value={adminWhatsapp}
+                    maxLength={30}
+                    disabled={!canCreate}
+                    placeholder="Nomor konfirmasi pembayaran"
+                    onChange={(event) => setAdminWhatsapp(event.target.value)}
+                    className={nextgenControlClass}
+                  />
+                  {canCreate && <button
+                    type="button"
+                    disabled={adminWhatsappSaving}
+                    onClick={() => void saveAdminWhatsapp()}
+                    className={nextgenNeutralButtonClass}>
+                    {adminWhatsappSaving &&
+                      <LoaderCircle className="animate-spin" size={17}/>}
+                    {adminWhatsappSaving ? "Menyimpan..." : "Simpan Kontak"}
+                  </button>}
+                </div>
+              </label>
+              <p className="mt-2 text-xs text-slate-500">
+                Kontak outlet ini disimpan sebagai snapshot pada invoice baru.
+              </p>
+            </div>
           </AppCard>
 
           <AppCard className="space-y-4 rounded-2xl border border-slate-200 p-4 shadow-sm">
@@ -1029,13 +1157,80 @@ export function CreateInvoiceClient({
               className={nextgenNeutralButtonClass}>
               <MessageCircle size={16}/>
             </button>}
-            {canVoid && !["VOID", "PAID"].includes(invoice.status) &&
-              <button title="Void Invoice" onClick={() => void voidSelectedInvoice(invoice)}
+            {canVoid &&
+              ["DRAFT", "ISSUED", "SENT", "PARTIALLY_PAID"].includes(invoice.status) &&
+              <button title="Void Invoice" onClick={() => openVoidModal(invoice)}
                 className={nextgenNeutralButtonClass}><X size={16}/></button>}
           </div></td>
         </tr>)}</tbody>
       </table></div>
     </SectionCard>
+
+    {voidInvoiceTarget && <div
+      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !voidSaving) closeVoidModal();
+      }}>
+      <ModalCard className="w-full max-w-lg" >
+        <div role="dialog" aria-modal="true" aria-labelledby="void-invoice-title">
+          <div className="flex items-start justify-between border-b p-5">
+            <div>
+              <h2 id="void-invoice-title" className="text-xl font-bold text-slate-950">
+                Batalkan Invoice
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Invoice {voidInvoiceTarget.invoiceNumber || "DRAFT"} akan dibatalkan
+                dan tidak dapat digunakan kembali.
+              </p>
+            </div>
+            <button type="button" aria-label="Tutup modal"
+              disabled={voidSaving} onClick={closeVoidModal}
+              className="rounded-lg p-1 text-slate-500 hover:bg-slate-100">
+              <X size={20}/>
+            </button>
+          </div>
+          <div className="p-5">
+            <label className="block text-sm font-semibold text-slate-700">
+              Alasan Pembatalan
+              <textarea
+                autoFocus
+                aria-label="Alasan Pembatalan"
+                rows={4}
+                maxLength={500}
+                value={voidReason}
+                disabled={voidSaving}
+                placeholder="Tuliskan alasan pembatalan invoice"
+                onChange={(event) => {
+                  setVoidReason(event.target.value);
+                  setVoidError("");
+                }}
+                className={`${nextgenControlClass} mt-1 resize-y`}
+              />
+            </label>
+            <div className="mt-1 flex justify-between gap-3 text-xs">
+              <p role={voidError ? "alert" : undefined} className="text-rose-700">
+                {voidError}
+              </p>
+              <span className="ml-auto text-slate-500">{voidReason.length}/500</span>
+            </div>
+          </div>
+          <div className="flex flex-col-reverse justify-end gap-3 border-t p-4 sm:flex-row">
+            <button type="button" disabled={voidSaving}
+              onClick={closeVoidModal}
+              className={`${nextgenNeutralButtonClass} w-full sm:w-auto`}>
+              Batal
+            </button>
+            <button type="button" disabled={voidSaving}
+              onClick={() => void submitVoidInvoice()}
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-rose-700 px-4 py-2 text-sm font-bold text-white hover:bg-rose-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">
+              {voidSaving && <LoaderCircle className="animate-spin" size={17}/>}
+              {voidSaving ? "Membatalkan..." : "Batalkan Invoice"}
+            </button>
+          </div>
+        </div>
+      </ModalCard>
+    </div>}
 
     {bankModalOpen && <div
       className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">

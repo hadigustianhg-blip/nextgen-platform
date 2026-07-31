@@ -49,12 +49,18 @@ export function getFirstSelectedWaybill(
 }
 
 export function billingAddressAfterRecipient(
-  currentAddress: string,
+  _currentAddress: string,
   recipientCity: string | null | undefined,
 ) {
-  return currentAddress.trim()
-    ? currentAddress
-    : recipientCity?.trim() || currentAddress;
+  return recipientCity?.trim() || "";
+}
+
+export function invoiceVoidReasonError(reason: string) {
+  const normalized = reason.trim();
+  if (!normalized) return "Alasan pembatalan wajib diisi.";
+  if (normalized.length < 5) return "Alasan pembatalan minimal 5 karakter.";
+  if (normalized.length > 500) return "Alasan pembatalan maksimal 500 karakter.";
+  return null;
 }
 
 export function canSaveInvoiceDraft(input: {

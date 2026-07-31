@@ -7,6 +7,7 @@ const db = vi.hoisted(() => ({
   masterPickup: { findMany: vi.fn(), findFirst: vi.fn() },
   invoice: { findFirst: vi.fn(), updateMany: vi.fn() },
   outletBankAccount: { findMany: vi.fn() },
+  outlet: { findFirst: vi.fn(), update: vi.fn() },
   $transaction: vi.fn(),
 }));
 const tx = vi.hoisted(() => ({
@@ -18,13 +19,14 @@ const tx = vi.hoisted(() => ({
     update: vi.fn(),
     updateMany: vi.fn(),
   },
+  outlet: { findFirst: vi.fn() },
   invoice: {
     create: vi.fn(),
     findFirst: vi.fn(),
     findUniqueOrThrow: vi.fn(),
     update: vi.fn(),
   },
-  invoiceItem: { createMany: vi.fn() },
+  invoiceItem: { createMany: vi.fn(), updateMany: vi.fn() },
   auditLog: { create: vi.fn() },
 }));
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
@@ -36,12 +38,14 @@ import {
   createOutletBankAccount,
   getActiveOutletBankAccounts,
   getInvoice,
+  getInvoiceOutletSettings,
   invoiceJsonSafe,
   normalizeSellerName,
   normalizeWhatsappNumber,
   prepareInvoiceWhatsapp,
   sellerIdentity,
   updateOutletBankAccount,
+  voidInvoice,
 } from "./invoice.service";
 import {
   canExportInvoice,
@@ -52,7 +56,8 @@ import {
   canVoidInvoice,
 } from "./invoice.authorization";
 import {
-  invoiceDraftSchema, invoiceRangeSchema, outletBankAccountSchema,
+  invoiceDraftSchema, invoiceRangeSchema, invoiceVoidSchema,
+  outletBankAccountSchema,
 } from "./invoice.validation";
 import { createInvoicePdf, invoicePdfFilename } from "./invoice.pdf";
 import {
@@ -178,6 +183,7 @@ describe("Invoice recipient detail", () => {
         recipientName: "Recipient Test",
         recipientPhone: "087777376950",
         recipientCity: "Kab. Test",
+        addressSnapshot: "Kab. Test",
       },
     });
     expect(result).toEqual({
@@ -420,6 +426,10 @@ beforeEach(() => {
   tx.invoiceItem.createMany.mockResolvedValue({ count: 1 });
   tx.auditLog.create.mockResolvedValue({ id: "audit-1" });
   tx.invoice.findUniqueOrThrow.mockResolvedValue({ id: "invoice-1" });
+  tx.outlet.findFirst.mockResolvedValue({
+    adminWhatsapp: null,
+    tenant: { adminWhatsapp: null },
+  });
   db.$transaction.mockImplementation(async (callback) => callback(tx));
 });
 
@@ -587,9 +597,51 @@ describe("Invoice validation and authorization", () => {
     expect(normalizeWhatsappNumber("6281234567890")).toBe("6281234567890");
     expect(normalizeWhatsappNumber("123")).toBeNull();
   });
+
+  it("requires a trimmed void reason between 5 and 500 characters", () => {
+    expect(invoiceVoidSchema.safeParse({ reason: "   " }).success).toBe(false);
+    expect(invoiceVoidSchema.safeParse({ reason: "abc" }).success).toBe(false);
+    expect(invoiceVoidSchema.safeParse({ reason: "Alasan valid" }).success).toBe(true);
+    expect(invoiceVoidSchema.safeParse({ reason: "x".repeat(501) }).success).toBe(false);
+  });
 });
 
 describe("Invoice persistence and PDF contracts", () => {
+  it("uses an additive migration for payment contact and void reason snapshots", async () => {
+    const migration = await readFile(
+      new URL(
+        "../../../prisma/migrations/20260731000100_add_invoice_payment_contact/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    for (const field of [
+      '"adminWhatsapp"',
+      '"paymentContactPhone"',
+      '"voidReason"',
+    ]) expect(migration).toContain(field);
+    expect(migration).not.toMatch(/\b(DROP|DELETE|TRUNCATE)\b/i);
+  });
+
+  it("resolves payment contact in the active outlet and tenant scope", async () => {
+    db.outlet.findFirst.mockResolvedValueOnce({
+      adminWhatsapp: "081111111111",
+      tenant: { adminWhatsapp: "082222222222" },
+    });
+    await expect(getInvoiceOutletSettings(scope)).resolves.toEqual({
+      adminWhatsapp: "081111111111",
+      tenantAdminWhatsapp: "082222222222",
+      effectiveAdminWhatsapp: "081111111111",
+    });
+    expect(db.outlet.findFirst).toHaveBeenCalledWith({
+      where: { id: scope.outletId, tenantId: scope.tenantId },
+      select: {
+        adminWhatsapp: true,
+        tenant: { select: { adminWhatsapp: true } },
+      },
+    });
+  });
+
   it("loads invoice detail within tenant/outlet scope and maps JSON-unsafe values", async () => {
     db.invoice.findFirst.mockResolvedValue({ id: "invoice-1" });
     await getInvoice(scope, "invoice-1");
@@ -712,6 +764,10 @@ describe("Invoice persistence and PDF contracts", () => {
       accountNumber: "00123456789",
       accountHolder: "Outlet Holder",
     });
+    tx.outlet.findFirst.mockResolvedValueOnce({
+      adminWhatsapp: null,
+      tenant: { adminWhatsapp: "081234567890" },
+    });
     const infoLog = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
     await expect(createInvoiceDraft({
@@ -758,6 +814,7 @@ describe("Invoice persistence and PDF contracts", () => {
         recipientName: "Recipient Test",
         recipientPhone: "081234567890",
         recipientCity: "Kab Sumedang",
+        paymentContactPhone: "081234567890",
         transferBankName: "Bank Outlet",
         transferAccountNumber: "00123456789",
         transferAccountHolder: "Outlet Holder",
@@ -772,6 +829,78 @@ describe("Invoice persistence and PDF contracts", () => {
       }),
     });
     infoLog.mockRestore();
+  });
+
+  it("voids a scoped invoice, stores its reason and audits the transition", async () => {
+    const actorId = "33333333-3333-4333-8333-333333333333";
+    tx.invoice.findFirst.mockResolvedValueOnce({
+      id: "invoice-1",
+      invoiceNumber: "INV/OUT001/2026/07/0001",
+      customerKey: "name:seller",
+      status: "ISSUED",
+    });
+    tx.invoiceItem.updateMany.mockResolvedValueOnce({ count: 1 });
+    tx.invoice.update.mockResolvedValueOnce({ id: "invoice-1", status: "VOID" });
+    await expect(voidInvoice({
+      ...scope,
+      actorId,
+      outletCode: "OUT001",
+    }, "invoice-1", "Kesalahan nominal")).resolves.toMatchObject({
+      status: "VOID",
+    });
+    expect(tx.invoice.findFirst).toHaveBeenCalledWith({
+      where: { id: "invoice-1", ...scope },
+    });
+    expect(tx.invoice.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "invoice-1" },
+      data: expect.objectContaining({
+        status: "VOID",
+        voidReason: "Kesalahan nominal",
+      }),
+    }));
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: scope.tenantId,
+        outletId: scope.outletId,
+        actorId,
+        entityType: "VOID_INVOICE",
+        metadata: expect.objectContaining({
+          previousStatus: "ISSUED",
+          nextStatus: "VOID",
+          reason: "Kesalahan nominal",
+        }),
+      }),
+    });
+  });
+
+  it("does not void an invoice outside the active tenant and outlet", async () => {
+    tx.invoice.findFirst.mockResolvedValueOnce(null);
+    await expect(voidInvoice({
+      ...scope,
+      actorId: "33333333-3333-4333-8333-333333333333",
+      outletCode: "OUT001",
+    }, "invoice-other", "Alasan valid")).rejects.toMatchObject({
+      code: "INVOICE_NOT_FOUND",
+      status: 404,
+    });
+    expect(tx.invoice.update).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("does not allow an already void invoice to be voided again", async () => {
+    tx.invoice.findFirst.mockResolvedValueOnce({
+      id: "invoice-1",
+      status: "VOID",
+    });
+    await expect(voidInvoice({
+      ...scope,
+      actorId: "33333333-3333-4333-8333-333333333333",
+      outletCode: "OUT001",
+    }, "invoice-1", "Alasan valid")).rejects.toMatchObject({
+      code: "INVOICE_LOCKED",
+      status: 409,
+    });
+    expect(tx.invoice.update).not.toHaveBeenCalled();
   });
 
   it("keeps business validation transactional and does not write a partial draft", async () => {
@@ -969,6 +1098,12 @@ describe("Invoice persistence and PDF contracts", () => {
     expect(source).toContain("invoice.recipientName");
     expect(source).toContain("invoice.recipientPhone");
     expect(source).toContain("invoice.recipientCity");
+    expect(source).toContain("invoice.paymentContactPhone");
+    expect(source).toContain("WhatsApp Admin:");
+    expect(source).not.toContain(
+      "invoice.recipientPhone || invoice.whatsappSnapshot",
+    );
+    expect(source).not.toContain("ke nomor WhatsApp");
     expect(source).not.toMatch(/NEXTGEN|J&T CARGO SUM001A|PT HUTAMA DAYA LOGISTIK/i);
     expect(source).not.toMatch(/registerFont|readFileSync|\/ROOT\/|node_modules\/pdfkit\/js\/data/);
     const fontNames = [...source.matchAll(/\.font\("([^"]+)"\)/g)]
