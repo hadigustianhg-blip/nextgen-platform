@@ -68,7 +68,14 @@ export async function POST(request: Request) {
       const delivery = await syncDeliverySettlement(context, {
         operationalDate: parsed.data.businessDate,
       });
-      return { processed: delivery.dispatch.fetched };
+      return {
+        processed: delivery.dispatch.unique,
+        received: delivery.dispatch.fetched,
+        unique: delivery.dispatch.unique,
+        created: delivery.dispatch.created,
+        updated: delivery.dispatch.updated,
+        duplicateIgnored: delivery.dispatch.duplicateIgnored,
+      };
     },
     async () => {
       const pickup = await syncPickup(context, {

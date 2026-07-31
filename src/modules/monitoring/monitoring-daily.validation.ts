@@ -21,4 +21,10 @@ export const monitoringDailyQuerySchema = z.object({
   pageSize,
 });
 
+export const monitoringDailyDiagnosticSchema = z.object({
+  businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  outletId: z.string().uuid().optional(),
+  waybill: z.string().trim().min(1).max(50).optional(),
+});
+
 export type MonitoringDailyQuery = z.infer<typeof monitoringDailyQuerySchema>;

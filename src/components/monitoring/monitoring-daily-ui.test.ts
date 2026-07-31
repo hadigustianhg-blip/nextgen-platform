@@ -52,6 +52,9 @@ describe("Monitoring Daily UI contract", () => {
     expect(source).toContain("Menyinkronkan...");
     expect(source).toContain('fetch("/api/monitoring/daily/sync"');
     expect(source).toContain("setRefreshKey((value) => value + 1)");
+    expect(source).toContain("unique waybill");
+    expect(source).toContain("duplikat diabaikan");
+    expect(source).not.toMatch(/totalPending\s*=|totalDelivery\s*-\s*totalTtd/);
   });
 
   it("protects the orchestration API and reuses both existing sync services", async () => {

@@ -16,7 +16,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "cron:sla-cut-off": "tsx scripts/sync-sla-cut-off.ts"
+    "cron:sla-cut-off": "tsx scripts/sync-sla-cut-off.ts",
+    "monitoring:dispatch:reconcile": "tsx scripts/reconcile-monitoring-dispatch.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

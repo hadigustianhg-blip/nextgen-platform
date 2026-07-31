@@ -7,6 +7,7 @@ vi.mock("@/lib/db/prisma", () => ({ prisma: {} }));
 import {
   aggregateDeliveryRecords,
   calculateDeliveryFinancials,
+  deduplicateDispatchEnvelope,
   normalizeComparison,
   sourceHash,
   summarizeDeliveryRows,
@@ -21,6 +22,29 @@ import {
 const d = (value: number | string) => new Prisma.Decimal(value);
 
 describe("Delivery Settlement aggregation", () => {
+  it("deduplicates overlapping endpoint pages by waybill and keeps the latest event", () => {
+    const base = {
+      kurir: "A", ongkir: 100, receiver: "", address: "",
+      status: "Belum diterima", berat: 1, pembayaran: "", service: "",
+      codStatus: "", codValue: 0, barang: "",
+    };
+    const records = [
+      dispatchRecordSchema.parse({
+        ...base, waybillNo: "WB1", waktu: "2026-07-31 10:00:00",
+      }),
+      dispatchRecordSchema.parse({
+        ...base, waybillNo: "WB2", waktu: "2026-07-31 11:00:00",
+      }),
+      dispatchRecordSchema.parse({
+        ...base, waybillNo: "WB1", waktu: "2026-07-31 12:00:00",
+        status: "Penerimaan Normal",
+      }),
+    ];
+    const result = deduplicateDispatchEnvelope(records);
+    expect(result).toHaveLength(2);
+    expect(result.find((row) => row.waybillNo === "WB1"))
+      .toMatchObject({ waktu: "2026-07-31 12:00:00", status: "Penerimaan Normal" });
+  });
   it("normalizes courier identity without fuzzy matching", () => {
     expect(normalizeComparison("  Ridwan   Kusnawan ")).toBe("RIDWAN KUSNAWAN");
     expect(normalizeComparison("Ridwan K.")).not.toBe(normalizeComparison("Ridwan Kusnawan"));

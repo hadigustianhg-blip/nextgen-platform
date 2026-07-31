@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db/prisma";
 import { createAutomaticCashMovement, voidAutomaticCashMovements } from "@/modules/payment/cash-flow.service";
 import { fetchDeliverySource, DeliverySourceError } from "./delivery-settlement.client";
 import { codRecordSchema, dispatchRecordSchema } from "./delivery-settlement.validation";
+import { selectLatestDispatchRecords } from "./dispatch-deduplication";
 
 type Scope = { tenantId: string; outletId: string };
 type Context = Scope & { actorId: string };
@@ -39,6 +40,27 @@ function parseSourceDate(value: string) {
   const normalized = value.trim().replace(" ", "T");
   const result = new Date(`${normalized}${/[zZ]|[+-]\d\d:\d\d$/.test(normalized) ? "" : "+07:00"}`);
   return Number.isNaN(result.valueOf()) ? null : result;
+}
+
+type DispatchSourceRecord = ReturnType<typeof dispatchRecordSchema.parse>;
+
+export function deduplicateDispatchEnvelope(records: DispatchSourceRecord[]) {
+  const byWaybill = new Map<string, { record: DispatchSourceRecord; index: number }>();
+  records.forEach((record, index) => {
+    const key = normalizeComparison(record.waybillNo);
+    const existing = byWaybill.get(key);
+    const recordTime = parseSourceDate(record.waktu)?.getTime() ?? 0;
+    const existingTime = existing
+      ? parseSourceDate(existing.record.waktu)?.getTime() ?? 0
+      : -1;
+    if (!existing || recordTime > existingTime ||
+      (recordTime === existingTime && index > existing.index)) {
+      byWaybill.set(key, { record, index });
+    }
+  });
+  return [...byWaybill.values()]
+    .sort((left, right) => left.index - right.index)
+    .map(({ record }) => record);
 }
 
 type Aggregate = {
@@ -114,14 +136,33 @@ export async function syncDeliverySettlement(
       fetchSource("/jfs-dispatch", operationalDate),
       fetchSource("/jfs-cod", operationalDate),
     ]);
-    let dispatchCreated = 0, dispatchUpdated = 0, codCreated = 0, codUpdated = 0, duplicate = 0, anomaly = 0;
+    let dispatchCreated = 0, dispatchUpdated = 0, dispatchUnchanged = 0;
+    let codCreated = 0, codUpdated = 0, duplicate = 0, anomaly = 0;
+    const parsedDispatches: DispatchSourceRecord[] = [];
+    for (const rawValue of dispatchEnvelope.data) {
+      const parsed = dispatchRecordSchema.safeParse(rawValue);
+      if (parsed.success) parsedDispatches.push(parsed.data);
+      else anomaly += 1;
+    }
+    const uniqueDispatches = deduplicateDispatchEnvelope(parsedDispatches);
+    const dispatchOverlapDuplicate = parsedDispatches.length - uniqueDispatches.length;
+    duplicate += dispatchOverlapDuplicate;
 
     await prisma.$transaction(async (tx) => {
-      for (const rawValue of dispatchEnvelope.data) {
-        const parsed = dispatchRecordSchema.safeParse(rawValue);
-        if (!parsed.success) { anomaly += 1; continue; }
-        const record = parsed.data;
-        const key = sourceKey("dispatch", [record.waybillNo, record.waktu]);
+      await tx.rawDispatch.updateMany({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          operationalDate: date,
+          isActive: true,
+          ...(uniqueDispatches.length
+            ? { waybillNo: { notIn: uniqueDispatches.map((row) => row.waybillNo) } }
+            : {}),
+        },
+        data: { isActive: false },
+      });
+      for (const record of uniqueDispatches) {
+        const key = `v2:dispatch:${record.waybillNo.trim()}`;
         const hash = sourceHash(record);
         const existing = await tx.rawDispatch.findUnique({ where: { tenantId_outletId_sourceRecordKey: {
           tenantId: context.tenantId, outletId: context.outletId, sourceRecordKey: key,
@@ -137,12 +178,28 @@ export async function syncDeliverySettlement(
           chargeWeight: decimal(record.berat), settlementTypeRaw: record.pembayaran || null,
           serviceRaw: record.service || null, codStatusRaw: record.codStatus || null,
           codValue: decimal(record.codValue), goodsDescription: record.barang || null,
+          isActive: true,
         };
+        await tx.rawDispatch.updateMany({
+          where: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            operationalDate: date,
+            waybillNo: record.waybillNo,
+            ...(existing ? { id: { not: existing.id } } : {}),
+            isActive: true,
+          },
+          data: { isActive: false },
+        });
         if (!existing) {
           await tx.rawDispatch.create({ data: { tenantId: context.tenantId, outletId: context.outletId, sourceRecordKey: key, firstSeenRunId: run.id, ...common } });
           dispatchCreated += 1;
         } else if (existing.sourceRecordHash === hash) {
-          await tx.rawDispatch.update({ where: { id: existing.id }, data: { sourceFetchedAt: startedAt, syncedAt: new Date(), lastSeenRunId: run.id } });
+          await tx.rawDispatch.update({ where: { id: existing.id }, data: {
+            sourceFetchedAt: startedAt, syncedAt: new Date(),
+            lastSeenRunId: run.id, isActive: true,
+          } });
+          dispatchUnchanged += 1;
           duplicate += 1;
         } else {
           await tx.rawDispatch.update({ where: { id: existing.id }, data: common });
@@ -185,10 +242,11 @@ export async function syncDeliverySettlement(
         }
       }
 
-      const [dispatches, cods] = await Promise.all([
-        tx.rawDispatch.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED" } }),
+      const [dispatchVersions, cods] = await Promise.all([
+        tx.rawDispatch.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED", isActive: true } }),
         tx.rawCod.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED" } }),
       ]);
+      const dispatches = selectLatestDispatchRecords(dispatchVersions);
       const aggregate = aggregateDeliveryRecords(dispatches, cods);
       anomaly += aggregate.anomaly;
       for (const candidate of aggregate.rows) {
@@ -240,13 +298,32 @@ export async function syncDeliverySettlement(
       status, completedAt, dispatchFetchedCount: dispatchEnvelope.total, dispatchCreatedCount: dispatchCreated,
       dispatchUpdatedCount: dispatchUpdated, codFetchedCount: codEnvelope.total, codCreatedCount: codCreated,
       codUpdatedCount: codUpdated, duplicateCount: duplicate, anomalyCount: anomaly,
+      metadata: {
+        dispatchAcceptedCount: parsedDispatches.length,
+        dispatchUniqueWaybillCount: uniqueDispatches.length,
+        dispatchOverlapDuplicateCount: dispatchOverlapDuplicate,
+        dispatchUnchangedCount: dispatchUnchanged,
+      },
     } });
     await prisma.auditLog.create({ data: {
       tenantId: context.tenantId, outletId: context.outletId, actorId: context.actorId,
       action: "UPDATE", entityType: "DELIVERY_SETTLEMENT_SYNC_COMPLETED", entityId: run.id,
       metadata: { status, dispatchFetched: dispatchEnvelope.total, codFetched: codEnvelope.total, duplicate, anomaly },
     } });
-    return { runId: run.id, status, startedAt, completedAt, dispatch: { fetched: dispatchEnvelope.total, created: dispatchCreated, updated: dispatchUpdated }, cod: { fetched: codEnvelope.total, created: codCreated, updated: codUpdated }, duplicate, anomaly };
+    return {
+      runId: run.id, status, startedAt, completedAt,
+      dispatch: {
+        fetched: dispatchEnvelope.total,
+        accepted: parsedDispatches.length,
+        unique: uniqueDispatches.length,
+        created: dispatchCreated,
+        updated: dispatchUpdated,
+        unchanged: dispatchUnchanged,
+        duplicateIgnored: dispatchOverlapDuplicate,
+      },
+      cod: { fetched: codEnvelope.total, created: codCreated, updated: codUpdated },
+      duplicate, anomaly,
+    };
   } catch (error) {
     const completedAt = new Date();
     await prisma.syncRun.update({ where: { id: run.id }, data: {

@@ -146,7 +146,16 @@ export function MonitoringDailyClient({
       });
       const body = (await response.json()) as {
         success?: boolean;
-        dispatch?: { success: boolean; processed?: number; error?: string };
+        dispatch?: {
+          success: boolean;
+          processed?: number;
+          received?: number;
+          unique?: number;
+          created?: number;
+          updated?: number;
+          duplicateIgnored?: number;
+          error?: string;
+        };
         pickup?: { success: boolean; processed?: number; error?: string };
         error?: { message?: string };
       };
@@ -163,7 +172,15 @@ export function MonitoringDailyClient({
       }
       setNotice({
         tone: "success",
-        text: `Sinkronisasi selesai. Dispatch ${body.dispatch?.processed ?? 0} data, Pickup ${body.pickup?.processed ?? 0} data.`,
+        text: [
+          "Sinkronisasi selesai:",
+          `diterima dari endpoint ${body.dispatch?.received ?? 0}`,
+          `unique waybill ${body.dispatch?.unique ?? 0}`,
+          `dibuat ${body.dispatch?.created ?? 0}`,
+          `diperbarui ${body.dispatch?.updated ?? 0}`,
+          `duplikat diabaikan ${body.dispatch?.duplicateIgnored ?? 0}`,
+          `Pickup ${body.pickup?.processed ?? 0}`,
+        ].join(" · "),
       });
       setRefreshKey((value) => value + 1);
     } catch (syncError) {

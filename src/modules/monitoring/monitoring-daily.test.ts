@@ -2,8 +2,10 @@ import { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
   buildDeliveryRows,
+  buildDeliveryMonitoring,
   buildPickupRows,
   calculateAchievement,
+  assertDeliveryInvariant,
   DELIVERY_TARGET,
   orchestrateMonitoringSync,
 } from "./monitoring-daily.calculation";
@@ -14,6 +16,38 @@ const count = (waybillNo: number) => ({ waybillNo });
 const sum = (totalFreight: number, weight: number) => ({
   totalFreight: new Prisma.Decimal(totalFreight),
   weight: new Prisma.Decimal(weight),
+});
+const deliveryRecord = (
+  id: string,
+  overrides: Partial<{
+    operationalDate: string;
+    waybillNo: string;
+    courierNameRaw: string | null;
+    deliveryStatusRaw: string | null;
+    syncStatus: string;
+    isActive: boolean;
+    sourceFetchedAt: string;
+    dispatchAt: string | null;
+  }> = {},
+) => ({
+  id,
+  operationalDate: new Date(`${overrides.operationalDate ?? "2026-07-31"}T00:00:00.000Z`),
+  waybillNo: overrides.waybillNo ?? id,
+  courierNameRaw: overrides.courierNameRaw === undefined
+    ? "TEAM A"
+    : overrides.courierNameRaw,
+  deliveryStatusRaw: overrides.deliveryStatusRaw === undefined
+    ? "Penerimaan Normal"
+    : overrides.deliveryStatusRaw,
+  syncStatus: overrides.syncStatus ?? "NORMALIZED",
+  isActive: overrides.isActive ?? true,
+  sourceRecordKey: `v1:dispatch:${id}`,
+  sourceFetchedAt: new Date(overrides.sourceFetchedAt ?? "2026-07-31T12:00:00.000Z"),
+  dispatchAt: overrides.dispatchAt === undefined
+    ? new Date("2026-07-31T11:00:00.000Z")
+    : overrides.dispatchAt ? new Date(overrides.dispatchAt) : null,
+  createdAt: new Date("2026-07-31T12:00:00.000Z"),
+  updatedAt: new Date("2026-07-31T12:00:00.000Z"),
 });
 
 describe("Monitoring Daily", () => {
@@ -48,6 +82,89 @@ describe("Monitoring Daily", () => {
       totalPending: 2,
       status: "NOT ACHIEVE",
     });
+  });
+
+  it("uses one final unique-waybill dataset for summary and every team", () => {
+    const result = buildDeliveryMonitoring([
+      deliveryRecord("old", {
+        waybillNo: "WB-1",
+        deliveryStatusRaw: "Belum diterima",
+        sourceFetchedAt: "2026-07-31T08:00:00.000Z",
+      }),
+      deliveryRecord("new", {
+        waybillNo: "WB-1",
+        deliveryStatusRaw: "  penerimaan   normal ",
+        sourceFetchedAt: "2026-07-31T12:00:00.000Z",
+      }),
+      deliveryRecord("pending", {
+        waybillNo: "WB-2",
+        deliveryStatusRaw: "Gagal Antar",
+      }),
+      deliveryRecord("unmapped", {
+        waybillNo: "WB-3",
+        courierNameRaw: " ",
+        deliveryStatusRaw: null,
+      }),
+    ], "2026-07-31");
+    expect(result.summary).toMatchObject({
+      totalDelivery: 3,
+      totalTtd: 1,
+      totalPending: 2,
+    });
+    expect(result.rows.find((row) =>
+      row.teamName === "Team Belum Terpetakan"
+    )).toMatchObject({ totalDelivery: 1, totalTtd: 0, totalPending: 1 });
+    expect(result.rows.reduce((sum, row) => sum + row.totalDelivery, 0)).toBe(3);
+    expect(result.rows.reduce((sum, row) => sum + row.totalTtd, 0)).toBe(1);
+    expect(result.rows.reduce((sum, row) => sum + row.totalPending, 0)).toBe(2);
+  });
+
+  it("excludes inactive, invalid-status, and adjacent business dates", () => {
+    const result = buildDeliveryMonitoring([
+      deliveryRecord("valid"),
+      deliveryRecord("superseded", { isActive: false }),
+      deliveryRecord("void", { syncStatus: "VOID" }),
+      deliveryRecord("previous", { operationalDate: "2026-07-30" }),
+      deliveryRecord("next", { operationalDate: "2026-08-01" }),
+    ], "2026-07-31");
+    expect(result.finalRecords.map((row) => row.id)).toEqual(["valid"]);
+  });
+
+  it.each(["Gagal Antar", "Retur", "Pending", "Dalam Proses", null, ""])(
+    "never treats status %s as TTD",
+    (deliveryStatusRaw) => {
+      const result = buildDeliveryMonitoring([
+        deliveryRecord("one", { deliveryStatusRaw }),
+      ], "2026-07-31");
+      expect(result.summary).toMatchObject({
+        totalDelivery: 1,
+        totalTtd: 0,
+        totalPending: 1,
+      });
+    },
+  );
+
+  it("keeps the 429/401/28 regression invariant", () => {
+    const records = Array.from({ length: 429 }, (_, index) =>
+      deliveryRecord(`WB-${index}`, {
+        deliveryStatusRaw: index < 401
+          ? "Penerimaan Normal"
+          : "Belum diterima",
+      })
+    );
+    expect(buildDeliveryMonitoring(records, "2026-07-31").summary)
+      .toMatchObject({ totalDelivery: 429, totalTtd: 401, totalPending: 28 });
+  });
+
+  it("throws invariant diagnostics outside production and warns safely in production", () => {
+    expect(() => assertDeliveryInvariant(false, { environment: "test" }))
+      .toThrow("MONITORING_DAILY_DELIVERY_INVARIANT_FAILED");
+    const warnings: string[] = [];
+    expect(() => assertDeliveryInvariant(false, {
+      environment: "production",
+      warn: (message) => warnings.push(message),
+    })).not.toThrow();
+    expect(warnings).toEqual(["MONITORING_DAILY_DELIVERY_INVARIANT_FAILED"]);
   });
 
   it("separates regular and marketplace pickup weight and sorts revenue", () => {
