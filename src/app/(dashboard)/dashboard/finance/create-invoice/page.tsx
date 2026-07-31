@@ -3,16 +3,23 @@ import { CreateInvoiceClient } from "@/components/finance/create-invoice-client"
 import { requireSession } from "@/lib/auth/session";
 import {
   canExportInvoice, canIssueInvoice, canMutateInvoice,
-  canPrepareInvoiceWhatsapp, canVoidInvoice,
+  canPrepareInvoiceWhatsapp, canVoidInvoice, getActiveOutletBankAccounts,
 } from "@/modules/invoice";
 
 export const metadata = { title: "Create Invoice" };
 
 export default async function CreateInvoicePage() {
   const session = await requireSession();
+  const bankAccounts = session.tenantId && session.outletId
+    ? await getActiveOutletBankAccounts({
+        tenantId: session.tenantId,
+        outletId: session.outletId,
+      })
+    : [];
   return <AppShell session={session}>
     {session.outletId
       ? <CreateInvoiceClient
+          bankAccounts={bankAccounts}
           canCreate={canMutateInvoice(session)}
           canIssue={canIssueInvoice(session)}
           canExport={canExportInvoice(session)}

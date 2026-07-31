@@ -5,7 +5,8 @@ import {
   invoiceDraftErrorMessage, moneyToCents, normalizeSellerLabel, sumMoney,
   invoicePdfErrorMessage, invoiceWhatsappDisabledReason, selectableInvoiceItems,
   buildRecipientWhatsappMessage, buildRecipientWhatsappUrl,
-  invoiceRecipientDetailErrorMessage, normalizeRecipientWhatsapp,
+  getFirstSelectedWaybill, invoiceRecipientDetailErrorMessage,
+  normalizeRecipientWhatsapp,
 } from "./invoice.view";
 
 describe("Create Invoice interface", () => {
@@ -35,6 +36,21 @@ describe("Create Invoice interface", () => {
     expect(source).toContain("Pilih Semua");
     expect(source).toContain("toggleItem(item.id)");
     expect(source).not.toContain("setSelectedIds(new Set(payload.data");
+  });
+
+  it("uses the first checked waybill in current table order", () => {
+    const items = [
+      { id: "first", waybillNumber: "201671591862" },
+      { id: "second", waybillNumber: "201671818679" },
+      { id: "third", waybillNumber: "201672444113" },
+    ];
+    expect(getFirstSelectedWaybill(items, new Set(["second", "first"]))).toBe(
+      "201671591862",
+    );
+    expect(getFirstSelectedWaybill(items, new Set(["third", "second"]))).toBe(
+      "201671818679",
+    );
+    expect(getFirstSelectedWaybill(items, new Set())).toBeNull();
   });
 
   it("builds source-items query with the actual seller key and active dates", () => {
@@ -218,18 +234,41 @@ describe("Create Invoice interface", () => {
     for (const text of [
       "Tampilkan Detail Penerima",
       "Mengambil detail...",
-      "Detail penerima ditampilkan",
+      "Detail penerima berhasil ditampilkan",
       "Chat WA Customer",
+      "Informasi Customer",
+      "Informasi Pembayaran",
+      "Rekening Penerima",
       "Nama Perusahaan",
       "Nama Bank",
       "Nomor Rekening",
-      "Atas Nama Rekening",
+      "Atas Nama",
     ]) expect(source).toContain(text);
     expect(source).toContain("/recipient-detail");
+    expect(source).toContain("getFirstSelectedWaybill(items, selectedIds)");
+    expect(source).toContain("bankAccountId: selectedBankAccountId || null");
+    expect(source).not.toContain("Nama bank customer");
+    expect(source).not.toContain("Nomor rekening customer");
     expect(source).toContain("disabled={!currentInvoice.recipientPhone}");
     expect(source).not.toContain("jfs-middleware-v2-production.up.railway.app");
     expect(invoiceRecipientDetailErrorMessage("JFS_AUTH_EXPIRED")).toContain(
       "Perbarui token middleware",
     );
+  });
+
+  it("auto-selects one scoped outlet account and uses a dropdown for multiple accounts", async () => {
+    const [client, page] = await Promise.all([
+      readFile(new URL("./create-invoice-client.tsx", import.meta.url), "utf8"),
+      readFile(new URL(
+        "../../app/(dashboard)/dashboard/finance/create-invoice/page.tsx",
+        import.meta.url,
+      ), "utf8"),
+    ]);
+    expect(page).toContain("getActiveOutletBankAccounts");
+    expect(page).toContain("tenantId: session.tenantId");
+    expect(page).toContain("outletId: session.outletId");
+    expect(client).toContain("bankAccounts.length ? bankAccounts[0].id");
+    expect(client).toContain("disabled={bankAccounts.length === 1}");
+    expect(client).toContain("Rekening penerima pembayaran belum dikonfigurasi.");
   });
 });

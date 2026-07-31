@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import {
-  canExportInvoice, createInvoicePdf, getActiveOutletBankAccounts, getInvoice,
+  canExportInvoice, createInvoicePdf, getInvoice,
   invoicePdfFilename, invoiceScope,
 } from "@/modules/invoice";
 
@@ -88,7 +88,15 @@ export async function GET(_: Request, context: Context) {
       );
     }
 
-    const accounts = await getActiveOutletBankAccounts(scope);
+    const accounts = (
+      invoice.transferBankName &&
+      invoice.transferAccountNumber &&
+      invoice.transferAccountHolder
+    ) ? [{
+      bankName: invoice.transferBankName,
+      accountNumber: invoice.transferAccountNumber,
+      accountHolder: invoice.transferAccountHolder,
+    }] : [];
     phase = "bank_accounts_loaded";
     console.info("[invoice.pdf]", {
       requestId,

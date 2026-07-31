@@ -1,6 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/db/prisma";
-import { getInvoice, InvoiceServiceError } from "./invoice.service";
+import {
+  getAccessibleInvoiceSourceByWaybill, getInvoice, InvoiceServiceError,
+} from "./invoice.service";
 
 type Scope = { tenantId: string; outletId: string };
 type MiddlewareRecipient = {
@@ -62,25 +64,14 @@ function middlewareError(status: number, code?: string) {
   return new InvoiceServiceError("JFS_UPSTREAM_ERROR", 502);
 }
 
-export async function fetchInvoiceRecipientDetail(
-  scope: Scope,
-  invoiceId: string,
+async function requestMiddlewareRecipient(
+  waybillNo: string,
   options: {
     fetcher?: typeof fetch;
     baseUrl?: string;
     timeoutMs?: number;
   } = {},
 ) {
-  const invoice = await getInvoice(scope, invoiceId);
-  if (!invoice) throw new InvoiceServiceError("INVOICE_NOT_FOUND", 404);
-  if (invoice.status !== "DRAFT") {
-    throw new InvoiceServiceError("INVOICE_LOCKED", 409);
-  }
-  const waybillNo = representativeInvoiceWaybill(invoice.items);
-  if (!waybillNo) {
-    throw new InvoiceServiceError("INVOICE_WAYBILL_NOT_AVAILABLE", 422);
-  }
-
   const url = buildSenderDetailUrl(
     options.baseUrl ?? process.env.JFS_MIDDLEWARE_BASE_URL ?? "",
     waybillNo,
@@ -111,16 +102,62 @@ export async function fetchInvoiceRecipientDetail(
   }
 
   const recipient = mapMiddlewareRecipient(payload.data);
+  return { waybillNo, ...recipient };
+}
+
+export async function fetchSelectedRecipientDetail(
+  scope: Scope,
+  waybillNo: string,
+  options: {
+    fetcher?: typeof fetch;
+    baseUrl?: string;
+    timeoutMs?: number;
+  } = {},
+) {
+  const normalizedWaybill = waybillNo.trim();
+  if (!WAYBILL_PATTERN.test(normalizedWaybill)) {
+    throw new InvoiceServiceError("INVALID_WAYBILL_NO", 400);
+  }
+  const accessible = await getAccessibleInvoiceSourceByWaybill(
+    scope, normalizedWaybill,
+  );
+  if (!accessible) {
+    throw new InvoiceServiceError("WAYBILL_NOT_ACCESSIBLE", 404);
+  }
+  return requestMiddlewareRecipient(normalizedWaybill, options);
+}
+
+export async function fetchInvoiceRecipientDetail(
+  scope: Scope,
+  invoiceId: string,
+  options: {
+    fetcher?: typeof fetch;
+    baseUrl?: string;
+    timeoutMs?: number;
+  } = {},
+) {
+  const invoice = await getInvoice(scope, invoiceId);
+  if (!invoice) throw new InvoiceServiceError("INVOICE_NOT_FOUND", 404);
+  if (invoice.status !== "DRAFT") {
+    throw new InvoiceServiceError("INVOICE_LOCKED", 409);
+  }
+  const waybillNo = representativeInvoiceWaybill(invoice.items);
+  if (!waybillNo) {
+    throw new InvoiceServiceError("INVOICE_WAYBILL_NOT_AVAILABLE", 422);
+  }
+
+  const recipient = await requestMiddlewareRecipient(waybillNo, options);
   const updated = await prisma.invoice.updateMany({
     where: { id: invoiceId, ...scope, status: "DRAFT" },
-    data: recipient,
+    data: {
+      recipientName: recipient.recipientName,
+      recipientPhone: recipient.recipientPhone,
+      recipientCity: recipient.recipientCity,
+    },
   });
   if (updated.count !== 1) {
     throw new InvoiceServiceError("INVOICE_LOCKED", 409);
   }
 
-  return {
-    waybillNo,
-    ...recipient,
-  };
+  return recipient;
 }

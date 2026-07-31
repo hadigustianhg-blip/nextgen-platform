@@ -11,7 +11,6 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 const mocks = vi.hoisted(() => ({
   getInvoice: vi.fn(),
-  getAccounts: vi.fn(),
   createPdf: vi.fn(),
   auditCreate: vi.fn(),
 }));
@@ -22,7 +21,6 @@ vi.mock("@/modules/invoice", () => ({
   canExportInvoice: () => true,
   invoiceScope: () => ({ tenantId: "tenant-1", outletId: "outlet-1" }),
   getInvoice: mocks.getInvoice,
-  getActiveOutletBankAccounts: mocks.getAccounts,
   createInvoicePdf: mocks.createPdf,
   invoicePdfFilename: () => "Invoice_DRAFT_Seller.pdf",
 }));
@@ -57,7 +55,6 @@ const context = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getInvoice.mockResolvedValue(invoice());
-  mocks.getAccounts.mockResolvedValue([]);
   mocks.createPdf.mockImplementation(async (_invoice, _accounts, options) => {
     for (const phase of [
       "pdf_start",
@@ -113,6 +110,26 @@ describe("GET /api/finance/invoices/[id]/pdf", () => {
         addressSnapshot: null,
       }),
       [],
+      expect.any(Object),
+    );
+  });
+
+  it("renders only the immutable payment account snapshot stored on the invoice", async () => {
+    mocks.getInvoice.mockResolvedValueOnce({
+      ...invoice(),
+      transferBankName: "Bank Outlet",
+      transferAccountNumber: "123456789",
+      transferAccountHolder: "Outlet Holder",
+    });
+    const response = await GET(new Request("http://localhost"), context);
+    expect(response.status).toBe(200);
+    expect(mocks.createPdf).toHaveBeenCalledWith(
+      expect.any(Object),
+      [{
+        bankName: "Bank Outlet",
+        accountNumber: "123456789",
+        accountHolder: "Outlet Holder",
+      }],
       expect.any(Object),
     );
   });

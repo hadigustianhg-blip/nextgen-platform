@@ -19,9 +19,10 @@ type DraftInput = {
   whatsapp?: string | null;
   email?: string | null;
   address?: string | null;
-  transferBankName?: string | null;
-  transferAccountNumber?: string | null;
-  transferAccountHolder?: string | null;
+  recipientName?: string | null;
+  recipientPhone?: string | null;
+  recipientCity?: string | null;
+  bankAccountId?: string | null;
   invoiceDate: string;
   dueDate: string;
   periodStart: string;
@@ -219,6 +220,17 @@ export async function getInvoiceSourceItems(input: Scope & {
       : row);
 }
 
+export async function getAccessibleInvoiceSourceByWaybill(
+  scope: Scope,
+  waybillNo: string,
+) {
+  const row = await prisma.masterPickup.findFirst({
+    where: { ...scope, waybillNo },
+    include: invoiceSourceInclude,
+  });
+  return row ? mapSource(row) : null;
+}
+
 export async function getInvoiceSourceSellers(input: Scope & {
   startDate: string;
   endDate: string;
@@ -344,6 +356,30 @@ const invoiceInclude = {
   createdBy: { select: { name: true } },
 };
 
+async function paymentAccountSnapshot(
+  tx: Prisma.TransactionClient,
+  scope: Scope,
+  bankAccountId: string | null | undefined,
+) {
+  if (!bankAccountId) {
+    return {
+      transferBankName: null,
+      transferAccountNumber: null,
+      transferAccountHolder: null,
+    };
+  }
+  const account = await tx.outletBankAccount.findFirst({
+    where: { id: bankAccountId, ...scope, isActive: true },
+    select: { bankName: true, accountNumber: true, accountHolder: true },
+  });
+  if (!account) throw new InvoiceServiceError("PAYMENT_ACCOUNT_NOT_ACCESSIBLE", 404);
+  return {
+    transferBankName: account.bankName,
+    transferAccountNumber: account.accountNumber,
+    transferAccountHolder: account.accountHolder,
+  };
+}
+
 export async function createInvoiceDraft(context: Context, input: DraftInput) {
   const maxAttempts = 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -361,6 +397,9 @@ export async function createInvoiceDraft(context: Context, input: DraftInput) {
           throw new InvoiceServiceError("SOURCE_SELLER_MISMATCH");
         }
         const calculated = totals(sources);
+        const paymentAccount = await paymentAccountSnapshot(
+          tx, context, input.bankAccountId,
+        );
         logCreateInvoice(context, step, {
           attempt,
           itemCount: sources.length,
@@ -377,9 +416,10 @@ export async function createInvoiceDraft(context: Context, input: DraftInput) {
             whatsappSnapshot: input.whatsapp || null,
             emailSnapshot: input.email || null,
             addressSnapshot: input.address || null,
-            transferBankName: input.transferBankName || null,
-            transferAccountNumber: input.transferAccountNumber || null,
-            transferAccountHolder: input.transferAccountHolder || null,
+            recipientName: input.recipientName || null,
+            recipientPhone: input.recipientPhone || null,
+            recipientCity: input.recipientCity || null,
+            ...paymentAccount,
             invoiceDate: date(input.invoiceDate),
             dueDate: date(input.dueDate),
             periodStart: date(input.periodStart),
@@ -470,6 +510,9 @@ export async function updateInvoiceDraft(
         throw new InvoiceServiceError("SOURCE_SELLER_MISMATCH");
       }
       const calculated = totals(sources);
+      const paymentAccount = await paymentAccountSnapshot(
+        tx, context, input.bankAccountId,
+      );
       await tx.invoiceItem.deleteMany({ where: { invoiceId } });
       await tx.invoice.update({
         where: { id: invoiceId },
@@ -480,9 +523,10 @@ export async function updateInvoiceDraft(
           whatsappSnapshot: input.whatsapp || null,
           emailSnapshot: input.email || null,
           addressSnapshot: input.address || null,
-          transferBankName: input.transferBankName || null,
-          transferAccountNumber: input.transferAccountNumber || null,
-          transferAccountHolder: input.transferAccountHolder || null,
+          recipientName: input.recipientName || null,
+          recipientPhone: input.recipientPhone || null,
+          recipientCity: input.recipientCity || null,
+          ...paymentAccount,
           invoiceDate: date(input.invoiceDate),
           dueDate: date(input.dueDate),
           periodStart: date(input.periodStart),
@@ -528,6 +572,13 @@ export async function issueInvoice(context: Context, invoiceId: string) {
       });
       if (!invoice) throw new InvoiceServiceError("INVOICE_NOT_FOUND", 404);
       if (invoice.status !== "DRAFT") throw new InvoiceServiceError("INVOICE_LOCKED", 409);
+      if (
+        !invoice.transferBankName ||
+        !invoice.transferAccountNumber ||
+        !invoice.transferAccountHolder
+      ) {
+        throw new InvoiceServiceError("PAYMENT_ACCOUNT_REQUIRED", 422);
+      }
       const sources = await validatedSources(
         tx, context, invoice.items.map((item) => item.masterPickupId), invoiceId,
       );

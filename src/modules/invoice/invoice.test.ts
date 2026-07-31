@@ -4,13 +4,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 const db = vi.hoisted(() => ({
-  masterPickup: { findMany: vi.fn() },
+  masterPickup: { findMany: vi.fn(), findFirst: vi.fn() },
   invoice: { findFirst: vi.fn(), updateMany: vi.fn() },
   outletBankAccount: { findMany: vi.fn() },
   $transaction: vi.fn(),
 }));
 const tx = vi.hoisted(() => ({
   masterPickup: { findMany: vi.fn() },
+  outletBankAccount: { findFirst: vi.fn() },
   invoice: {
     create: vi.fn(),
     findFirst: vi.fn(),
@@ -26,6 +27,7 @@ import {
   getInvoiceSourceItems,
   getInvoiceSourceSellers,
   createInvoiceDraft,
+  getActiveOutletBankAccounts,
   getInvoice,
   invoiceJsonSafe,
   normalizeSellerName,
@@ -46,6 +48,7 @@ import { createInvoicePdf, invoicePdfFilename } from "./invoice.pdf";
 import {
   buildSenderDetailUrl,
   fetchInvoiceRecipientDetail,
+  fetchSelectedRecipientDetail,
   mapMiddlewareRecipient,
   representativeInvoiceWaybill,
 } from "./invoice-recipient.service";
@@ -96,6 +99,49 @@ describe("Invoice recipient detail", () => {
       "https://middleware.example.test",
       "201680658475 test",
     )).toContain("waybillNo=201680658475%20test");
+  });
+
+  it("validates a selected waybill in the active tenant and outlet before middleware", async () => {
+    db.masterPickup.findFirst.mockResolvedValueOnce(pickup({
+      waybillNo: "201680658475",
+    }));
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      data: {
+        senderName: "Recipient",
+        senderMobilePhone: "08123456789",
+        senderCityName: "Bandung",
+        internalField: "do-not-expose",
+      },
+    }), { status: 200 }));
+    const result = await fetchSelectedRecipientDetail(scope, "201680658475", {
+      fetcher,
+      baseUrl: "https://middleware.example.test",
+    });
+    expect(db.masterPickup.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        waybillNo: "201680658475",
+        tenantId: scope.tenantId,
+        outletId: scope.outletId,
+      },
+    }));
+    expect(result).toEqual({
+      waybillNo: "201680658475",
+      recipientName: "Recipient",
+      recipientPhone: "08123456789",
+      recipientCity: "Bandung",
+    });
+    expect(JSON.stringify(result)).not.toContain("internalField");
+  });
+
+  it("rejects a selected waybill outside the active tenant or outlet", async () => {
+    db.masterPickup.findFirst.mockResolvedValueOnce(null);
+    const fetcher = vi.fn();
+    await expect(fetchSelectedRecipientDetail(scope, "201680658475", {
+      fetcher,
+      baseUrl: "https://middleware.example.test",
+    })).rejects.toMatchObject({ code: "WAYBILL_NOT_ACCESSIBLE", status: 404 });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("maps middleware fields, stores a scoped snapshot and returns no raw data", async () => {
@@ -212,6 +258,17 @@ describe("Invoice recipient detail", () => {
       }), { status: 200 })),
       baseUrl: "https://middleware.example.test",
     })).rejects.toMatchObject({ code: "INVOICE_LOCKED", status: 409 });
+  });
+});
+
+describe("Invoice outlet payment accounts", () => {
+  it("loads only active accounts for the active tenant and outlet", async () => {
+    db.outletBankAccount.findMany.mockResolvedValueOnce([]);
+    await getActiveOutletBankAccounts(scope);
+    expect(db.outletBankAccount.findMany).toHaveBeenCalledWith({
+      where: { ...scope, isActive: true },
+      orderBy: [{ displayOrder: "asc" }, { bankName: "asc" }],
+    });
   });
 });
 const decimal = (value: string | number) => new Prisma.Decimal(value);
@@ -560,15 +617,13 @@ describe("Invoice persistence and PDF contracts", () => {
     expect(service).toContain("INVOICE_SOURCE_CHANGED");
   });
 
-  it("stores optional manual customer fields as trimmed nullable snapshots", async () => {
+  it("stores recipient fields and a scoped outlet payment-account snapshot", async () => {
     const service = await readFile(new URL("./invoice.service.ts", import.meta.url), "utf8");
     for (const field of [
       "companyNameSnapshot",
       "emailSnapshot",
       "addressSnapshot",
-      "transferBankName",
-      "transferAccountNumber",
-      "transferAccountHolder",
+      "paymentAccountSnapshot",
       "notes",
     ]) expect(service).toContain(field);
     expect(invoiceDraftSchema.parse({
@@ -577,9 +632,10 @@ describe("Invoice persistence and PDF contracts", () => {
       companyName: "  Company Test  ",
       email: "",
       address: "   ",
-      transferBankName: "  Bank Test ",
-      transferAccountNumber: "   ",
-      transferAccountHolder: " Holder ",
+      recipientName: "  Recipient Test ",
+      recipientPhone: " 08123456789 ",
+      recipientCity: " Bandung ",
+      bankAccountId: "22222222-2222-4222-8222-222222222222",
       invoiceDate: "2026-07-30",
       dueDate: "2026-08-06",
       periodStart: "2026-07-01",
@@ -589,9 +645,10 @@ describe("Invoice persistence and PDF contracts", () => {
       companyName: "Company Test",
       email: "",
       address: "",
-      transferBankName: "Bank Test",
-      transferAccountNumber: "",
-      transferAccountHolder: "Holder",
+      recipientName: "Recipient Test",
+      recipientPhone: "08123456789",
+      recipientCity: "Bandung",
+      bankAccountId: "22222222-2222-4222-8222-222222222222",
     });
   });
 
@@ -692,7 +749,8 @@ describe("Invoice persistence and PDF contracts", () => {
     ]) expect(source).toContain(`function ${helper}`);
     for (const label of [
       "DITAGIHKAN KEPADA", "NOMOR INVOICE", "TANGGAL INVOICE",
-      "JATUH TEMPO", "TOTAL TAGIHAN", "PEMBAYARAN DAPAT DILAKUKAN KE:",
+      "JATUH TEMPO", "TOTAL TAGIHAN", "INFORMASI PEMBAYARAN",
+      "Nomor Rekening:", "Atas Nama:",
       "Informasi rekening pembayaran belum tersedia.",
       "Invoice ini dibuat secara elektronik dan tidak memerlukan tanda tangan.",
       "Halaman ${pageNumber} dari ${pageCount}",

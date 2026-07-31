@@ -41,6 +41,13 @@ export function buildInvoiceSourceItemsQuery(input: {
   return query;
 }
 
+export function getFirstSelectedWaybill(
+  items: Array<{ id: string; waybillNumber: string }>,
+  selectedIds: ReadonlySet<string>,
+) {
+  return items.find((item) => selectedIds.has(item.id))?.waybillNumber ?? null;
+}
+
 export function canSaveInvoiceDraft(input: {
   sellerSelected: boolean;
   detailLoading: boolean;

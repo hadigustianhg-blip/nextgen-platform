@@ -16,7 +16,7 @@ import {
   invoiceDraftErrorMessage, invoicePdfErrorMessage, invoiceWhatsappDisabledReason,
   invoiceWhatsappErrorMessage, selectableInvoiceItems, sumMoney,
   buildRecipientWhatsappMessage, buildRecipientWhatsappUrl,
-  invoiceRecipientDetailErrorMessage,
+  getFirstSelectedWaybill, invoiceRecipientDetailErrorMessage,
 } from "./invoice.view";
 
 type Seller = {
@@ -90,6 +90,12 @@ type Invoice = {
   tenant?: { name: string };
   _count?: { items: number };
 };
+type BankAccount = {
+  id: string;
+  bankName: string;
+  accountNumber: string;
+  accountHolder: string;
+};
 
 const today = jakartaOperationalDate();
 const isoDate = (value: string) => value.slice(0, 10);
@@ -110,12 +116,14 @@ const validRange = (start: string, end: string) => {
 };
 
 export function CreateInvoiceClient({
+  bankAccounts,
   canCreate,
   canIssue,
   canExport,
   canWhatsapp,
   canVoid,
 }: {
+  bankAccounts: BankAccount[];
   canCreate: boolean;
   canIssue: boolean;
   canExport: boolean;
@@ -150,9 +158,10 @@ export function CreateInvoiceClient({
   const [whatsapp, setWhatsapp] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
-  const [transferBankName, setTransferBankName] = useState("");
-  const [transferAccountNumber, setTransferAccountNumber] = useState("");
-  const [transferAccountHolder, setTransferAccountHolder] = useState("");
+  const [recipientCity, setRecipientCity] = useState("");
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState(
+    bankAccounts.length ? bankAccounts[0].id : "",
+  );
   const [invoiceDate, setInvoiceDate] = useState(today);
   const [dueDate, setDueDate] = useState(plusDays(today, 7));
   const [notes, setNotes] = useState("");
@@ -226,9 +235,7 @@ export function CreateInvoiceClient({
       setWhatsapp(payload.data[0]?.whatsapp || "");
       setEmail(payload.data[0]?.email || "");
       setAddress(payload.data[0]?.address || "");
-      setTransferBankName("");
-      setTransferAccountNumber("");
-      setTransferAccountHolder("");
+      setRecipientCity("");
     } catch (cause) {
       setItems([]);
       setItemsError(cause instanceof Error
@@ -255,6 +262,9 @@ export function CreateInvoiceClient({
   const selectedSubtotal = sumMoney(selectedItems.map((item) => item.freightAmount));
   const selectedDiscount = sumMoney(selectedItems.map((item) => item.discountAmount));
   const selectedTotal = sumMoney(selectedItems.map((item) => item.obligationAmount));
+  const selectedBankAccount = bankAccounts.find(
+    (account) => account.id === selectedBankAccountId,
+  ) ?? null;
   const draftCanBeSaved = canSaveInvoiceDraft({
     sellerSelected: Boolean(selectedSeller),
     detailLoading,
@@ -278,9 +288,10 @@ export function CreateInvoiceClient({
       whatsapp: whatsapp || null,
       email: email || null,
       address: address || null,
-      transferBankName: transferBankName || null,
-      transferAccountNumber: transferAccountNumber || null,
-      transferAccountHolder: transferAccountHolder || null,
+      recipientName: customerName || null,
+      recipientPhone: whatsapp || null,
+      recipientCity: recipientCity || null,
+      bankAccountId: selectedBankAccountId || null,
       invoiceDate,
       dueDate,
       periodStart: startDate,
@@ -373,9 +384,12 @@ export function CreateInvoiceClient({
       setWhatsapp(invoice.whatsappSnapshot || "");
       setEmail(invoice.emailSnapshot || "");
       setAddress(invoice.addressSnapshot || "");
-      setTransferBankName(invoice.transferBankName || "");
-      setTransferAccountNumber(invoice.transferAccountNumber || "");
-      setTransferAccountHolder(invoice.transferAccountHolder || "");
+      setRecipientCity(invoice.recipientCity || "");
+      setSelectedBankAccountId(bankAccounts.find((account) =>
+        account.bankName === invoice.transferBankName &&
+        account.accountNumber === invoice.transferAccountNumber &&
+        account.accountHolder === invoice.transferAccountHolder
+      )?.id ?? "");
       setInvoiceDate(isoDate(invoice.invoiceDate));
       setDueDate(isoDate(invoice.dueDate));
       setNotes(invoice.notes || "");
@@ -390,9 +404,12 @@ export function CreateInvoiceClient({
       setWhatsapp(invoice.whatsappSnapshot || "");
       setEmail(invoice.emailSnapshot || "");
       setAddress(invoice.addressSnapshot || "");
-      setTransferBankName(invoice.transferBankName || "");
-      setTransferAccountNumber(invoice.transferAccountNumber || "");
-      setTransferAccountHolder(invoice.transferAccountHolder || "");
+      setRecipientCity(invoice.recipientCity || "");
+      setSelectedBankAccountId(bankAccounts.find((account) =>
+        account.bankName === invoice.transferBankName &&
+        account.accountNumber === invoice.transferAccountNumber &&
+        account.accountHolder === invoice.transferAccountHolder
+      )?.id ?? "");
       setInvoiceDate(isoDate(invoice.invoiceDate));
       setDueDate(isoDate(invoice.dueDate));
       setNotes(invoice.notes || "");
@@ -436,6 +453,39 @@ export function CreateInvoiceClient({
       setRecipientLoadedId(invoice.id);
       setNotice("Detail penerima ditampilkan.");
       await loadInvoices();
+    } catch (cause) {
+      setError(cause instanceof Error
+        ? cause.message
+        : "Gagal mengambil detail penerima.");
+    } finally {
+      setRecipientLoadingId("");
+    }
+  }
+
+  async function showSelectedRecipientDetail() {
+    if (recipientLoadingId) return;
+    const waybillNo = getFirstSelectedWaybill(items, selectedIds);
+    if (!waybillNo) {
+      setError("Pilih minimal satu resi terlebih dahulu.");
+      return;
+    }
+    setRecipientLoadingId("form");
+    setRecipientLoadedId("");
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/finance/invoices/recipient-detail?waybillNo=${encodeURIComponent(waybillNo)}`,
+        { cache: "no-store" },
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(invoiceRecipientDetailErrorMessage(result.error?.code));
+      }
+      setCustomerName(result.data.recipientName || customerName);
+      setWhatsapp(result.data.recipientPhone || whatsapp);
+      setRecipientCity(result.data.recipientCity || "");
+      setRecipientLoadedId("form");
+      setNotice("Detail penerima berhasil ditampilkan");
     } catch (cause) {
       setError(cause instanceof Error
         ? cause.message
@@ -548,40 +598,95 @@ export function CreateInvoiceClient({
         {!selectedSeller ? <div className="grid min-h-72 place-items-center text-center text-sm text-slate-500">
           Pilih seller untuk melihat resi Pickup Belum Bayar.
         </div> : <div className="space-y-5">
-          <div className="grid gap-3 md:grid-cols-2">
-            <input aria-label="Nama Seller" value={customerName}
-              onChange={(event) => setCustomerName(event.target.value)} className={nextgenControlClass}/>
-            <input aria-label="Nama Perusahaan" placeholder="Nama perusahaan (opsional)"
-              value={companyName} onChange={(event) => setCompanyName(event.target.value)}
-              className={nextgenControlClass}/>
-            <input aria-label="Nomor WhatsApp" placeholder="Nomor WhatsApp"
-              value={whatsapp} onChange={(event) => setWhatsapp(event.target.value)}
-              className={nextgenControlClass}/>
-            <input aria-label="Email" placeholder="Email (opsional)" value={email}
-              onChange={(event) => setEmail(event.target.value)} className={nextgenControlClass}/>
-            <textarea aria-label="Alamat" placeholder="Alamat penagihan" value={address}
-              onChange={(event) => setAddress(event.target.value)}
-              className={`${nextgenControlClass} md:col-span-2`}/>
-            <input aria-label="Nama Bank" placeholder="Nama bank customer (opsional)"
-              value={transferBankName}
-              onChange={(event) => setTransferBankName(event.target.value)}
-              className={nextgenControlClass}/>
-            <input aria-label="Nomor Rekening" placeholder="Nomor rekening customer (opsional)"
-              value={transferAccountNumber}
-              onChange={(event) => setTransferAccountNumber(event.target.value)}
-              className={nextgenControlClass}/>
-            <input aria-label="Atas Nama Rekening" placeholder="Atas nama rekening (opsional)"
-              value={transferAccountHolder}
-              onChange={(event) => setTransferAccountHolder(event.target.value)}
-              className={nextgenControlClass}/>
-            <input aria-label="Tanggal Invoice" type="date" value={invoiceDate}
-              onChange={(event) => setInvoiceDate(event.target.value)} className={nextgenControlClass}/>
-            <input aria-label="Tanggal Jatuh Tempo" type="date" value={dueDate}
-              onChange={(event) => setDueDate(event.target.value)} className={nextgenControlClass}/>
-            <textarea aria-label="Catatan" placeholder="Catatan invoice" value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              className={`${nextgenControlClass} md:col-span-2`}/>
-          </div>
+          <AppCard className="space-y-4 rounded-2xl border border-slate-200 p-4 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+              Informasi Customer
+            </p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <input aria-label="Nama Customer/Penerima" value={customerName}
+                onChange={(event) => setCustomerName(event.target.value)}
+                className={nextgenControlClass}/>
+              <input aria-label="Nama Perusahaan" placeholder="Nama perusahaan (opsional)"
+                value={companyName} onChange={(event) => setCompanyName(event.target.value)}
+                className={nextgenControlClass}/>
+              <input aria-label="Nomor WhatsApp" placeholder="Nomor WhatsApp"
+                value={whatsapp} onChange={(event) => setWhatsapp(event.target.value)}
+                className={nextgenControlClass}/>
+              <input aria-label="Email" placeholder="Email (opsional)" value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className={nextgenControlClass}/>
+              <textarea aria-label="Alamat" placeholder="Alamat penagihan" value={address}
+                onChange={(event) => setAddress(event.target.value)}
+                className={`${nextgenControlClass} md:col-span-2`}/>
+              <input aria-label="Kota/Kabupaten" placeholder="Kota/Kabupaten"
+                value={recipientCity}
+                onChange={(event) => setRecipientCity(event.target.value)}
+                className={nextgenControlClass}/>
+            </div>
+            <button type="button"
+              disabled={recipientLoadingId === "form"}
+              onClick={() => void showSelectedRecipientDetail()}
+              className={nextgenNeutralButtonClass}>
+              {recipientLoadingId === "form" &&
+                <LoaderCircle className="animate-spin" size={17}/>}
+              {recipientLoadingId === "form"
+                ? "Mengambil detail..."
+                : recipientLoadedId === "form"
+                  ? "Detail penerima berhasil ditampilkan"
+                  : "Tampilkan Detail Penerima"}
+            </button>
+          </AppCard>
+
+          <AppCard className="space-y-4 rounded-2xl border border-slate-200 p-4 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+              Informasi Pembayaran
+            </p>
+            {bankAccounts.length === 0 ? <div role="status"
+              className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Rekening penerima pembayaran belum dikonfigurasi.
+            </div> : <>
+              <label className="block text-sm font-semibold text-slate-700">
+                Rekening Penerima
+                <select aria-label="Rekening Penerima"
+                  value={selectedBankAccountId}
+                  onChange={(event) => setSelectedBankAccountId(event.target.value)}
+                  className={`${nextgenControlClass} mt-1`}
+                  disabled={bankAccounts.length === 1}>
+                  {bankAccounts.map((account) => <option key={account.id} value={account.id}>
+                    {account.bankName} · {account.accountNumber} · {account.accountHolder}
+                  </option>)}
+                </select>
+              </label>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {[
+                  ["Nama Bank", selectedBankAccount?.bankName],
+                  ["Nomor Rekening", selectedBankAccount?.accountNumber],
+                  ["Atas Nama", selectedBankAccount?.accountHolder],
+                ].map(([label, value]) => <div key={label}
+                  className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs text-slate-500">{label}</p>
+                  <p className="mt-1 font-semibold text-slate-950">{value || "—"}</p>
+                </div>)}
+              </div>
+            </>}
+          </AppCard>
+
+          <AppCard className="space-y-4 rounded-2xl border border-slate-200 p-4 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+              Detail Invoice
+            </p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <input aria-label="Tanggal Invoice" type="date" value={invoiceDate}
+                onChange={(event) => setInvoiceDate(event.target.value)}
+                className={nextgenControlClass}/>
+              <input aria-label="Tanggal Jatuh Tempo" type="date" value={dueDate}
+                onChange={(event) => setDueDate(event.target.value)}
+                className={nextgenControlClass}/>
+              <textarea aria-label="Catatan" placeholder="Catatan invoice" value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                className={`${nextgenControlClass} md:col-span-2`}/>
+            </div>
+          </AppCard>
 
           {currentInvoice?.id === draftId && <AppCard className="rounded-2xl border border-slate-200 p-4 shadow-sm">
             <div className="mb-4">
@@ -825,21 +930,33 @@ function InvoicePreview({
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
             Informasi Customer
           </p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {[
-              ["Nama Perusahaan", invoice.companyNameSnapshot],
-              ["Email", invoice.emailSnapshot],
-              ["Alamat", invoice.addressSnapshot],
-              ["Nama Bank", invoice.transferBankName],
-              ["Nomor Rekening", invoice.transferAccountNumber],
-              ["Atas Nama", invoice.transferAccountHolder],
-              ["Catatan", invoice.notes],
-            ].map(([label, value]) => <div key={label}>
+           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+             {[
+               ["Nama Perusahaan", invoice.companyNameSnapshot],
+               ["Email", invoice.emailSnapshot],
+               ["Alamat", invoice.addressSnapshot],
+               ["Catatan", invoice.notes],
+             ].map(([label, value]) => <div key={label}>
               <p className="text-xs text-slate-500">{label}</p>
               <p className="font-medium">{value || "—"}</p>
             </div>)}
-          </div>
-        </AppCard>
+           </div>
+         </AppCard>
+         <AppCard className="rounded-2xl border border-slate-200 p-4 shadow-sm">
+           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+             Informasi Pembayaran
+           </p>
+           <div className="mt-3 grid gap-3 sm:grid-cols-3">
+             {[
+               ["Nama Bank", invoice.transferBankName],
+               ["Nomor Rekening", invoice.transferAccountNumber],
+               ["Atas Nama", invoice.transferAccountHolder],
+             ].map(([label, value]) => <div key={label}>
+               <p className="text-xs text-slate-500">{label}</p>
+               <p className="font-medium">{value || "—"}</p>
+             </div>)}
+           </div>
+         </AppCard>
         <div className="overflow-x-auto"><table className="w-full min-w-[800px] text-left text-sm">
           <thead className="bg-slate-50"><tr>{["No", "Tanggal", "No Resi", "Staff", "Pengirim", "Berat", "Ongkir", "Diskon", "Final"]
             .map((label) => <th key={label} className="px-3 py-2">{label}</th>)}</tr></thead>

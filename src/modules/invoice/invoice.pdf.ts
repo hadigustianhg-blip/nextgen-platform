@@ -263,13 +263,13 @@ function drawPaymentAccounts(
   invoice: PdfInvoice,
   bankAccounts: BankAccount[],
 ) {
-  const accountHeight = bankAccounts.length ? bankAccounts.length * 22 : 20;
+  const accountHeight = bankAccounts.length ? bankAccounts.length * 42 : 20;
   const paymentPhone = invoice.recipientPhone || invoice.whatsappSnapshot;
   const notesHeight = paymentPhone ? 38 : 26;
   ensurePageSpace(doc, invoice, 42 + accountHeight + notesHeight);
   const startY = doc.y;
   doc.font("Helvetica-Bold").fontSize(9).fillColor(PRIMARY)
-    .text("PEMBAYARAN DAPAT DILAKUKAN KE:", PAGE.margin, startY, {
+    .text("INFORMASI PEMBAYARAN", PAGE.margin, startY, {
       width: CONTENT_WIDTH,
     });
   doc.moveTo(PAGE.margin, startY + 15).lineTo(PAGE.margin + 190, startY + 15)
@@ -278,12 +278,15 @@ function drawPaymentAccounts(
   if (bankAccounts.length) {
     for (const account of bankAccounts) {
       doc.font("Helvetica-Bold").fontSize(8.5).fillColor(DARK)
-        .text(cleanText(account.bankName), PAGE.margin, doc.y, {
-          width: 105, continued: true,
+        .text(`Bank: ${cleanText(account.bankName)}`, PAGE.margin, doc.y, {
+          width: CONTENT_WIDTH,
         })
         .font("Helvetica").fillColor(MUTED)
-        .text(`  ${cleanText(account.accountNumber)}  |  a.n. ${cleanText(account.accountHolder)}`, {
-          width: CONTENT_WIDTH - 105,
+        .text(`Nomor Rekening: ${cleanText(account.accountNumber)}`, {
+          width: CONTENT_WIDTH,
+        })
+        .text(`Atas Nama: ${cleanText(account.accountHolder)}`, {
+          width: CONTENT_WIDTH,
         });
       doc.moveDown(0.45);
     }
