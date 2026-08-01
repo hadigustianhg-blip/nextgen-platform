@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
@@ -235,4 +236,133 @@ export async function voidPickupPayment(context: Context, id: string, input: { r
     } });
     return voided;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+type BulkPaymentInput = {
+  batchRequestId: string;
+  masterPickupIds: string[];
+  paymentDate: string;
+  method: "CASH" | "TRANSFER";
+  reference?: string;
+  bank?: string;
+  note?: string;
+};
+
+function bulkPaymentRequestKey(batchRequestId: string, masterPickupId: string) {
+  const hex = createHash("sha256").update(`${batchRequestId}:${masterPickupId}`)
+    .digest("hex").slice(0, 32).split("");
+  hex[12] = "4";
+  hex[16] = ((Number.parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16);
+  const value = hex.join("");
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
+export async function bulkAdjustPickupPayments(context: Context, input: BulkPaymentInput) {
+  const masterPickupIds = [...new Set(input.masterPickupIds)];
+  const requestKeys = masterPickupIds.map((id) => bulkPaymentRequestKey(input.batchRequestId, id));
+  return prisma.$transaction(async (tx) => {
+    const replays = await tx.pickupPayment.findMany({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        transactionKey: { in: requestKeys },
+        revision: 1,
+      },
+      select: { transactionKey: true, receivedAmount: true },
+    });
+    if (replays.length === masterPickupIds.length) {
+      return {
+        batchRequestId: input.batchRequestId,
+        adjustedCount: masterPickupIds.length,
+        totalAdjustment: replays.reduce((sum, row) => sum.plus(row.receivedAmount), zero()).toString(),
+        idempotent: true,
+      };
+    }
+    if (replays.length > 0) throw new Error("BULK_IDEMPOTENCY_CONFLICT");
+
+    const masters = await tx.masterPickup.findMany({
+      where: { id: { in: masterPickupIds }, ...prismaScope(context) },
+      include: pickupInclude,
+    });
+    if (masters.length !== masterPickupIds.length) throw new Error("PICKUP_PAYMENT_NOT_FOUND");
+
+    const adjustments = masters.map((master) => {
+      const obligation = master.freightAmount.minus(master.settlementRevisions[0]?.discountAmount ?? zero());
+      const paid = master.payments.reduce((sum, payment) => sum.plus(payment.receivedAmount), zero());
+      const outstanding = obligation.minus(paid);
+      if (!outstanding.greaterThan(0)) throw new Error("PICKUP_PAYMENT_NOT_ELIGIBLE");
+      return { master, obligation, paid, outstanding };
+    });
+    const totalAdjustment = adjustments.reduce((sum, row) => sum.plus(row.outstanding), zero());
+
+    for (const adjustment of adjustments) {
+      const requestKey = bulkPaymentRequestKey(input.batchRequestId, adjustment.master.id);
+      const payment = await tx.pickupPayment.create({ data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        masterPickupId: adjustment.master.id,
+        transactionKey: requestKey,
+        revision: 1,
+        paymentDate: dateValue(input.paymentDate),
+        receivedAmount: adjustment.outstanding,
+        paymentMethodRaw: input.method,
+        transferAccount: input.method === "TRANSFER" ? input.bank : null,
+        reference: input.reference || null,
+        note: input.note || null,
+        createdByUserId: context.actorId,
+        updatedByUserId: context.actorId,
+      } });
+      await createAutomaticCashMovement(tx, {
+        ...context,
+        businessDate: payment.paymentDate,
+        direction: "IN",
+        channel: input.method === "CASH" ? "CASH" : "BANK",
+        movementType: "PICKUP_PAYMENT",
+        amount: adjustment.outstanding,
+        description: "Penyesuaian massal Pickup Payment",
+        reference: adjustment.master.waybillNo,
+        sourceType: "PickupPayment",
+        sourceId: payment.id,
+        requestKey: payment.id,
+      });
+      await tx.auditLog.create({ data: {
+        ...context,
+        action: "CREATE",
+        entityType: "PICKUP_PAYMENT_CREATED",
+        entityId: payment.id,
+        metadata: {
+          batchRequestId: input.batchRequestId,
+          masterPickupId: adjustment.master.id,
+          method: input.method,
+          amount: adjustment.outstanding.toString(),
+          paidBefore: adjustment.paid.toString(),
+          paidAfter: adjustment.obligation.toString(),
+          outstandingBefore: adjustment.outstanding.toString(),
+          outstandingAfter: "0",
+        },
+      } });
+    }
+    await tx.auditLog.create({ data: {
+      ...context,
+      action: "UPDATE",
+      entityType: "PICKUP_PAYMENT_BULK_ADJUSTED",
+      entityId: input.batchRequestId,
+      metadata: {
+        batchRequestId: input.batchRequestId,
+        recordCount: adjustments.length,
+        totalAdjustment: totalAdjustment.toString(),
+        masterPickupIds,
+      },
+    } });
+    return {
+      batchRequestId: input.batchRequestId,
+      adjustedCount: adjustments.length,
+      totalAdjustment: totalAdjustment.toString(),
+      idempotent: false,
+    };
+  }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    maxWait: 10_000,
+    timeout: 30_000,
+  });
 }

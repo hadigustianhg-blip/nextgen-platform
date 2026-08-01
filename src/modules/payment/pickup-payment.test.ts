@@ -18,14 +18,31 @@ const master = {
   settlementRevisions: [{ discountAmount: new Prisma.Decimal(0) }],
   payments: [] as Array<Record<string, any>>,
 };
+const secondMaster = {
+  ...master,
+  id: "10000000-0000-4000-8000-000000000020",
+  waybillNo: "WB-002",
+  freightAmount: new Prisma.Decimal(2000),
+};
+const masters = [master, secondMaster];
 const tx = {
   masterPickup: {
     findFirst: vi.fn(async () => ({
       ...master,
       payments: state.payments.filter((item) => item.recordStatus === "VALID"),
     })),
+    findMany: vi.fn(async ({ where }: any) => masters
+      .filter((item) => where.id.in.includes(item.id) && item.tenantId === where.tenantId && item.outletId === where.outletId)
+      .map((item) => ({
+        ...item,
+        payments: state.payments.filter((payment) => payment.masterPickupId === item.id && payment.recordStatus === "VALID"),
+      }))),
   },
   pickupPayment: {
+    findMany: vi.fn(async ({ where }: any) => state.payments.filter((item) =>
+      item.tenantId === where.tenantId && item.outletId === where.outletId &&
+      where.transactionKey.in.includes(item.transactionKey) && item.revision === where.revision,
+    )),
     findUnique: vi.fn(async ({ where }: any) => state.payments.find((item) =>
       item.transactionKey === where.transactionKey_revision.transactionKey &&
       item.revision === where.transactionKey_revision.revision,
@@ -57,11 +74,11 @@ vi.mock("@/lib/db/prisma", () => ({
 }));
 
 import {
-  createPickupPayment, pickupReceivableStatus, receivableAgeBucket,
+  bulkAdjustPickupPayments, createPickupPayment, pickupReceivableStatus, receivableAgeBucket,
   receivableAgeDays, voidPickupPayment,
 } from "./pickup-payment.service";
 import { cashBalance } from "./cash-flow.service";
-import { pickupPaymentInputSchema, pickupPaymentListSchema } from "./pickup-payment.validation";
+import { pickupPaymentBulkAdjustmentSchema, pickupPaymentInputSchema, pickupPaymentListSchema } from "./pickup-payment.validation";
 import {
   canCreatePickupPayment, canManagePickupPayment, canReadPickupPayment,
 } from "./pickup-payment.authorization";
@@ -160,5 +177,74 @@ describe("Pickup Payment validation, filters, pagination, and RBAC", () => {
     expect(canManagePickupPayment(session(["OPERATIONAL"]))).toBe(false);
     expect(canManagePickupPayment(session(["ADMIN"]))).toBe(true);
     expect(canManagePickupPayment(session(["OWNER"]))).toBe(true);
+  });
+});
+
+describe("Pickup Payment bulk adjustment", () => {
+  const bulkInput = {
+    batchRequestId: "30000000-0000-4000-8000-000000000010",
+    masterPickupIds: [master.id, secondMaster.id],
+    paymentDate: "2026-07-29",
+    method: "CASH" as const,
+    reference: "BATCH-1",
+    bank: "",
+    note: "Pelunasan massal",
+  };
+
+  it("pays every selected outstanding atomically and derives LUNAS status", async () => {
+    const result = await bulkAdjustPickupPayments(context, bulkInput);
+    expect(result).toMatchObject({ adjustedCount: 2, totalAdjustment: "3000", idempotent: false });
+    expect(state.payments).toHaveLength(2);
+    expect(state.movements).toHaveLength(2);
+    expect(pickupReceivableStatus(d(1000), state.payments[0].receivedAmount)).toBe("LUNAS");
+    expect(pickupReceivableStatus(d(2000), state.payments[1].receivedAmount)).toBe("LUNAS");
+    expect(state.audits.filter((item) => item.entityType === "PICKUP_PAYMENT_CREATED")).toHaveLength(2);
+    expect(state.audits.some((item) => item.entityType === "PICKUP_PAYMENT_BULK_ADJUSTED")).toBe(true);
+  });
+
+  it("applies only each record remaining outstanding and creates individual history", async () => {
+    state.payments.push({
+      id: "existing", tenantId: master.tenantId, outletId: master.outletId,
+      masterPickupId: master.id, transactionKey: "30000000-0000-4000-8000-000000000099",
+      revision: 1, recordStatus: "VALID", receivedAmount: d(400),
+    });
+    const result = await bulkAdjustPickupPayments(context, bulkInput);
+    expect(result.totalAdjustment).toBe("2600");
+    expect(state.payments.find((item) => item.masterPickupId === master.id && item.id !== "existing")?.receivedAmount.toString()).toBe("600");
+  });
+
+  it("replays the same batch without duplicate payments or movements", async () => {
+    await bulkAdjustPickupPayments(context, bulkInput);
+    const replay = await bulkAdjustPickupPayments(context, bulkInput);
+    expect(replay.idempotent).toBe(true);
+    expect(state.payments).toHaveLength(2);
+    expect(state.movements).toHaveLength(2);
+  });
+
+  it("rejects one missing, foreign-scope, or already paid record before any write", async () => {
+    await expect(bulkAdjustPickupPayments(context, {
+      ...bulkInput,
+      masterPickupIds: [master.id, "10000000-0000-4000-8000-000000000099"],
+    })).rejects.toThrow("PICKUP_PAYMENT_NOT_FOUND");
+    expect(state.payments).toHaveLength(0);
+
+    state.payments.push({
+      id: "paid", tenantId: master.tenantId, outletId: master.outletId,
+      masterPickupId: master.id, transactionKey: "30000000-0000-4000-8000-000000000098",
+      revision: 1, recordStatus: "VALID", receivedAmount: d(1000),
+    });
+    await expect(bulkAdjustPickupPayments(context, {
+      ...bulkInput,
+      masterPickupIds: [master.id],
+    })).rejects.toThrow("PICKUP_PAYMENT_NOT_ELIGIBLE");
+    expect(state.payments).toHaveLength(1);
+  });
+
+  it("validates empty, duplicate, oversized, negative, and transfer payloads", () => {
+    expect(pickupPaymentBulkAdjustmentSchema.safeParse({ ...bulkInput, masterPickupIds: [] }).success).toBe(false);
+    expect(pickupPaymentBulkAdjustmentSchema.safeParse({ ...bulkInput, masterPickupIds: [master.id, master.id] }).success).toBe(false);
+    expect(pickupPaymentBulkAdjustmentSchema.safeParse({ ...bulkInput, masterPickupIds: Array.from({ length: 501 }, (_, index) => `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`) }).success).toBe(false);
+    expect(pickupPaymentBulkAdjustmentSchema.safeParse({ ...bulkInput, amount: -1 }).success).toBe(false);
+    expect(pickupPaymentBulkAdjustmentSchema.safeParse({ ...bulkInput, method: "TRANSFER", bank: "" }).success).toBe(false);
   });
 });

@@ -44,3 +44,14 @@ export const pickupPaymentVoidSchema = z.object({
   requestKey: z.string().uuid(),
   reason: z.string().trim().min(1).max(500),
 });
+
+export const pickupPaymentBulkAdjustmentSchema = requireTransferBank(z.object({
+  batchRequestId: z.string().uuid(),
+  masterPickupIds: z.array(z.string().uuid()).min(1).max(500)
+    .refine((ids) => new Set(ids).size === ids.length, "ID pickup tidak boleh duplikat."),
+  paymentDate: date,
+  method: z.enum(["CASH", "TRANSFER"]),
+  reference: z.string().trim().max(100).optional().default(""),
+  bank: z.string().trim().max(100).optional().default(""),
+  note: z.string().trim().max(500).optional().default(""),
+}).strict());
