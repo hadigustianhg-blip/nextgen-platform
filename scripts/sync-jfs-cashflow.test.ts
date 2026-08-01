@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 import {
-  jakartaCashflowDate,
   parseCashflowOutletIds,
+  previousJakartaCashflowDate,
   runJfsCashflowCron,
 } from "./sync-jfs-cashflow";
 
@@ -12,12 +12,12 @@ afterEach(() => { process.exitCode = undefined; });
 const outlet = { id: "outlet-1", tenantId: "tenant-1", code: "OUT001" };
 
 describe("Cashflow JFS cron", () => {
-  it("uses the current Asia/Jakarta date and CRON trigger for configured active outlets", async () => {
+  it("uses the previous Asia/Jakarta date and CRON trigger for configured active outlets", async () => {
     const syncOutlet = vi.fn(async () => ({ success: true }));
     const result = await runJfsCashflowCron(["outlet-1"], {
       listOutlets: vi.fn(async () => [outlet]), syncOutlet,
       disconnect: vi.fn(async () => undefined), log: vi.fn(), error: vi.fn(),
-      now: () => new Date("2026-08-01T16:00:00.000Z"),
+      now: () => new Date("2026-08-01T19:00:00.000Z"),
     });
     expect(syncOutlet).toHaveBeenCalledWith(expect.objectContaining({
       tenantId: "tenant-1", outletId: "outlet-1",
@@ -50,8 +50,15 @@ describe("Cashflow JFS cron", () => {
     expect(disconnect).toHaveBeenCalledOnce();
   });
 
-  it("deduplicates outlet configuration and converts UTC to Jakarta", () => {
+  it("deduplicates outlet configuration", () => {
     expect(parseCashflowOutletIds(" one,two,one, ")).toEqual(["one", "two"]);
-    expect(jakartaCashflowDate(new Date("2026-07-31T17:30:00.000Z"))).toBe("2026-08-01");
+  });
+
+  it.each([
+    ["2026-08-01T19:00:00.000Z", "2026-08-01"],
+    ["2026-07-31T19:00:00.000Z", "2026-07-31"],
+    ["2026-12-31T19:00:00.000Z", "2026-12-31"],
+  ])("at Jakarta 02:00 for %s synchronizes previous date %s", (now, expected) => {
+    expect(previousJakartaCashflowDate(new Date(now))).toBe(expected);
   });
 });

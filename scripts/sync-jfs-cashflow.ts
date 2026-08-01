@@ -18,8 +18,11 @@ export function parseCashflowOutletIds(value: string | undefined) {
   return [...new Set((value ?? "").split(",").map((item) => item.trim()).filter(Boolean))];
 }
 
-export function jakartaCashflowDate(now: Date) {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(now);
+export function previousJakartaCashflowDate(now: Date) {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(now);
+  const previousDate = new Date(`${today}T00:00:00.000Z`);
+  previousDate.setUTCDate(previousDate.getUTCDate() - 1);
+  return previousDate.toISOString().slice(0, 10);
 }
 
 export async function runJfsCashflowCron(
@@ -27,7 +30,7 @@ export async function runJfsCashflowCron(
   dependencies: CronDependencies,
 ) {
   const summary = { success: 0, failed: 0, skipped: 0 };
-  const businessDate = jakartaCashflowDate(dependencies.now());
+  const businessDate = previousJakartaCashflowDate(dependencies.now());
   dependencies.log(`[CASHFLOW JFS CRON] Started businessDate=${businessDate}`);
   try {
     if (configuredIds.length === 0) throw new Error("CASHFLOW_JFS_OUTLET_IDS belum dikonfigurasi.");
