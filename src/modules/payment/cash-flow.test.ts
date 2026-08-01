@@ -1,11 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
+const prismaMocks = vi.hoisted(() => ({ findMany: vi.fn() }));
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/db/prisma", () => ({ prisma: {} }));
+vi.mock("@/lib/db/prisma", () => ({
+  prisma: { cashMovement: { findMany: prismaMocks.findMany } },
+}));
 
 import {
   cashBalance,
+  listCashFlow,
   runningBalances,
   voidAutomaticCashMovements,
 } from "./cash-flow.service";
@@ -16,6 +20,7 @@ import {
   canCreateManualCashFlow, canManageManualCashFlow, canReadCashFlow,
 } from "./cash-flow.authorization";
 import type { SessionContext } from "@/lib/auth/session";
+import { jakartaCurrentMonthRange } from "@/lib/dates/jakarta-date";
 
 const amount = (value: number) => new Prisma.Decimal(value);
 const movement = (
@@ -77,6 +82,112 @@ describe("Cash Flow Payment formulas", () => {
     ]);
     expect(result.cash.toString()).toBe("-500");
     expect(result.bank.toString()).toBe("500");
+  });
+});
+
+describe("Cash Flow Payment period and cumulative ledger", () => {
+  const row = (input: {
+    id: string;
+    businessDate: string;
+    amount: number;
+    direction?: "IN" | "OUT";
+  }) => ({
+    id: input.id,
+    tenantId: "tenant-a",
+    outletId: "outlet-a",
+    businessDate: new Date(`${input.businessDate}T00:00:00.000Z`),
+    occurredAt: new Date(`${input.businessDate}T03:00:00.000Z`),
+    direction: input.direction ?? "IN",
+    channel: "CASH" as const,
+    movementType: "MANUAL_INCOME" as const,
+    amount: amount(input.amount),
+    description: null,
+    reference: null,
+    sourceType: "MANUAL",
+    sourceId: null,
+    requestKey: `request-${input.id}`,
+    recordStatus: "VALID" as const,
+    createdByUserId: "user-a",
+    createdAt: new Date("2026-08-01T00:00:00.000Z"),
+    updatedAt: new Date("2026-08-01T00:00:00.000Z"),
+    createdBy: { name: "Operator" },
+  });
+
+  it("resolves the current month using Asia/Jakarta at a UTC month boundary", () => {
+    expect(jakartaCurrentMonthRange(new Date("2026-07-31T17:30:00.000Z"))).toEqual({
+      startDate: "2026-08-01",
+      endDate: "2026-08-31",
+    });
+  });
+
+  it("defaults database filtering to current-month businessDate and carries prior balance", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-15T03:00:00.000Z"));
+    const july = row({ id: "july", businessDate: "2026-07-31", amount: 1000 });
+    const august = row({ id: "august", businessDate: "2026-08-01", amount: 250 });
+    const augustOut = row({ id: "august-out", businessDate: "2026-08-02", amount: 50, direction: "OUT" });
+    const voidAugust = { ...row({ id: "august-void", businessDate: "2026-08-03", amount: 999 }), recordStatus: "VOID" as const };
+    const september = row({ id: "september", businessDate: "2026-09-01", amount: 100 });
+    prismaMocks.findMany.mockImplementation((args) =>
+      Promise.resolve(args.include ? [august, augustOut] : [july, august, augustOut, voidAugust, september]));
+
+    const result = await listCashFlow({
+      tenantId: "tenant-a", outletId: "outlet-a", page: 1, pageSize: 25,
+      startDate: "", endDate: "",
+    });
+
+    expect(prismaMocks.findMany.mock.calls[0]![0].where.businessDate).toEqual({
+      gte: new Date("2026-08-01T00:00:00.000Z"),
+      lte: new Date("2026-08-31T00:00:00.000Z"),
+    });
+    expect(prismaMocks.findMany.mock.calls[0]![0].where).not.toHaveProperty("createdAt");
+    expect(prismaMocks.findMany.mock.calls[0]![0].where).not.toHaveProperty("updatedAt");
+    expect(result.data.find((item) => item.id === "august")!.runningBalance).toBe("1250");
+    expect(result.data.find((item) => item.id === "august-out")!.runningBalance).toBe("1200");
+    expect(result.summary.cashOnHand).toBe("1300");
+    expect(result.summary.monthlyIncome).toBe("250");
+    expect(result.summary.monthlyExpense).toBe("50");
+    expect(prismaMocks.findMany.mock.calls[1]![0]).toMatchObject({
+      where: { tenantId: "tenant-a", outletId: "outlet-a" },
+    });
+    expect(prismaMocks.findMany.mock.calls[1]![0].where).not.toHaveProperty("businessDate");
+    vi.useRealTimers();
+  });
+
+  it("honors a manual July date range together with existing filters", async () => {
+    const july = row({ id: "july-filtered", businessDate: "2026-07-10", amount: 500 });
+    prismaMocks.findMany.mockImplementation((args) =>
+      Promise.resolve(args.include ? [july] : [july]));
+
+    await listCashFlow({
+      tenantId: "tenant-a", outletId: "outlet-a", page: 1, pageSize: 25,
+      startDate: "2026-07-01", endDate: "2026-07-31", direction: "IN",
+      channel: "CASH", movementType: "MANUAL_INCOME", reference: "REF", search: "manual",
+    });
+
+    expect(prismaMocks.findMany.mock.calls.at(-2)![0].where).toMatchObject({
+      tenantId: "tenant-a",
+      outletId: "outlet-a",
+      businessDate: {
+        gte: new Date("2026-07-01T00:00:00.000Z"),
+        lte: new Date("2026-07-31T00:00:00.000Z"),
+      },
+      direction: "IN",
+      channel: "CASH",
+      movementType: "MANUAL_INCOME",
+    });
+  });
+
+  it("supports a manual date range spanning two months", async () => {
+    prismaMocks.findMany.mockResolvedValue([]);
+    await listCashFlow({
+      tenantId: "tenant-a", outletId: "outlet-a", page: 2, pageSize: 10,
+      startDate: "2026-06-15", endDate: "2026-07-15",
+    });
+    expect(prismaMocks.findMany.mock.calls.at(-2)![0].where.businessDate).toEqual({
+      gte: new Date("2026-06-15T00:00:00.000Z"),
+      lte: new Date("2026-07-15T00:00:00.000Z"),
+    });
   });
 });
 

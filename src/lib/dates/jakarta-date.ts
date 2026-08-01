@@ -27,3 +27,13 @@ export function jakartaDateRange(daysBack = 3, now = new Date()) {
   const endDate = jakartaOperationalDate(now);
   return { startDate: shiftCalendarDate(endDate, -daysBack), endDate };
 }
+
+export function jakartaCurrentMonthRange(now = new Date()) {
+  const today = jakartaOperationalDate(now);
+  const [year, month] = today.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year!, month!, 0)).getUTCDate();
+  return {
+    startDate: `${today.slice(0, 7)}-01`,
+    endDate: `${today.slice(0, 7)}-${String(lastDay).padStart(2, "0")}`,
+  };
+}

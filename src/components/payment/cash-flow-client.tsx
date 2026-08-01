@@ -12,6 +12,7 @@ import {
   nextgenControlClass,
   nextgenNeutralButtonClass,
 } from "@/components/ui";
+import { jakartaCurrentMonthRange } from "@/lib/dates/jakarta-date";
 
 type Row = {
   id: string;
@@ -68,6 +69,9 @@ export function CashFlowClient({
   canManage: boolean;
   initialDate?: string;
 }) {
+  const defaultPeriod = initialDate
+    ? { startDate: initialDate, endDate: initialDate }
+    : jakartaCurrentMonthRange();
   const [rows, setRows] = useState<Row[]>([]);
   const [summary, setSummary] = useState(initialSummary);
   const [pagination, setPagination] = useState({
@@ -78,8 +82,8 @@ export function CashFlowClient({
   });
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({
-    startDate: initialDate,
-    endDate: initialDate,
+    startDate: defaultPeriod.startDate,
+    endDate: defaultPeriod.endDate,
     direction: "",
     channel: "",
     movementType: "",
@@ -359,6 +363,12 @@ export function CashFlowClient({
                 <tr>
                   <td colSpan={12} className="p-12 text-center">
                     Memuat…
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td colSpan={12} className="p-12 text-center text-slate-500">
+                    Belum ada transaksi Cash Flow pada periode ini.
                   </td>
                 </tr>
               ) : (

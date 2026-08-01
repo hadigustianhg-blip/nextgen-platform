@@ -7,6 +7,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { jakartaCurrentMonthRange } from "@/lib/dates/jakarta-date";
 
 type Scope = { tenantId: string; outletId: string };
 type Context = Scope & { actorId: string };
@@ -126,13 +127,13 @@ type ListInput = Scope & {
 };
 
 export async function listCashFlow(input: ListInput) {
+  const defaultPeriod = jakartaCurrentMonthRange();
+  const startDate = input.startDate || defaultPeriod.startDate;
+  const endDate = input.endDate || defaultPeriod.endDate;
   const where: Prisma.CashMovementWhereInput = {
     tenantId: input.tenantId,
     outletId: input.outletId,
-    ...(input.startDate || input.endDate ? { businessDate: {
-      ...(input.startDate ? { gte: dateValue(input.startDate) } : {}),
-      ...(input.endDate ? { lte: dateValue(input.endDate) } : {}),
-    } } : {}),
+    businessDate: { gte: dateValue(startDate), lte: dateValue(endDate) },
     ...(input.direction ? { direction: input.direction } : {}),
     ...(input.channel ? { channel: input.channel } : {}),
     ...(input.movementType ? { movementType: input.movementType } : {}),
@@ -143,22 +144,34 @@ export async function listCashFlow(input: ListInput) {
       { sourceType: { contains: input.search, mode: "insensitive" } },
     ] } : {}),
   };
-  const [filtered, allValid] = await Promise.all([
+  const [filtered, allLedger] = await Promise.all([
     prisma.cashMovement.findMany({
       where, include: { createdBy: { select: { name: true } } },
       orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
     }),
     prisma.cashMovement.findMany({
-      where: { tenantId: input.tenantId, outletId: input.outletId, recordStatus: "VALID" },
-      select: { direction: true, channel: true, amount: true, recordStatus: true, businessDate: true },
+      where: { tenantId: input.tenantId, outletId: input.outletId },
+      select: {
+        id: true, direction: true, channel: true, amount: true,
+        recordStatus: true, businessDate: true,
+      },
+      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
     }),
   ]);
-  const balances = runningBalances(filtered);
-  const rows = filtered.map((row, index) => ({ row, runningBalance: balances[index]! })).reverse();
+  const ledgerBalances = runningBalances(allLedger);
+  const balanceById = new Map(
+    allLedger.map((row, index) => [row.id, ledgerBalances[index]!] as const),
+  );
+  const rows = filtered.map((row) => ({
+    row,
+    runningBalance: balanceById.get(row.id) ?? zero(),
+  })).reverse();
   const skip = (input.page - 1) * input.pageSize;
-  const month = new Date().toISOString().slice(0, 7);
-  const monthRows = allValid.filter((row) => row.businessDate.toISOString().slice(0, 7) === month);
-  const balance = cashBalance(allValid);
+  const monthRows = allLedger.filter((row) =>
+    row.recordStatus === "VALID"
+    && row.businessDate >= dateValue(defaultPeriod.startDate)
+    && row.businessDate <= dateValue(defaultPeriod.endDate));
+  const balance = cashBalance(allLedger);
   return {
     data: rows.slice(skip, skip + input.pageSize).map(({ row, runningBalance }) => ({
       ...row, amount: row.amount.toString(), runningBalance: runningBalance.toString(),
