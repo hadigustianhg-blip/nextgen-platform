@@ -4,7 +4,7 @@ export type PickupMessageOrder = {
   goodsName: string | null;
 };
 
-export function normalizePickupPhone(value: string | null) {
+export function normalizePickupPhone(value: string | null | undefined) {
   if (!value) return null;
   let digits = value.replace(/[^\d]/g, "");
   if (digits.startsWith("0")) digits = `62${digits.slice(1)}`;
@@ -21,7 +21,10 @@ export function buildPickupMessage(input: {
   const customer = input.customerName?.trim() || "kak";
   const outlet = input.outletCode?.trim() || "";
   const brand = outlet ? `JNT CARGO ${outlet}` : "JNT CARGO";
-  const orderText = input.orders.map((order) => [
+  const uniqueOrders = [...new Map(input.orders
+    .map((order) => [order.waybill.trim(), order] as const)
+    .filter(([waybill]) => Boolean(waybill))).values()];
+  const orderText = uniqueOrders.map((order) => [
     order.waybill,
     `${order.source?.trim() || "JFS"} Pickup`,
     order.goodsName?.trim() || null,

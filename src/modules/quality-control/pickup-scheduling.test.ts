@@ -52,7 +52,11 @@ import {
   resetPickupSchedulingLocks,
   syncPickupScheduling,
 } from "./pickup-scheduling-sync.service";
-import { getPickupSchedulingDetail } from "./pickup-scheduling-sensitive.service";
+import {
+  fetchPickupSenderDetail,
+  getPickupSchedulingDetail,
+  PickupSenderDetailError,
+} from "./pickup-scheduling-sensitive.service";
 import {
   buildPickupMessage,
   buildPickupWhatsAppUrl,
@@ -86,6 +90,7 @@ beforeEach(() => {
   memory.stored.clear();
   memory.audits.length = 0;
   resetPickupSchedulingLocks();
+  process.env.JFS_MIDDLEWARE_BASE_URL = "https://middleware.example.test";
 });
 
 describe("Pickup Scheduling date range", () => {
@@ -268,9 +273,95 @@ describe("Pickup Scheduling WhatsApp", () => {
     expect(buildPickupWhatsAppUrl("invalid", message)).toBeNull();
     expect(buildPickupWhatsAppUrl("081234567890", message)).toContain("https://wa.me/6281234567890?text=");
   });
+
+  it("keeps the existing wording, removes duplicate waybills, and encodes once", () => {
+    const message = buildPickupMessage({
+      customerName: "Customer", outletCode: null,
+      orders: [
+        { waybill: "WB-1", source: "JFS", goodsName: null },
+        { waybill: "WB-1", source: "JFS", goodsName: null },
+      ],
+    });
+    expect(message.match(/WB-1/g)).toHaveLength(1);
+    expect(message).toBe("Hallo kak Customer\n\nSaya dari JNT CARGO, izin konfirmasi penjadwalan pickup :\n\nWB-1\nJFS Pickup\n\nUntuk barang diatas apa sudah ready di pickup? Jika sudah team lapangan akan segera melakukan penjemputan ke lokasi kaka.\n\nDitunggu ya kak responnya, terimakasih 🙏");
+    const url = buildPickupWhatsAppUrl("081234567890", message)!;
+    expect(decodeURIComponent(new URL(url).searchParams.get("text")!)).toBe(message);
+    expect(message).not.toMatch(/undefined|null|\[object Object\]/);
+  });
+
+  it.each([null, "", "-", "********", "08123", "nomor tidak tersedia"])(
+    "rejects invalid or placeholder phone %s",
+    (value) => expect(normalizePickupPhone(value)).toBeNull(),
+  );
 });
 
 describe("Pickup Scheduling sync and sensitive detail", () => {
+  it("uses the current sender-detail endpoint, encoded waybill, and actual response contract", async () => {
+    const fetcher = vi.fn(async (url: URL | RequestInfo) => {
+      const parsed = url instanceof URL ? url : new URL(String(url));
+      expect(parsed.pathname).toBe("/jfs-sender-detail");
+      expect(parsed.searchParams.get("waybillNo")).toBe("WB / 1");
+      return new Response(JSON.stringify({
+        success: true,
+        data: {
+          senderName: "Full Customer",
+          senderMobilePhone: "+62 812-3456-7890",
+          senderCityName: "Bandung",
+        },
+      }), { headers: { "content-type": "application/json" } });
+    });
+    await expect(fetchPickupSenderDetail(" WB / 1 ", fetcher)).resolves.toEqual({
+      waybill: "WB / 1",
+      senderName: "Full Customer",
+      senderMobilePhone: "+62 812-3456-7890",
+      senderCityName: "Bandung",
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [404, "SENDER_DETAIL_NOT_FOUND"],
+    [500, "SENDER_DETAIL_FAILED"],
+  ])("handles sender-detail HTTP %i", async (status, expectedCode) => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      success: false,
+      error: { code: expectedCode },
+    }), { status, headers: { "content-type": "application/json" } }));
+    await expect(fetchPickupSenderDetail("WB-1", fetcher)).rejects.toMatchObject({
+      code: expectedCode,
+      status,
+    });
+  });
+
+  it("handles null data and invalid JSON safely", async () => {
+    const nullFetcher = vi.fn(async () => new Response(JSON.stringify({ success: true, data: null }), {
+      headers: { "content-type": "application/json" },
+    }));
+    await expect(fetchPickupSenderDetail("WB-1", nullFetcher)).rejects.toMatchObject({
+      code: "SENDER_DETAIL_FAILED",
+    });
+    const invalidFetcher = vi.fn(async () => new Response("not-json", {
+      headers: { "content-type": "application/json" },
+    }));
+    await expect(fetchPickupSenderDetail("WB-1", invalidFetcher)).rejects.toMatchObject({
+      code: "SENDER_DETAIL_FAILED",
+    });
+  });
+
+  it("retries one transient failure but does not retry a 404", async () => {
+    const transient = vi.fn()
+      .mockResolvedValueOnce(new Response("", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        data: { senderName: "A", senderMobilePhone: "081234567890", senderCityName: "B" },
+      }), { headers: { "content-type": "application/json" } }));
+    await expect(fetchPickupSenderDetail("WB-1", transient)).resolves.toMatchObject({ senderName: "A" });
+    expect(transient).toHaveBeenCalledTimes(2);
+    const notFound = vi.fn(async () => new Response("", { status: 404 }));
+    await expect(fetchPickupSenderDetail("WB-1", notFound)).rejects.toBeInstanceOf(PickupSenderDetailError);
+    expect(notFound).toHaveBeenCalledOnce();
+  });
+
   it("upserts idempotently without storing unmasked detail or raw payload", async () => {
     const record = {
       orderId: "order-1", waybillId: "WB-1", customerId: "customer-1",
@@ -322,12 +413,11 @@ describe("Pickup Scheduling sync and sensitive detail", () => {
     await first;
   });
 
-  it("validates the representative order from scoped DB and requests exactly one detail", async () => {
+  it("validates the scoped group and resolves every unique waybill independently", async () => {
     memory.rows = [row(1), row(2)];
-    const fetchDetail = vi.fn(async (orderId: string) => ({
-      requestedOrderId: orderId,
-      customerName: "Full Customer", customerPhone: "081234567890",
-      pickupAddress: "Full Address", outletCode: null,
+    const fetchDetail = vi.fn(async (waybill: string) => ({
+      waybill, senderName: "Full Customer", senderMobilePhone: "081234567890",
+      senderCityName: "Bandung",
     }));
     const group = groupPickupSchedules(memory.rows as never[])[0];
     const result = await getPickupSchedulingDetail({
@@ -335,17 +425,47 @@ describe("Pickup Scheduling sync and sensitive detail", () => {
       startDate: "2026-07-27", endDate: "2026-07-30", groupId: group.groupId,
       sessionOutletCode: "SESSION01", fetchDetail,
     });
-    expect(fetchDetail).toHaveBeenCalledOnce();
-    expect(fetchDetail).toHaveBeenCalledWith("order-1");
+    expect(fetchDetail).toHaveBeenCalledTimes(2);
+    expect(fetchDetail).toHaveBeenNthCalledWith(1, "WB-1");
+    expect(fetchDetail).toHaveBeenNthCalledWith(2, "WB-2");
     expect(result.orders.map((order) => order.waybill)).toEqual(["WB-1", "WB-2"]);
     expect(result.outletCode).toBe("OUT001");
+    expect(result.senderMobilePhone).toBe("081234567890");
+    expect(result.details.every((detail) => detail.status === "success")).toBe(true);
     const calls = db.rawPickupSchedule.findMany.mock.calls as unknown as
       Array<[{ where: Record<string, unknown> }]>;
     const query = calls[0]?.[0];
     expect(query?.where).toMatchObject({
       tenantId: "tenant", outletId: "outlet",
     });
-    expect(JSON.stringify(memory.audits.at(-1))).not.toMatch(/Full Customer|081234567890|Full Address/);
+    expect(JSON.stringify(memory.audits.at(-1))).not.toMatch(/Full Customer|081234567890|Bandung/);
+  });
+
+  it("keeps successful waybill detail when another waybill fails and uses valid list fallback", async () => {
+    memory.rows = [
+      row(1, { senderPhoneMasked: "081234567890" }),
+      row(2, { senderPhoneMasked: "081234567890" }),
+    ];
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const group = groupPickupSchedules(memory.rows as never[])[0];
+    const result = await getPickupSchedulingDetail({
+      tenantId: "tenant", outletId: "outlet", actorId: "user",
+      startDate: "2026-07-27", endDate: "2026-07-30", groupId: group.groupId,
+      sessionOutletCode: "SESSION01",
+      fetchDetail: vi.fn(async (waybill: string) => {
+        if (waybill === "WB-2") throw new PickupSenderDetailError("UPSTREAM", 502, "application/json", ["error"]);
+        return { waybill, senderName: "Sender", senderMobilePhone: null, senderCityName: "Bandung" };
+      }),
+      requestId: "request-safe",
+    });
+    expect(result.details.map(({ waybill, status }) => ({ waybill, status }))).toEqual([
+      { waybill: "WB-1", status: "success" },
+      { waybill: "WB-2", status: "failed" },
+    ]);
+    expect(result.senderMobilePhone).toBe("081234567890");
+    expect(warning).toHaveBeenCalledWith("PICKUP_SCHEDULING_SENDER_DETAIL_FAILED", expect.objectContaining({
+      requestId: "request-safe", stage: "FETCH_SENDER_DETAIL", errorCode: "UPSTREAM",
+    }));
   });
 });
 
@@ -356,12 +476,13 @@ describe("Pickup Scheduling UI and permissions", () => {
     expect(canViewPickupSchedulingSensitive(session(["VIEWER"]))).toBe(false);
   });
 
-  it("keeps accordion closed by default and detail click-only", async () => {
+  it("keeps accordion closed by default and loads detail through the internal API", async () => {
     const ui = await readFile(new URL("../../components/quality-control/pickup-scheduling-client.tsx", import.meta.url), "utf8");
     expect(ui).toContain("useState<Set<string>>(() => new Set())");
     expect(ui).toContain("expanded.has(group.groupId)");
-    const beforeConfirm = ui.slice(0, ui.indexOf("async function confirm"));
-    expect(beforeConfirm).not.toContain("/detail?");
+    expect(ui).toContain("loadGroupDetail(group)");
+    expect(ui).toContain("detailRequests.current");
+    expect(ui).toContain("confirmationLocks.current");
     expect(ui).toContain('aria-label="Tanggal Mulai"');
     expect(ui).toContain('aria-label="Tanggal Akhir"');
     expect(ui).toContain("jakartaDateRange(3)");
@@ -371,6 +492,8 @@ describe("Pickup Scheduling UI and permissions", () => {
     expect(ui).toContain('anchor.rel = "noopener noreferrer"');
     expect(ui).not.toContain("localStorage");
     expect(ui).not.toContain("sessionStorage");
+    expect(ui).not.toContain("jfs-middleware-v2-production");
+    expect(ui).not.toContain("/jfs-sender-detail");
   });
 
   it("uses private no-store detail responses and has no fixed outlet fallback", async () => {

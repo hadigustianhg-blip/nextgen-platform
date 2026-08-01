@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
-const BASE_URL = "https://jfs-middleware-v2-production.up.railway.app";
 const locks = new Set<string>();
 const text = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : null;
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -43,7 +42,10 @@ export async function fetchPickupScheduleList(
   endDate: string,
   fetcher: typeof fetch = fetch,
 ) {
-  const url = new URL("/jfs-order-list-sync", process.env.JFS_MIDDLEWARE_URL || BASE_URL);
+  const baseUrl = process.env.JFS_MIDDLEWARE_BASE_URL?.trim()
+    || process.env.JFS_MIDDLEWARE_URL?.trim();
+  if (!baseUrl) throw new Error("MIDDLEWARE_NOT_CONFIGURED");
+  const url = new URL("/jfs-order-list-sync", baseUrl);
   url.searchParams.set("startDate", startDate);
   url.searchParams.set("endDate", endDate);
   const response = await fetcher(url, {

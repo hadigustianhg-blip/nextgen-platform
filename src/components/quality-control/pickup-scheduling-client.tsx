@@ -1,13 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, LoaderCircle, MessageCircle, RefreshCw } from "lucide-react";
 import {
   FilterCard, MetricCard, PageHeader, TableCard, nextgenButtonClass,
   nextgenControlClass, nextgenNeutralButtonClass,
 } from "@/components/ui";
 import { jakartaDateRange } from "@/lib/dates/jakarta-date";
-import { buildPickupMessage, buildPickupWhatsAppUrl } from "@/modules/quality-control/pickup-scheduling-whatsapp";
+import {
+  buildPickupMessage, buildPickupWhatsAppUrl, normalizePickupPhone,
+} from "@/modules/quality-control/pickup-scheduling-whatsapp";
 
 type Order = {
   id: string; waybill: string; source: string | null; goodsName: string | null;
@@ -21,6 +23,16 @@ type Result = {
   summary: { totalWaybills: number; totalGroups: number; validMaskedPhones: number };
   groups: Group[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
+};
+type SenderDetail = {
+  waybill: string; senderName: string | null; senderMobilePhone: string | null;
+  senderCityName: string | null; status: "success" | "failed"; errorCode: string | null;
+};
+type GroupDetail = {
+  requestId: string; groupId: string; senderName: string | null;
+  senderMobilePhone: string | null; senderCityName: string | null;
+  outletCode: string | null; details: SenderDetail[];
+  orders: Array<{ waybill: string; source: string | null; goodsName: string | null }>;
 };
 const empty: Result = {
   summary: { totalWaybills: 0, totalGroups: 0, validMaskedPhones: 0 },
@@ -53,6 +65,11 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [detailLoading, setDetailLoading] = useState<Set<string>>(() => new Set());
+  const [detailCache, setDetailCache] = useState<Record<string, SenderDetail>>({});
+  const groupDetailCache = useRef(new Map<string, GroupDetail>());
+  const detailRequests = useRef(new Map<string, Promise<GroupDetail>>());
+  const confirmationLocks = useRef(new Set<string>());
   const [notice, setNotice] = useState("");
   const [page, setPage] = useState(1);
 
@@ -115,26 +132,68 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
     finally { setSyncing(false); }
   }
 
-  async function confirm(group: Group) {
-    if (confirming) return;
-    setConfirming(group.groupId); setNotice("");
-    try {
+  const loadGroupDetail = useCallback(async (group: Group) => {
+    const groupCacheKey = `${group.groupId}:${startDate}:${endDate}:${group.orders.map((order) => order.waybill.trim()).join("|")}`;
+    const cached = groupDetailCache.current.get(groupCacheKey);
+    if (cached) return cached;
+    const active = detailRequests.current.get(groupCacheKey);
+    if (active) return active;
+
+    setDetailLoading((current) => new Set(current).add(group.groupId));
+    const request = (async () => {
       const query = new URLSearchParams({ startDate, endDate });
       const response = await fetch(`/api/quality-control/pickup-scheduling/groups/${group.groupId}/detail?${query}`, { cache: "no-store" });
-      if (!response.ok) throw new Error();
-      const detail = await response.json();
-      const message = buildPickupMessage({
-        customerName: detail.customerName, outletCode: detail.outletCode, orders: detail.orders,
+      const body = await response.json().catch(() => null) as GroupDetail | { error?: { code?: string } } | null;
+      if (!response.ok || !body || !("details" in body) || !Array.isArray(body.details)) {
+        throw new Error(response.status === 404 ? "GROUP_NOT_FOUND" : "DETAIL_FAILED");
+      }
+      const detail = body as GroupDetail;
+      groupDetailCache.current.set(groupCacheKey, detail);
+      setDetailCache((current) => {
+        const next = { ...current };
+        for (const item of detail.details) next[item.waybill.trim()] = item;
+        return next;
       });
-      const url = buildPickupWhatsAppUrl(detail.customerPhone, message);
-      if (!url) throw new Error();
+      return detail;
+    })();
+    detailRequests.current.set(groupCacheKey, request);
+    try {
+      return await request;
+    } finally {
+      detailRequests.current.delete(groupCacheKey);
+      setDetailLoading((current) => {
+        const next = new Set(current); next.delete(group.groupId); return next;
+      });
+    }
+  }, [endDate, startDate]);
+
+  async function confirm(group: Group) {
+    if (confirmationLocks.current.has(group.groupId)) return;
+    confirmationLocks.current.add(group.groupId);
+    setConfirming(group.groupId); setNotice("");
+    try {
+      const detail = await loadGroupDetail(group);
+      if (!detail.senderMobilePhone) throw new Error("PHONE_UNAVAILABLE");
+      if (!normalizePickupPhone(detail.senderMobilePhone)) throw new Error("PHONE_INVALID");
+      const message = buildPickupMessage({
+        customerName: detail.senderName, outletCode: detail.outletCode, orders: detail.orders,
+      });
+      const url = buildPickupWhatsAppUrl(detail.senderMobilePhone, message);
+      if (!url) throw new Error("PHONE_INVALID");
       const anchor = document.createElement("a");
       anchor.href = url;
       anchor.target = "_blank";
       anchor.rel = "noopener noreferrer";
       anchor.click();
-    } catch { setNotice("Detail pengirim atau nomor WhatsApp tidak tersedia."); }
-    finally { setConfirming(null); }
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "DETAIL_FAILED";
+      setNotice(code === "PHONE_UNAVAILABLE" ? "Nomor WhatsApp pengirim tidak tersedia."
+        : code === "PHONE_INVALID" ? "Nomor WhatsApp tidak valid."
+        : "Gagal mengambil detail pengirim.");
+    } finally {
+      confirmationLocks.current.delete(group.groupId);
+      setConfirming(null);
+    }
   }
 
   const reset = () => {
@@ -145,9 +204,13 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
     const range = jakartaDateRange(daysBack);
     setPage(1); setStartDate(range.startDate); setEndDate(range.endDate);
   };
-  const toggle = (id: string) => setExpanded((current) => {
+  const toggle = (group: Group) => setExpanded((current) => {
     const next = new Set(current);
-    if (next.has(id)) next.delete(id); else next.add(id);
+    if (next.has(group.groupId)) next.delete(group.groupId);
+    else {
+      next.add(group.groupId);
+      void loadGroupDetail(group).catch(() => setNotice("Detail waybill gagal dimuat."));
+    }
     return next;
   });
 
@@ -183,11 +246,11 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
         : result.groups.map((group, index) => <section key={group.groupId} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="flex flex-wrap items-center gap-4 p-4">
             <span className="w-8 text-slate-500">{index + 1}</span>
-            <button aria-expanded={expanded.has(group.groupId)} onClick={() => toggle(group.groupId)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+            <button aria-expanded={expanded.has(group.groupId)} onClick={() => toggle(group)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
               {expanded.has(group.groupId) ? <ChevronDown size={18}/> : <ChevronRight size={18}/>}
               <span><strong>{group.sellerName || "Pengirim tidak tersedia"}</strong><span className="ml-3 text-sm text-slate-500">{group.orders.length} resi · {group.senderPhoneMasked || "nomor tersensor"}</span></span>
             </button>
-            {canConfirm && <button disabled={confirming !== null} onClick={() => void confirm(group)} className={nextgenButtonClass}>
+            {canConfirm && <button disabled={confirming === group.groupId} onClick={() => void confirm(group)} className={nextgenButtonClass}>
               {confirming === group.groupId ? <LoaderCircle className="animate-spin" size={17}/> : <MessageCircle size={17}/>}Konfirmasi Pickup
             </button>}
           </div>
@@ -198,7 +261,16 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
               <tbody className="divide-y">{group.orders.map((order, orderIndex) => <tr key={order.id}>
                 <td className="px-4 py-3">{orderIndex + 1}</td><td className="px-4 py-3">{order.businessDate}</td>
                 <td className="px-4 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{order.ageLabel}</span></td>
-                <td className="px-4 py-3 font-semibold">{order.waybill}</td>
+                <td className="px-4 py-3 font-semibold">
+                  <div>{order.waybill}</div>
+                  <div className="mt-1 text-xs font-normal text-slate-500">
+                    {detailLoading.has(group.groupId) && !detailCache[order.waybill.trim()] ? "Memuat detail…"
+                      : detailCache[order.waybill.trim()]?.status === "success"
+                        ? [detailCache[order.waybill.trim()].senderName, detailCache[order.waybill.trim()].senderCityName].filter(Boolean).join(" · ") || "Detail pengirim tersedia"
+                        : detailCache[order.waybill.trim()]?.status === "failed" ? "Detail waybill gagal dimuat."
+                        : "Detail belum dimuat"}
+                  </div>
+                </td>
                 <td className="px-4 py-3">{order.goodsName || "—"}</td><td className="px-4 py-3">{order.source || "—"}</td>
                 <td className="px-4 py-3">{order.weight.toLocaleString("id-ID")}</td><td className="px-4 py-3">{order.status || "—"}</td>
               </tr>)}</tbody>
