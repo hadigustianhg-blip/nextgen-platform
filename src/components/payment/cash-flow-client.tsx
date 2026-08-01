@@ -94,6 +94,10 @@ export function CashFlowClient({
   const [modal, setModal] = useState<"income" | "expense" | null>(null);
   const [editing, setEditing] = useState<Row | null>(null);
   const [error, setError] = useState("");
+  const updateFilter = (key: keyof typeof filters, value: string) => {
+    setPage(1);
+    setFilters((current) => ({ ...current, [key]: value }));
+  };
 
   const query = useMemo(
     () =>
@@ -223,10 +227,10 @@ export function CashFlowClient({
       />
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
-          ["Cash On Hand", summary.cashOnHand],
-          ["Saldo Bank", summary.bankBalance],
-          ["Cash Masuk Bulan Ini", summary.monthlyIncome],
-          ["Cash Keluar Bulan Ini", summary.monthlyExpense],
+          ["Cash On Hand Periode", summary.cashOnHand],
+          ["Saldo Bank Periode", summary.bankBalance],
+          ["Cash Masuk Periode", summary.monthlyIncome],
+          ["Cash Keluar Periode", summary.monthlyExpense],
         ].map(([label, value]) => (
           <MetricCard key={label} label={label} value={money(value)} />
         ))}
@@ -236,26 +240,20 @@ export function CashFlowClient({
           <input
             type="date"
             value={filters.startDate}
-            onChange={(e) =>
-              setFilters({ ...filters, startDate: e.target.value })
-            }
+            onChange={(e) => updateFilter("startDate", e.target.value)}
             className={nextgenControlClass}
             aria-label="Tanggal mulai"
           />
           <input
             type="date"
             value={filters.endDate}
-            onChange={(e) =>
-              setFilters({ ...filters, endDate: e.target.value })
-            }
+            onChange={(e) => updateFilter("endDate", e.target.value)}
             className={nextgenControlClass}
             aria-label="Tanggal akhir"
           />
           <select
             value={filters.direction}
-            onChange={(e) =>
-              setFilters({ ...filters, direction: e.target.value })
-            }
+            onChange={(e) => updateFilter("direction", e.target.value)}
             className={nextgenControlClass}
           >
             <option value="">Semua jenis</option>
@@ -264,9 +262,7 @@ export function CashFlowClient({
           </select>
           <select
             value={filters.channel}
-            onChange={(e) =>
-              setFilters({ ...filters, channel: e.target.value })
-            }
+            onChange={(e) => updateFilter("channel", e.target.value)}
             className={nextgenControlClass}
           >
             <option value="">Semua channel</option>
@@ -276,9 +272,7 @@ export function CashFlowClient({
           <select
             aria-label="Kategori"
             value={filters.movementType}
-            onChange={(e) =>
-              setFilters({ ...filters, movementType: e.target.value })
-            }
+            onChange={(e) => updateFilter("movementType", e.target.value)}
             className={nextgenControlClass}
           >
             <option value="">Semua kategori</option>
@@ -300,15 +294,13 @@ export function CashFlowClient({
           <input
             placeholder="Reference"
             value={filters.reference}
-            onChange={(e) =>
-              setFilters({ ...filters, reference: e.target.value })
-            }
+            onChange={(e) => updateFilter("reference", e.target.value)}
             className={nextgenControlClass}
           />
           <input
             placeholder="Search"
             value={filters.search}
-            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+            onChange={(e) => updateFilter("search", e.target.value)}
             className={nextgenControlClass}
           />
         </div>

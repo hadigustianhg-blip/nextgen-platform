@@ -167,11 +167,11 @@ export async function listCashFlow(input: ListInput) {
     runningBalance: balanceById.get(row.id) ?? zero(),
   })).reverse();
   const skip = (input.page - 1) * input.pageSize;
-  const monthRows = allLedger.filter((row) =>
+  const periodRows = allLedger.filter((row) =>
     row.recordStatus === "VALID"
-    && row.businessDate >= dateValue(defaultPeriod.startDate)
-    && row.businessDate <= dateValue(defaultPeriod.endDate));
-  const balance = cashBalance(allLedger);
+    && row.businessDate >= dateValue(startDate)
+    && row.businessDate <= dateValue(endDate));
+  const balance = cashBalance(periodRows);
   return {
     data: rows.slice(skip, skip + input.pageSize).map(({ row, runningBalance }) => ({
       ...row, amount: row.amount.toString(), runningBalance: runningBalance.toString(),
@@ -184,9 +184,9 @@ export async function listCashFlow(input: ListInput) {
     summary: {
       cashOnHand: balance.cash.toString(),
       bankBalance: balance.bank.toString(),
-      monthlyIncome: monthRows.filter((row) => row.direction === "IN")
+      monthlyIncome: periodRows.filter((row) => row.direction === "IN")
         .reduce((sum, row) => sum.plus(row.amount), zero()).toString(),
-      monthlyExpense: monthRows.filter((row) => row.direction === "OUT")
+      monthlyExpense: periodRows.filter((row) => row.direction === "OUT")
         .reduce((sum, row) => sum.plus(row.amount), zero()).toString(),
     },
   };

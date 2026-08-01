@@ -91,6 +91,9 @@ describe("Cash Flow Payment period and cumulative ledger", () => {
     businessDate: string;
     amount: number;
     direction?: "IN" | "OUT";
+    channel?: "CASH" | "BANK";
+    recordStatus?: "VALID" | "VOID";
+    createdAt?: string;
   }) => ({
     id: input.id,
     tenantId: "tenant-a",
@@ -98,7 +101,7 @@ describe("Cash Flow Payment period and cumulative ledger", () => {
     businessDate: new Date(`${input.businessDate}T00:00:00.000Z`),
     occurredAt: new Date(`${input.businessDate}T03:00:00.000Z`),
     direction: input.direction ?? "IN",
-    channel: "CASH" as const,
+    channel: input.channel ?? "CASH",
     movementType: "MANUAL_INCOME" as const,
     amount: amount(input.amount),
     description: null,
@@ -106,9 +109,9 @@ describe("Cash Flow Payment period and cumulative ledger", () => {
     sourceType: "MANUAL",
     sourceId: null,
     requestKey: `request-${input.id}`,
-    recordStatus: "VALID" as const,
+    recordStatus: input.recordStatus ?? "VALID",
     createdByUserId: "user-a",
-    createdAt: new Date("2026-08-01T00:00:00.000Z"),
+    createdAt: new Date(input.createdAt ?? "2026-08-01T00:00:00.000Z"),
     updatedAt: new Date("2026-08-01T00:00:00.000Z"),
     createdBy: { name: "Operator" },
   });
@@ -144,7 +147,8 @@ describe("Cash Flow Payment period and cumulative ledger", () => {
     expect(prismaMocks.findMany.mock.calls[0]![0].where).not.toHaveProperty("updatedAt");
     expect(result.data.find((item) => item.id === "august")!.runningBalance).toBe("1250");
     expect(result.data.find((item) => item.id === "august-out")!.runningBalance).toBe("1200");
-    expect(result.summary.cashOnHand).toBe("1300");
+    expect(result.summary.cashOnHand).toBe("200");
+    expect(result.summary.bankBalance).toBe("0");
     expect(result.summary.monthlyIncome).toBe("250");
     expect(result.summary.monthlyExpense).toBe("50");
     expect(prismaMocks.findMany.mock.calls[1]![0]).toMatchObject({
@@ -155,14 +159,19 @@ describe("Cash Flow Payment period and cumulative ledger", () => {
   });
 
   it("honors a manual July date range together with existing filters", async () => {
-    const july = row({ id: "july-filtered", businessDate: "2026-07-10", amount: 500 });
+    const july = row({ id: "july-filtered", businessDate: "2026-07-10", amount: 500, channel: "BANK" });
+    const julyCash = row({ id: "july-cash", businessDate: "2026-07-11", amount: 300 });
+    const julyCashOut = row({ id: "july-cash-out", businessDate: "2026-07-12", amount: 100, direction: "OUT" });
+    const june = row({ id: "june", businessDate: "2026-06-30", amount: 9000 });
+    const august = row({ id: "august-other", businessDate: "2026-08-01", amount: 8000, channel: "BANK" });
+    const julyVoid = row({ id: "july-void", businessDate: "2026-07-15", amount: 7000, recordStatus: "VOID" });
     prismaMocks.findMany.mockImplementation((args) =>
-      Promise.resolve(args.include ? [july] : [july]));
+      Promise.resolve(args.include ? [july] : [june, july, julyCash, julyCashOut, julyVoid, august]));
 
     await listCashFlow({
       tenantId: "tenant-a", outletId: "outlet-a", page: 1, pageSize: 25,
       startDate: "2026-07-01", endDate: "2026-07-31", direction: "IN",
-      channel: "CASH", movementType: "MANUAL_INCOME", reference: "REF", search: "manual",
+      channel: "BANK", movementType: "MANUAL_INCOME", reference: "REF", search: "manual",
     });
 
     expect(prismaMocks.findMany.mock.calls.at(-2)![0].where).toMatchObject({
@@ -173,20 +182,52 @@ describe("Cash Flow Payment period and cumulative ledger", () => {
         lte: new Date("2026-07-31T00:00:00.000Z"),
       },
       direction: "IN",
-      channel: "CASH",
+      channel: "BANK",
       movementType: "MANUAL_INCOME",
+    });
+    const result = await listCashFlow({
+      tenantId: "tenant-a", outletId: "outlet-a", page: 1, pageSize: 25,
+      startDate: "2026-07-01", endDate: "2026-07-31", channel: "BANK",
+    });
+    expect(result.summary).toEqual({
+      cashOnHand: "200",
+      bankBalance: "500",
+      monthlyIncome: "800",
+      monthlyExpense: "100",
     });
   });
 
   it("supports a manual date range spanning two months", async () => {
-    prismaMocks.findMany.mockResolvedValue([]);
-    await listCashFlow({
+    const before = row({ id: "before", businessDate: "2026-06-14", amount: 1000 });
+    const julyIn = row({ id: "july-in", businessDate: "2026-07-01", amount: 400 });
+    const augustOut = row({ id: "august-out-range", businessDate: "2026-08-15", amount: 150, direction: "OUT", channel: "BANK" });
+    const after = row({ id: "after", businessDate: "2026-08-16", amount: 2000 });
+    prismaMocks.findMany.mockImplementation((args) =>
+      Promise.resolve(args.include ? [julyIn, augustOut] : [before, julyIn, augustOut, after]));
+    const result = await listCashFlow({
       tenantId: "tenant-a", outletId: "outlet-a", page: 2, pageSize: 10,
-      startDate: "2026-06-15", endDate: "2026-07-15",
+      startDate: "2026-06-15", endDate: "2026-08-15",
     });
     expect(prismaMocks.findMany.mock.calls.at(-2)![0].where.businessDate).toEqual({
       gte: new Date("2026-06-15T00:00:00.000Z"),
-      lte: new Date("2026-07-15T00:00:00.000Z"),
+      lte: new Date("2026-08-15T00:00:00.000Z"),
+    });
+    expect(result.summary).toEqual({
+      cashOnHand: "400", bankBalance: "-150",
+      monthlyIncome: "400", monthlyExpense: "150",
+    });
+  });
+
+  it("returns zero period cards when the active period has no transactions", async () => {
+    const old = row({ id: "old", businessDate: "2026-06-01", amount: 1000 });
+    prismaMocks.findMany.mockImplementation((args) =>
+      Promise.resolve(args.include ? [] : [old]));
+    const result = await listCashFlow({
+      tenantId: "tenant-a", outletId: "outlet-a", page: 1, pageSize: 25,
+      startDate: "2026-08-01", endDate: "2026-08-31",
+    });
+    expect(result.summary).toEqual({
+      cashOnHand: "0", bankBalance: "0", monthlyIncome: "0", monthlyExpense: "0",
     });
   });
 });
