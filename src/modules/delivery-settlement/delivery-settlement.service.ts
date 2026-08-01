@@ -144,7 +144,7 @@ export function deliverySyncFailureDiagnostic(input: {
 
 export function aggregateDeliveryRecords(
   dispatches: Array<{ courierNameRaw: string | null; deliveryStatusRaw: string | null; freightAmount: Prisma.Decimal }>,
-  cods: Array<{ courierNameRaw: string | null; repaymentTypeCode: number | null; repaymentTypeLabel: string | null; codAmount: Prisma.Decimal }>,
+  cods: Array<{ courierNameRaw: string | null; repaymentTypeCode: number | null; repaymentTypeLabel: string | null; repaymentStatusCode?: number | null; codAmount: Prisma.Decimal }>,
 ) {
   const aggregates = new Map<string, Aggregate>();
   let anomaly = 0;
