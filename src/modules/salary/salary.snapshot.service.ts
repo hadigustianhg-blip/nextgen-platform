@@ -13,6 +13,21 @@ type Transaction = Prisma.TransactionClient;
 const json = (value: unknown) =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 
+export function canonicalizeSalaryPickupSettlement(
+  value: string | null | undefined,
+): "DFOD" | "Tunai" | "Bulanan" | null {
+  if (value == null) return null;
+  const normalized = value
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/gu, " ")
+    .toLocaleLowerCase("id-ID");
+  if (normalized === "dfod") return "DFOD";
+  if (normalized === "tunai") return "Tunai";
+  if (normalized === "bulanan") return "Bulanan";
+  return null;
+}
+
 const settingDecimalKeys = [
   "basicDailySalary",
   "overtimeRate",
@@ -175,6 +190,9 @@ export async function captureSalaryClosingSnapshots(
         },
         syncStatus: "NORMALIZED",
       },
+      include: {
+        rawPickup: { select: { settlementRaw: true } },
+      },
       orderBy: [{ operationalDate: "asc" }, { id: "asc" }],
     }),
     tx.operationalExpense.findMany({
@@ -232,7 +250,9 @@ export async function captureSalaryClosingSnapshots(
         waybillNo: pickup.waybillNo,
         staffName: pickup.staffName,
         freightAmount: pickup.freightAmount,
-        settlement: null,
+        settlement: canonicalizeSalaryPickupSettlement(
+          pickup.rawPickup.settlementRaw,
+        ),
         sourceSyncStatus: pickup.syncStatus,
         normalizationVersion: pickup.normalizationVersion,
         sourceSyncedAt: pickup.sourceSyncedAt,
