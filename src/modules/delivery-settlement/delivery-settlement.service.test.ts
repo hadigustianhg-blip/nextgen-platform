@@ -141,16 +141,6 @@ describe("Delivery Settlement aggregation", () => {
     expect(result.rows.find((row) => row.courierKey === "RIDWAN KUSNAWAN")?.dfod.toString()).toBe("3");
   });
 
-  it("aggregates active cash pickups by the same normalized team key", () => {
-    const result = aggregateDeliveryRecords([], [], [
-      { staffName: " Ridwan  Kusnawan ", settlementRaw: "Tunai", freightAmount: d(185000) },
-      { staffName: "RIDWAN KUSNAWAN", settlementRaw: "Transfer", freightAmount: d(999999) },
-      { staffName: null, settlementRaw: "tunai", freightAmount: d(44000) },
-    ]);
-    expect(result.rows.find((row) => row.courierKey === "RIDWAN KUSNAWAN")?.pickupCash.toString()).toBe("185000");
-    expect(result.rows.find((row) => row.courierKey === "TEAM BELUM TERPETAKAN")?.pickupCash.toString()).toBe("44000");
-  });
-
   it("classifies actual repayment codes into exactly one settlement category", () => {
     expect(classifyCodSettlement({ repaymentTypeCode: 1, repaymentTypeLabel: null })).toBe("COD_CASH");
     expect(classifyCodSettlement({ repaymentTypeCode: 3, repaymentTypeLabel: null })).toBe("COD_CASH");
@@ -178,6 +168,36 @@ describe("Delivery Settlement aggregation", () => {
       businessDate: "2026-07-31",
     });
     expect(JSON.stringify(diagnostic)).not.toContain("sensitive database detail");
+  });
+
+  it("extracts PostgreSQL check violation code and constraint name safely", () => {
+    const error = new Prisma.PrismaClientKnownRequestError(
+      "Constraint failed",
+      {
+        code: "P2004",
+        clientVersion: "6.19.3",
+        meta: { database_error: {
+          code: "23514",
+          constraint: "MasterSetoran_total_formula_check",
+        } },
+      },
+    );
+    const diagnostic = deliverySyncFailureDiagnostic({
+      requestId: "request-constraint",
+      stage: "UPSERT_MASTER_SETORAN",
+      error,
+      tenantId: "tenant-1",
+      outletId: "outlet-1",
+      businessDate: "2026-07-31",
+    });
+    expect(diagnostic).toMatchObject({
+      prismaCode: "P2004",
+      postgresCode: "23514",
+      constraintName: "MasterSetoran_total_formula_check",
+      stage: "UPSERT_MASTER_SETORAN",
+      requestId: "request-constraint",
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain("Constraint failed");
   });
 
   it("does not fetch COD or enter later stages when Dispatch fails", async () => {
@@ -210,45 +230,28 @@ describe("Delivery Settlement aggregation", () => {
     expect(stages).toEqual(["FETCH_DISPATCH", "FETCH_COD"]);
   });
 
-  it("uses the union of pickup, DFOD, and COD teams, including pickup-only teams", () => {
-    const result = aggregateDeliveryRecords(
-      [{ courierNameRaw: "LILI SOBARI", deliveryStatusRaw: "Penerimaan Normal", freightAmount: d(89542) }],
-      [{ courierNameRaw: "M KURNIA", repaymentTypeCode: 1, repaymentTypeLabel: null, codAmount: d(2252817) }],
-      [
-        { staffName: "DINI SETIANI", settlementRaw: "Tunai", freightAmount: d(44000) },
-        { staffName: "RAIDI GS", settlementRaw: "Tunai", freightAmount: d(161000) },
-      ],
-    );
-    expect(result.rows.map((row) => row.courierKey).sort()).toEqual([
-      "DINI SETIANI", "LILI SOBARI", "M KURNIA", "RAIDI GS",
-    ]);
-    expect(result.rows.find((row) => row.courierKey === "DINI SETIANI")?.pickupCash.toString()).toBe("44000");
-    expect(result.rows.find((row) => row.courierKey === "RAIDI GS")?.pickupCash.toString()).toBe("161000");
-  });
 });
 
 describe("Delivery Settlement financial calculation", () => {
-  it("reconciles the 31 July COD, QRIS, pickup cash, and DFOD semantics", () => {
+  it("reconciles the 31 July COD, QRIS, and DFOD semantics", () => {
     const totalCod = d(21876610);
     const codQris = d(614800);
-    const pickupCash = d(511000);
     const dfod = d(1535421);
-    const totalSettlement = pickupCash.plus(dfod).plus(totalCod);
+    const totalSettlement = dfod.plus(totalCod);
     expect(totalCod.minus(codQris).toString()).toBe("21261810");
-    expect(totalSettlement.toString()).toBe("23923031");
-    expect(totalSettlement.equals(pickupCash.plus(dfod).plus(totalCod).plus(codQris))).toBe(false);
-    expect(totalSettlement.toString()).not.toBe("24537831");
-    expect(totalSettlement.toString()).not.toBe("24026831");
+    expect(totalSettlement.toString()).toBe("23412031");
+    expect(totalSettlement.equals(dfod.plus(totalCod).plus(codQris))).toBe(false);
   });
 
   it.each([
-    { courier: "LILI SOBARI", pickup: 0, dfod: 89542, cod: 5722812, qris: 310881, settlement: 5812354 },
-    { courier: "M KURNIA", pickup: 0, dfod: 71800, cod: 2252817, qris: 160556, settlement: 2324617 },
-    { courier: "RIDWAN KUSNAWAN", pickup: 185000, dfod: 345551, cod: 5481608, qris: 143363, settlement: 6012159 },
-  ])("keeps QRIS out of $courier settlement while exposing its breakdown", ({ pickup, dfod, cod, qris, settlement }) => {
-    const total = d(pickup).plus(dfod).plus(cod);
+    { courier: "LILI SOBARI", dfod: 89542, cod: 5722812, qris: 310881, settlement: 5812354 },
+    { courier: "M KURNIA", dfod: 71800, cod: 2252817, qris: 160556, settlement: 2324617 },
+    { courier: "RIDWAN KUSNAWAN", dfod: 345551, cod: 5481608, qris: 143363, settlement: 5827159 },
+  ])("keeps QRIS out of $courier settlement while exposing its breakdown", ({ dfod, cod, qris, settlement }) => {
+    const total = d(dfod).plus(cod);
     expect(total.toString()).toBe(String(settlement));
     expect(d(cod).minus(qris).plus(qris).toString()).toBe(String(cod));
+    expect(total.equals(d(dfod).plus(cod).plus(qris))).toBe(false);
   });
 
   it("keeps QRIS as a subset of total COD instead of adding it twice", () => {

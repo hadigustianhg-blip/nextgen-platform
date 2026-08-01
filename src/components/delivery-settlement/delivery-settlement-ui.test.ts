@@ -44,6 +44,8 @@ describe("Delivery Settlement UI contract", () => {
     expect(client).toContain("money(summary.totalCod)");
     expect(client).toContain("money(summary.totalCodQris)");
     expect(client).toContain("money(summary.totalDfod)");
+    expect(client).not.toContain("Pickup Tunai");
+    expect(client).not.toContain("pickupCashAmount");
   });
 
   it("defaults the date picker and first list request to today in Jakarta", () => {

@@ -91,7 +91,6 @@ export function deduplicateDispatchEnvelope(records: DispatchSourceRecord[]) {
 type Aggregate = {
   courierKey: string;
   courierName: string;
-  pickupCash: Prisma.Decimal;
   dfod: Prisma.Decimal;
   codCash: Prisma.Decimal;
   codQris: Prisma.Decimal;
@@ -105,6 +104,20 @@ export function deliverySyncFailureDiagnostic(input: {
   outletId: string;
   businessDate: string;
 }) {
+  const databaseError = input.error instanceof Prisma.PrismaClientKnownRequestError
+    ? input.error.meta?.database_error
+    : null;
+  const databaseErrorText = typeof databaseError === "string"
+    ? databaseError
+    : databaseError && typeof databaseError === "object"
+      ? JSON.stringify(databaseError)
+      : "";
+  const postgresCode = databaseError && typeof databaseError === "object" && "code" in databaseError
+    ? String(databaseError.code)
+    : databaseErrorText.match(/(?:SQLSTATE|code)[^0-9]*([0-9]{5})/i)?.[1] ?? null;
+  const constraintName = databaseError && typeof databaseError === "object" && "constraint" in databaseError
+    ? String(databaseError.constraint)
+    : databaseErrorText.match(/constraint[\s"':]+([A-Za-z0-9_]+)/i)?.[1] ?? null;
   return {
     requestId: input.requestId,
     stage: input.stage,
@@ -114,6 +127,8 @@ export function deliverySyncFailureDiagnostic(input: {
     prismaCode: input.error instanceof Prisma.PrismaClientKnownRequestError
       ? input.error.code
       : null,
+    postgresCode,
+    constraintName,
     target: input.error instanceof DeliverySourceError ? input.error.diagnostic.target : null,
     httpStatus: input.error instanceof DeliverySourceError ? input.error.diagnostic.httpStatus : null,
     contentType: input.error instanceof DeliverySourceError ? input.error.diagnostic.contentType : null,
@@ -130,7 +145,6 @@ export function deliverySyncFailureDiagnostic(input: {
 export function aggregateDeliveryRecords(
   dispatches: Array<{ courierNameRaw: string | null; deliveryStatusRaw: string | null; freightAmount: Prisma.Decimal }>,
   cods: Array<{ courierNameRaw: string | null; repaymentTypeCode: number | null; repaymentTypeLabel: string | null; codAmount: Prisma.Decimal }>,
-  pickups: Array<{ staffName: string | null; settlementRaw: string | null; freightAmount: Prisma.Decimal }> = [],
 ) {
   const aggregates = new Map<string, Aggregate>();
   let anomaly = 0;
@@ -143,7 +157,7 @@ export function aggregateDeliveryRecords(
       courierName: normalizeComparison(name)
         ? name!.trim().replace(/\s+/g, " ")
         : "Team Belum Terpetakan",
-      pickupCash: zero(), dfod: zero(), codCash: zero(), codQris: zero(),
+      dfod: zero(), codCash: zero(), codQris: zero(),
     };
     aggregates.set(courierKey, created);
     return created;
@@ -168,11 +182,6 @@ export function aggregateDeliveryRecords(
     } else if (category === "COD_CASH") {
       target.codCash = target.codCash.plus(row.codAmount);
     }
-  }
-  for (const row of pickups) {
-    if (normalizeComparison(row.settlementRaw) !== "TUNAI") continue;
-    const target = get(row.staffName);
-    target.pickupCash = target.pickupCash.plus(row.freightAmount);
   }
   return { rows: [...aggregates.values()], anomaly };
 }
@@ -329,34 +338,18 @@ export async function syncDeliverySettlement(
       }
 
       stage = "LOAD_FINAL_SOURCES";
-      const [dispatchVersions, cods, pickups] = await Promise.all([
+      const [dispatchVersions, cods] = await Promise.all([
         tx.rawDispatch.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED", isActive: true } }),
         tx.rawCod.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED" } }),
-        tx.masterPickup.findMany({
-          where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date },
-          select: {
-            staffName: true,
-            freightAmount: true,
-            rawPickup: { select: { settlementRaw: true } },
-          },
-        }),
       ]);
       const dispatches = selectLatestDispatchRecords(dispatchVersions);
       const finalCods = selectLatestCodRecords(cods);
-      stage = "AGGREGATE_TEAM_UNION";
-      const aggregate = aggregateDeliveryRecords(
-        dispatches,
-        finalCods,
-        pickups.map((row) => ({
-          staffName: row.staffName,
-          freightAmount: row.freightAmount,
-          settlementRaw: row.rawPickup.settlementRaw,
-        })),
-      );
+      stage = "AGGREGATE_DELIVERY";
+      const aggregate = aggregateDeliveryRecords(dispatches, finalCods);
       anomaly += aggregate.anomaly;
       stage = "UPSERT_MASTER_SETORAN";
       for (const candidate of aggregate.rows) {
-        const total = candidate.pickupCash.plus(candidate.dfod).plus(candidate.codCash);
+        const total = candidate.dfod.plus(candidate.codCash);
         const where = { tenantId_outletId_operationalDate_courierKey: {
           tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, courierKey: candidate.courierKey,
         } };
@@ -488,6 +481,8 @@ export async function syncDeliverySettlement(
         stage: diagnostic.stage,
         errorCode: diagnostic.errorCode,
         prismaCode: diagnostic.prismaCode,
+        postgresCode: diagnostic.postgresCode,
+        constraintName: diagnostic.constraintName,
         dispatchHttpStatus: stage === "FETCH_DISPATCH" ? diagnostic.httpStatus : dispatchFetch?.httpStatus ?? null,
         codHttpStatus: stage === "FETCH_COD" ? diagnostic.httpStatus : codFetch?.httpStatus ?? null,
         dispatchAttemptCount: stage === "FETCH_DISPATCH" ? diagnostic.attemptCount : dispatchFetch?.attemptCount ?? 0,
@@ -531,19 +526,11 @@ const paymentInclude = {
   },
 };
 
-function pickupAggregationKey(date: Date, staffName: string | null) {
-  return `${date.toISOString().slice(0, 10)}:${normalizeComparison(staffName) || "TEAM BELUM TERPETAKAN"}`;
-}
-
-function mapMaster(
-  row: Prisma.MasterSetoranGetPayload<{ include: typeof paymentInclude }>,
-  pickupCashAmount: Prisma.Decimal = zero(),
-) {
+function mapMaster(row: Prisma.MasterSetoranGetPayload<{ include: typeof paymentInclude }>) {
   const financial = calculateDeliveryFinancials(row);
   return {
     id: row.id, updatedAt: row.updatedAt, operationalDate: row.operationalDate,
-    courierName: row.courierName, pickupCashAmount: pickupCashAmount.toString(),
-    dfodAmount: row.dfodAmount.toString(),
+    courierName: row.courierName, dfodAmount: row.dfodAmount.toString(),
     codCashAmount: row.codCashAmount.toString(), codQrisAmount: row.codQrisAmount.toString(),
     codCashOnlyAmount: row.codCashAmount.toString(),
     totalSettlement: row.totalSettlementAmount.toString(),
@@ -565,7 +552,6 @@ export function summarizeDeliveryRows(rows: Array<{
   codCashAmount: string;
   codQrisAmount: string;
   dfodAmount: string;
-  pickupCashAmount?: string;
   paymentStatus: "UNCLEARED" | "CLEAR" | "OVERPAID";
 }>) {
   return rows.reduce((sum, row) => {
@@ -576,12 +562,11 @@ export function summarizeDeliveryRows(rows: Array<{
     sum.totalCod = sum.totalCod.plus(row.codCashAmount);
     sum.totalCodQris = sum.totalCodQris.plus(row.codQrisAmount);
     sum.totalDfod = sum.totalDfod.plus(row.dfodAmount);
-    sum.totalPickupCash = sum.totalPickupCash.plus(row.pickupCashAmount ?? 0);
     if (row.paymentStatus === "CLEAR") sum.clearCount += 1;
     else if (row.paymentStatus === "UNCLEARED") sum.unclearedCount += 1;
     else sum.overpaidCount += 1;
     return sum;
-  }, { totalSettlement: zero(), totalCashReceived: zero(), totalTransferReceived: zero(), totalOutstanding: zero(), totalCod: zero(), totalCodQris: zero(), totalDfod: zero(), totalPickupCash: zero(), clearCount: 0, unclearedCount: 0, overpaidCount: 0 });
+  }, { totalSettlement: zero(), totalCashReceived: zero(), totalTransferReceived: zero(), totalOutstanding: zero(), totalCod: zero(), totalCodQris: zero(), totalDfod: zero(), clearCount: 0, unclearedCount: 0, overpaidCount: 0 });
 }
 
 export async function listDeliverySettlements(input: Scope & {
@@ -596,29 +581,7 @@ export async function listDeliverySettlements(input: Scope & {
     },
     include: paymentInclude, orderBy: [{ operationalDate: "desc" }, { courierName: "asc" }, { id: "desc" }],
   });
-  const pickupRows = candidates.length === 0 ? [] : await prisma.masterPickup.findMany({
-    where: {
-      tenantId: input.tenantId,
-      outletId: input.outletId,
-      operationalDate: { in: [...new Map(candidates.map((row) => [row.operationalDate.toISOString(), row.operationalDate])).values()] },
-    },
-    select: {
-      operationalDate: true,
-      staffName: true,
-      freightAmount: true,
-      rawPickup: { select: { settlementRaw: true } },
-    },
-  });
-  const pickupByTeam = new Map<string, Prisma.Decimal>();
-  for (const pickup of pickupRows) {
-    if (normalizeComparison(pickup.rawPickup.settlementRaw) !== "TUNAI") continue;
-    const key = pickupAggregationKey(pickup.operationalDate, pickup.staffName);
-    pickupByTeam.set(key, (pickupByTeam.get(key) ?? zero()).plus(pickup.freightAmount));
-  }
-  const filtered = candidates.map((row) => mapMaster(
-    row,
-    pickupByTeam.get(pickupAggregationKey(row.operationalDate, row.courierName)) ?? zero(),
-  ))
+  const filtered = candidates.map(mapMaster)
     .filter((row) => !input.paymentStatus || row.paymentStatus === input.paymentStatus)
     .filter((row) => !input.paymentMethod || row.paymentMethodSummary === input.paymentMethod);
   const summary = summarizeDeliveryRows(filtered);
@@ -631,7 +594,6 @@ export async function listDeliverySettlements(input: Scope & {
       totalTransferReceived: summary.totalTransferReceived.toString(), totalOutstanding: summary.totalOutstanding.toString(),
       totalCod: summary.totalCod.toString(), totalCodQris: summary.totalCodQris.toString(),
       totalCodCash: summary.totalCod.toString(),
-      totalPickupCash: summary.totalPickupCash.toString(),
       totalDfod: summary.totalDfod.toString(), courierCount: filtered.length,
       clearCount: summary.clearCount, unclearedCount: summary.unclearedCount, overpaidCount: summary.overpaidCount,
     },
@@ -640,19 +602,7 @@ export async function listDeliverySettlements(input: Scope & {
 
 export async function getDeliverySettlement(scope: Scope, id: string) {
   const row = await prisma.masterSetoran.findFirst({ where: { id, ...scope }, include: paymentInclude });
-  if (!row) return null;
-  const pickups = await prisma.masterPickup.findMany({
-    where: { ...scope, operationalDate: row.operationalDate },
-    select: { staffName: true, freightAmount: true, rawPickup: { select: { settlementRaw: true } } },
-  });
-  const pickupCash = pickups.reduce(
-    (sum, pickup) => normalizeComparison(pickup.staffName) === row.courierKey &&
-      normalizeComparison(pickup.rawPickup.settlementRaw) === "TUNAI"
-      ? sum.plus(pickup.freightAmount)
-      : sum,
-    zero(),
-  );
-  return mapMaster(row, pickupCash);
+  return row ? mapMaster(row) : null;
 }
 
 export async function adjustDeliverySettlement(
