@@ -18,7 +18,8 @@ import {
 
 type Row = {
   id: string; updatedAt: string; operationalDate: string; courierName: string;
-  dfodAmount: string; codCashAmount: string; codQrisAmount: string; totalSettlement: string;
+  dfodAmount: string; codCashAmount: string; codCashOnlyAmount: string;
+  codQrisAmount: string; totalSettlement: string;
   cashPaidAmount: string; transferPaidAmount: string; totalReceived: string;
   outstandingAmount: string; overpaidAmount: string;
   paymentStatus: "UNCLEARED" | "CLEAR" | "OVERPAID";
@@ -94,8 +95,17 @@ export function DeliverySettlementClient({ outletCode }: { outletCode: string })
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ operationalDate: syncDate }),
       });
+      const body = await response.json();
       if (!response.ok) throw new Error();
-      setNotice({ tone: "success", text: "Delivery Settlement berhasil disinkronkan." });
+      const cod = body.data?.cod ?? {};
+      const successText = [
+        "Delivery Settlement berhasil disinkronkan:",
+        `diterima ${cod.fetched ?? 0}`,
+        `unik ${cod.unique ?? 0}`,
+        `dibuat ${cod.created ?? 0}`,
+        `diperbarui ${cod.updated ?? 0}`,
+        `duplikat diabaikan ${cod.duplicateIgnored ?? 0}`,
+      ].join(" · ");
       if (usedFallbackDate) {
         const refreshedQuery = new URLSearchParams({
           page: "1",
@@ -109,6 +119,7 @@ export function DeliverySettlementClient({ outletCode }: { outletCode: string })
       } else {
         await load();
       }
+      setNotice({ tone: "success", text: successText });
     } catch { setNotice({ tone: "error", text: "Sinkronisasi gagal. Data lama tetap dipertahankan." }); }
     finally { setSyncing(false); }
   }
@@ -192,12 +203,12 @@ export function DeliverySettlementClient({ outletCode }: { outletCode: string })
     </div>
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="overflow-x-auto"><table className="min-w-[1500px] w-full text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr>{["Waktu Diperbarui","Tanggal","Nama Kurir","DFOD","COD Tunai","COD QRIS","Total Setoran","Bayar Tunai","Total Transfer","Total Diterima","Belum Bayar","Status","Aksi"].map((item) => <th key={item} className="px-4 py-3">{item}</th>)}</tr></thead>
-      <tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan={13} className="py-14 text-center text-slate-500"><LoaderCircle className="mx-auto mb-2 animate-spin" />Memuat data…</td></tr> : rows.length === 0 ? <tr><td colSpan={13} className="py-14 text-center text-slate-500"><Truck className="mx-auto mb-2" />Belum ada Delivery Settlement.</td></tr> : rows.map((row) => <tr key={row.id} className="hover:bg-slate-50"><td className="px-4 py-3">{dateTime(row.updatedAt)}</td><td className="px-4 py-3">{date(row.operationalDate)}</td><td className="px-4 py-3 font-semibold">{row.courierName}</td>{[row.dfodAmount,row.codCashAmount,row.codQrisAmount,row.totalSettlement,row.cashPaidAmount,row.transferPaidAmount,row.totalReceived,row.outstandingAmount].map((amount, index) => <td key={index} className="px-4 py-3 tabular-nums">{money(amount)}</td>)}<td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${row.paymentStatus === "CLEAR" ? "bg-emerald-100 text-emerald-700" : row.paymentStatus === "OVERPAID" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-800"}`}>{row.paymentStatus === "CLEAR" ? "Clear" : row.paymentStatus === "OVERPAID" ? "Lebih Bayar" : "Belum Clear"}</span></td><td className="px-4 py-3"><button onClick={() => open(row)} className="font-semibold text-blue-600 hover:text-blue-800">Penyesuaian</button></td></tr>)}</tbody></table></div>
+      <tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan={13} className="py-14 text-center text-slate-500"><LoaderCircle className="mx-auto mb-2 animate-spin" />Memuat data…</td></tr> : rows.length === 0 ? <tr><td colSpan={13} className="py-14 text-center text-slate-500"><Truck className="mx-auto mb-2" />Belum ada Delivery Settlement.</td></tr> : rows.map((row) => <tr key={row.id} className="hover:bg-slate-50"><td className="px-4 py-3">{dateTime(row.updatedAt)}</td><td className="px-4 py-3">{date(row.operationalDate)}</td><td className="px-4 py-3 font-semibold">{row.courierName}</td>{[row.dfodAmount,row.codCashOnlyAmount,row.codQrisAmount,row.totalSettlement,row.cashPaidAmount,row.transferPaidAmount,row.totalReceived,row.outstandingAmount].map((amount, index) => <td key={index} className="px-4 py-3 tabular-nums">{money(amount)}</td>)}<td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${row.paymentStatus === "CLEAR" ? "bg-emerald-100 text-emerald-700" : row.paymentStatus === "OVERPAID" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-800"}`}>{row.paymentStatus === "CLEAR" ? "Clear" : row.paymentStatus === "OVERPAID" ? "Lebih Bayar" : "Belum Clear"}</span></td><td className="px-4 py-3"><button onClick={() => open(row)} className="font-semibold text-blue-600 hover:text-blue-800">Penyesuaian</button></td></tr>)}</tbody></table></div>
       <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-sm text-slate-600"><span>{pagination.total} transaksi</span><div className="flex gap-2"><button disabled={page <= 1} onClick={() => setPage((value) => value - 1)} className="rounded-lg border px-3 py-1.5 disabled:opacity-40">Sebelumnya</button><span className="px-2 py-1.5">{page} / {Math.max(1, pagination.totalPages)}</span><button disabled={page >= pagination.totalPages} onClick={() => setPage((value) => value + 1)} className="rounded-lg border px-3 py-1.5 disabled:opacity-40">Berikutnya</button></div></div>
     </div>
     {selected && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4"><div role="dialog" aria-modal="true" aria-label="Setor Kurir" className="max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
       <div className="flex items-start justify-between border-b px-6 py-5"><div><p className="text-sm font-semibold text-blue-600">Delivery Settlement</p><h2 className="text-2xl font-bold">Setor Kurir</h2><p className="text-sm text-slate-500">Rincian penerimaan dan pembayaran setoran harian.</p></div><button aria-label="Tutup modal" onClick={() => setSelected(null)}><X /></button></div>
-      <div className="grid gap-6 p-6 lg:grid-cols-2"><div className="space-y-5"><section className="rounded-2xl bg-slate-50 p-5"><h3 className="font-bold">Ringkasan Kurir</h3><dl className="mt-4 grid grid-cols-2 gap-4 text-sm">{[["Tanggal",date(selected.operationalDate)],["Nama Kurir",selected.courierName],["DFOD",money(selected.dfodAmount)],["COD Cash",money(selected.codCashAmount)],["COD QRIS",money(selected.codQrisAmount)]].map(([label,value]) => <div key={label}><dt className="text-slate-500">{label}</dt><dd className="mt-1 font-semibold">{value}</dd></div>)}</dl></section>
+      <div className="grid gap-6 p-6 lg:grid-cols-2"><div className="space-y-5"><section className="rounded-2xl bg-slate-50 p-5"><h3 className="font-bold">Ringkasan Kurir</h3><dl className="mt-4 grid grid-cols-2 gap-4 text-sm">{[["Tanggal",date(selected.operationalDate)],["Nama Kurir",selected.courierName],["DFOD",money(selected.dfodAmount)],["COD Tunai",money(selected.codCashOnlyAmount)],["COD QRIS",money(selected.codQrisAmount)]].map(([label,value]) => <div key={label}><dt className="text-slate-500">{label}</dt><dd className="mt-1 font-semibold">{value}</dd></div>)}</dl></section>
       <section><h3 className="font-bold">Form Pembayaran</h3>
       <label className="mt-4 block text-sm font-medium">Status<select value={adjustmentStatus} onChange={(event) => { const status = event.target.value as "BELUM_BAYAR" | "SUDAH_BAYAR"; setAdjustmentStatus(status); setAdjustmentError(""); setConfirmCancellation(false); if (status === "BELUM_BAYAR") { setCash("0"); setTransfers([]); } }} className="mt-1 w-full rounded-xl border px-3 py-2.5"><option value="BELUM_BAYAR">Belum Bayar</option><option value="SUDAH_BAYAR">Sudah Bayar</option></select></label>
       {adjustmentStatus === "BELUM_BAYAR" && Number(selected.totalReceived) > 0 && <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Mengubah status menjadi Belum Bayar akan membatalkan pembayaran settlement Delivery sebelumnya dan mengembalikan nominal ke Delivery Outstanding.</div>}

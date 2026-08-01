@@ -6,6 +6,11 @@ import { createAutomaticCashMovement, voidAutomaticCashMovements } from "@/modul
 import { fetchDeliverySource, DeliverySourceError } from "./delivery-settlement.client";
 import { codRecordSchema, dispatchRecordSchema } from "./delivery-settlement.validation";
 import { selectLatestDispatchRecords } from "./dispatch-deduplication";
+import {
+  codSourceKey,
+  deduplicateCodEnvelope,
+  selectLatestCodRecords,
+} from "./cod-deduplication";
 
 type Scope = { tenantId: string; outletId: string };
 type Context = Scope & { actorId: string };
@@ -29,10 +34,6 @@ export function sourceHash(value: unknown) {
 
 export function normalizeComparison(value: string | null | undefined) {
   return (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID");
-}
-
-function sourceKey(prefix: "dispatch" | "cod", parts: Array<string | number | null | undefined>) {
-  return `v1:${prefix}:${parts.map((part) => String(part ?? "").trim()).join(":")}`;
 }
 
 function parseSourceDate(value: string) {
@@ -78,11 +79,16 @@ export function aggregateDeliveryRecords(
   const aggregates = new Map<string, Aggregate>();
   let anomaly = 0;
   const get = (name: string | null) => {
-    const courierKey = normalizeComparison(name);
-    if (!courierKey) return null;
+    const courierKey = normalizeComparison(name) || "TEAM BELUM TERPETAKAN";
     const existing = aggregates.get(courierKey);
     if (existing) return existing;
-    const created = { courierKey, courierName: name!.trim().replace(/\s+/g, " "), dfod: zero(), codCash: zero(), codQris: zero() };
+    const created = {
+      courierKey,
+      courierName: normalizeComparison(name)
+        ? name!.trim().replace(/\s+/g, " ")
+        : "Team Belum Terpetakan",
+      dfod: zero(), codCash: zero(), codQris: zero(),
+    };
     aggregates.set(courierKey, created);
     return created;
   };
@@ -90,20 +96,24 @@ export function aggregateDeliveryRecords(
   for (const row of dispatches) {
     if (normalizeComparison(row.deliveryStatusRaw) !== "PENERIMAAN NORMAL") continue;
     const target = get(row.courierNameRaw);
-    if (!target) anomaly += 1;
-    else target.dfod = target.dfod.plus(row.freightAmount);
+    target.dfod = target.dfod.plus(row.freightAmount);
   }
   for (const row of cods) {
     const target = get(row.courierNameRaw);
-    if (!target) {
+    const label = normalizeComparison(row.repaymentTypeLabel);
+    const recognized = row.repaymentTypeCode === null
+      ? Boolean(label)
+      : [0, 1, 2, 3].includes(row.repaymentTypeCode);
+    if (!recognized) {
       anomaly += 1;
       continue;
     }
-    const label = normalizeComparison(row.repaymentTypeLabel);
-    if (row.repaymentTypeCode === 2 || label === "QRIS COD") target.codQris = target.codQris.plus(row.codAmount);
-    else if (row.repaymentTypeCode === 0 || row.repaymentTypeCode === 1 || (row.repaymentTypeCode === null && label && label !== "QRIS COD")) {
-      target.codCash = target.codCash.plus(row.codAmount);
-    } else anomaly += 1;
+    // codCash is the existing persistence field for total COD obligation.
+    // QRIS is a reporting subset and must not be added to COD a second time.
+    target.codCash = target.codCash.plus(row.codAmount);
+    if (row.repaymentTypeCode === 2 || label === "QRIS COD") {
+      target.codQris = target.codQris.plus(row.codAmount);
+    }
   }
   return { rows: [...aggregates.values()], anomaly };
 }
@@ -137,7 +147,7 @@ export async function syncDeliverySettlement(
       fetchSource("/jfs-cod", operationalDate),
     ]);
     let dispatchCreated = 0, dispatchUpdated = 0, dispatchUnchanged = 0, dispatchInactive = 0;
-    let codCreated = 0, codUpdated = 0, duplicate = 0, anomaly = 0;
+    let codCreated = 0, codUpdated = 0, codUnchanged = 0, duplicate = 0, anomaly = 0;
     const parsedDispatches: DispatchSourceRecord[] = [];
     for (const rawValue of dispatchEnvelope.data) {
       const parsed = dispatchRecordSchema.safeParse(rawValue);
@@ -147,6 +157,15 @@ export async function syncDeliverySettlement(
     const uniqueDispatches = deduplicateDispatchEnvelope(parsedDispatches);
     const dispatchOverlapDuplicate = parsedDispatches.length - uniqueDispatches.length;
     duplicate += dispatchOverlapDuplicate;
+    const parsedCods: ReturnType<typeof codRecordSchema.parse>[] = [];
+    for (const rawValue of codEnvelope.data) {
+      const parsed = codRecordSchema.safeParse(rawValue);
+      if (parsed.success) parsedCods.push(parsed.data);
+      else anomaly += 1;
+    }
+    const uniqueCods = deduplicateCodEnvelope(parsedCods);
+    const codOverlapDuplicate = parsedCods.length - uniqueCods.length;
+    duplicate += codOverlapDuplicate;
 
     await prisma.$transaction(async (tx) => {
       const missingDispatches = await tx.rawDispatch.updateMany({
@@ -209,13 +228,10 @@ export async function syncDeliverySettlement(
         }
       }
 
-      for (const rawValue of codEnvelope.data) {
-        const parsed = codRecordSchema.safeParse(rawValue);
-        if (!parsed.success) { anomaly += 1; continue; }
-        const record = parsed.data;
+      for (const record of uniqueCods) {
         const typeCode = record.repaymentTypeCode ?? (typeof record.repaymentType === "number" ? record.repaymentType : null);
         const typeLabel = record.repaymentTypeLabel ?? (typeof record.repaymentType === "string" ? record.repaymentType : null);
-        const key = sourceKey("cod", [record.waybillNo, typeCode, record.signTime]);
+        const key = codSourceKey(record.waybillNo);
         const hash = sourceHash(record);
         const existing = await tx.rawCod.findUnique({ where: { tenantId_outletId_sourceRecordKey: {
           tenantId: context.tenantId, outletId: context.outletId, sourceRecordKey: key,
@@ -237,6 +253,7 @@ export async function syncDeliverySettlement(
           codCreated += 1;
         } else if (existing.sourceRecordHash === hash) {
           await tx.rawCod.update({ where: { id: existing.id }, data: { sourceFetchedAt: startedAt, syncedAt: new Date(), lastSeenRunId: run.id } });
+          codUnchanged += 1;
           duplicate += 1;
         } else {
           await tx.rawCod.update({ where: { id: existing.id }, data: common });
@@ -249,7 +266,8 @@ export async function syncDeliverySettlement(
         tx.rawCod.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED" } }),
       ]);
       const dispatches = selectLatestDispatchRecords(dispatchVersions);
-      const aggregate = aggregateDeliveryRecords(dispatches, cods);
+      const finalCods = selectLatestCodRecords(cods);
+      const aggregate = aggregateDeliveryRecords(dispatches, finalCods);
       anomaly += aggregate.anomaly;
       for (const candidate of aggregate.rows) {
         const total = candidate.dfod.plus(candidate.codCash);
@@ -262,7 +280,26 @@ export async function syncDeliverySettlement(
             tenantId: context.tenantId, outletId: context.outletId, operationalDate: date,
             courierKey: candidate.courierKey, courierName: candidate.courierName,
             dfodAmount: candidate.dfod, codCashAmount: candidate.codCash, codQrisAmount: candidate.codQris,
-            totalSettlementAmount: total, sourceFetchedFrom: startedAt, sourceFetchedTo: new Date(),
+            totalSettlementAmount: total, normalizationVersion: 2,
+            sourceFetchedFrom: startedAt, sourceFetchedTo: new Date(),
+          } });
+        } else if (existing.normalizationVersion < 2) {
+          await tx.masterSetoran.update({ where: { id: existing.id }, data: {
+            courierName: candidate.courierName, dfodAmount: candidate.dfod,
+            codCashAmount: candidate.codCash, codQrisAmount: candidate.codQris,
+            totalSettlementAmount: total, previousObligationAmount: existing.totalSettlementAmount,
+            needsReview: false, proposedDfodAmount: null, proposedCodCashAmount: null,
+            proposedCodQrisAmount: null, proposedObligationAmount: null,
+            reviewDecision: null, reviewedAt: null, reviewedByUserId: null,
+            normalizationVersion: 2, obligationVersion: { increment: 1 },
+            sourceFetchedTo: new Date(),
+          } });
+          await tx.auditLog.create({ data: {
+            tenantId: context.tenantId, outletId: context.outletId, actorId: context.actorId,
+            action: "UPDATE", entityType: "DELIVERY_SETTLEMENT_COD_DEDUPLICATED",
+            entityId: existing.id, metadata: {
+              previous: existing.totalSettlementAmount.toString(), current: total.toString(),
+            },
           } });
         } else if (total.lessThan(existing.totalSettlementAmount)) {
           await tx.masterSetoran.update({ where: { id: existing.id }, data: {
@@ -305,6 +342,10 @@ export async function syncDeliverySettlement(
         dispatchUniqueWaybillCount: uniqueDispatches.length,
         dispatchOverlapDuplicateCount: dispatchOverlapDuplicate,
         dispatchUnchangedCount: dispatchUnchanged,
+        codAcceptedCount: parsedCods.length,
+        codUniqueWaybillCount: uniqueCods.length,
+        codOverlapDuplicateCount: codOverlapDuplicate,
+        codUnchangedCount: codUnchanged,
       },
     } });
     await prisma.auditLog.create({ data: {
@@ -324,7 +365,11 @@ export async function syncDeliverySettlement(
         duplicateIgnored: dispatchOverlapDuplicate,
         inactiveVersions: dispatchInactive,
       },
-      cod: { fetched: codEnvelope.total, created: codCreated, updated: codUpdated },
+      cod: {
+        fetched: codEnvelope.total, accepted: parsedCods.length,
+        unique: uniqueCods.length, created: codCreated, updated: codUpdated,
+        unchanged: codUnchanged, duplicateIgnored: codOverlapDuplicate,
+      },
       duplicate, anomaly,
     };
   } catch (error) {
@@ -379,6 +424,7 @@ function mapMaster(row: Prisma.MasterSetoranGetPayload<{ include: typeof payment
     id: row.id, updatedAt: row.updatedAt, operationalDate: row.operationalDate,
     courierName: row.courierName, dfodAmount: row.dfodAmount.toString(),
     codCashAmount: row.codCashAmount.toString(), codQrisAmount: row.codQrisAmount.toString(),
+    codCashOnlyAmount: row.codCashAmount.minus(row.codQrisAmount).toString(),
     totalSettlement: row.totalSettlementAmount.toString(),
     cashPaidAmount: financial.cashPaidAmount.toString(), transferPaidAmount: financial.transferPaidAmount.toString(),
     totalReceived: financial.totalReceived.toString(), remainingAmount: financial.remainingAmount.toString(),

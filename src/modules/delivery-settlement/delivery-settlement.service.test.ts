@@ -13,6 +13,11 @@ import {
   summarizeDeliveryRows,
 } from "./delivery-settlement.service";
 import {
+  codSourceKey,
+  deduplicateCodEnvelope,
+  selectLatestCodRecords,
+} from "./cod-deduplication";
+import {
   codRecordSchema,
   deliveryAdjustmentSchema,
   deliverySettlementListSchema,
@@ -45,6 +50,34 @@ describe("Delivery Settlement aggregation", () => {
     expect(result.find((row) => row.waybillNo === "WB1"))
       .toMatchObject({ waktu: "2026-07-31 12:00:00", status: "Penerimaan Normal" });
   });
+
+  it("deduplicates COD envelope by waybill even when repayment type changes", () => {
+    const records = [
+      codRecordSchema.parse({ waybillNo: "WB1", codAmount: 100000, repaymentStatus: 1, repaymentType: 0, repaymentTypeCode: 0, signTime: "2026-07-31 10:00:00", dispatchStaffName: "A" }),
+      codRecordSchema.parse({ waybillNo: "WB1", codAmount: 100000, repaymentStatus: 1, repaymentType: 1, repaymentTypeCode: 1, signTime: "2026-07-31 10:00:00", dispatchStaffName: "A" }),
+    ];
+    expect(deduplicateCodEnvelope(records)).toEqual([records[1]]);
+    expect(codSourceKey(records[0].waybillNo)).toBe(codSourceKey(records[1].waybillNo));
+  });
+
+  it("selects one final RawCod version so dispatch multiplicity cannot double COD", () => {
+    const base = {
+      waybillNo: "WB1", courierNameRaw: "A", repaymentTypeLabel: "COD",
+      codAmount: d(100000), signedAt: new Date("2026-07-31T03:00:00Z"),
+      createdAt: new Date("2026-07-31T04:00:00Z"),
+    };
+    const final = selectLatestCodRecords([
+      { ...base, id: "old", repaymentTypeCode: 0, sourceFetchedAt: new Date("2026-07-31T05:00:00Z"), updatedAt: new Date("2026-07-31T05:00:00Z") },
+      { ...base, id: "new", repaymentTypeCode: 1, sourceFetchedAt: new Date("2026-07-31T06:00:00Z"), updatedAt: new Date("2026-07-31T06:00:00Z") },
+    ]);
+    const dispatches = [
+      { courierNameRaw: "A", deliveryStatusRaw: "Penerimaan Normal", freightAmount: d(0) },
+      { courierNameRaw: "A", deliveryStatusRaw: "Penerimaan Normal", freightAmount: d(0) },
+    ];
+    const result = aggregateDeliveryRecords(dispatches, final);
+    expect(final).toHaveLength(1);
+    expect(result.rows[0].codCash.toString()).toBe("100000");
+  });
   it("normalizes courier identity without fuzzy matching", () => {
     expect(normalizeComparison("  Ridwan   Kusnawan ")).toBe("RIDWAN KUSNAWAN");
     expect(normalizeComparison("Ridwan K.")).not.toBe(normalizeComparison("Ridwan Kusnawan"));
@@ -70,9 +103,9 @@ describe("Delivery Settlement aggregation", () => {
       { courierNameRaw: "RIDWAN", repaymentTypeCode: 1, repaymentTypeLabel: "COD", codAmount: d(400000) },
       { courierNameRaw: "RIDWAN", repaymentTypeCode: 2, repaymentTypeLabel: "Qris COD", codAmount: d(108813) },
     ]);
-    expect(result.rows[0].codCash.toString()).toBe("800000");
+    expect(result.rows[0].codCash.toString()).toBe("908813");
     expect(result.rows[0].codQris.toString()).toBe("108813");
-    expect(result.rows[0].dfod.plus(result.rows[0].codCash).toString()).toBe("800000");
+    expect(result.rows[0].dfod.plus(result.rows[0].codCash).toString()).toBe("908813");
   });
 
   it("uses normalized TYPE label when a known code is unavailable", () => {
@@ -81,17 +114,18 @@ describe("Delivery Settlement aggregation", () => {
       { courierNameRaw: "A", repaymentTypeCode: null, repaymentTypeLabel: "Tunai", codAmount: d(20) },
     ]);
     expect(result.rows[0].codQris.toString()).toBe("10");
-    expect(result.rows[0].codCash.toString()).toBe("20");
+    expect(result.rows[0].codCash.toString()).toBe("30");
   });
 
-  it("marks unknown and missing courier identities as anomalies", () => {
+  it("keeps missing couriers under Team Belum Terpetakan and rejects unknown COD type", () => {
     const result = aggregateDeliveryRecords(
       [{ courierNameRaw: "", deliveryStatusRaw: "Penerimaan Normal", freightAmount: d(10) }],
       [{ courierNameRaw: "A", repaymentTypeCode: 9, repaymentTypeLabel: null, codAmount: d(20) }],
     );
-    expect(result.anomaly).toBe(2);
+    expect(result.anomaly).toBe(1);
     expect(result.rows[0].codCash.toString()).toBe("0");
     expect(result.rows[0].codQris.toString()).toBe("0");
+    expect(result.rows.find((row) => row.courierKey === "TEAM BELUM TERPETAKAN")?.dfod.toString()).toBe("10");
   });
 
   it("groups normalized courier names and keeps distinct identities separate", () => {
@@ -106,6 +140,20 @@ describe("Delivery Settlement aggregation", () => {
 });
 
 describe("Delivery Settlement financial calculation", () => {
+  it("keeps QRIS as a subset of total COD instead of adding it twice", () => {
+    const summary = summarizeDeliveryRows([{
+      totalSettlement: "150000", cashPaidAmount: "50000",
+      transferPaidAmount: "25000", outstandingAmount: "75000",
+      codCashAmount: "100000", codQrisAmount: "20000", dfodAmount: "50000",
+      paymentStatus: "UNCLEARED",
+    }]);
+    expect(summary.totalCod.toString()).toBe("100000");
+    expect(summary.totalCodQris.toString()).toBe("20000");
+    expect(summary.totalSettlement.toString()).toBe("150000");
+    expect(summary.totalCashReceived.plus(summary.totalTransferReceived).toString()).toBe("75000");
+    expect(summary.totalOutstanding.toString()).toBe("75000");
+  });
+
   it("sums COD cash, COD QRIS, and DFOD across all filtered rows", () => {
     const base = {
       totalSettlement: "0", cashPaidAmount: "0", transferPaidAmount: "0",
