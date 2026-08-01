@@ -61,4 +61,16 @@ describe("Cashflow JFS cron", () => {
   ])("at Jakarta 02:00 for %s synchronizes previous date %s", (now, expected) => {
     expect(previousJakartaCashflowDate(new Date(now))).toBe(expected);
   });
+
+  it("imports the pure cron core while the Next.js service keeps its server-only boundary", async () => {
+    const [script, service, core] = await Promise.all([
+      import("node:fs/promises").then(({ readFile }) => readFile(new URL("./sync-jfs-cashflow.ts", import.meta.url), "utf8")),
+      import("node:fs/promises").then(({ readFile }) => readFile(new URL("../src/modules/finance/jfs-cashflow.service.ts", import.meta.url), "utf8")),
+      import("node:fs/promises").then(({ readFile }) => readFile(new URL("../src/modules/finance/jfs-cashflow.core.ts", import.meta.url), "utf8")),
+    ]);
+    expect(script).toContain("jfs-cashflow.core");
+    expect(script).not.toContain("jfs-cashflow.service");
+    expect(service).toContain('import "server-only"');
+    expect(core).not.toContain('import "server-only"');
+  });
 });

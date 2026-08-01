@@ -1,5 +1,5 @@
 import { prisma } from "../src/lib/db/prisma";
-import { runJfsCashflowSync } from "../src/modules/finance/jfs-cashflow.service";
+import { runJfsCashflowSync } from "../src/modules/finance/jfs-cashflow.core";
 
 type CronOutlet = { id: string; tenantId: string; code: string };
 type CronDependencies = {
@@ -69,12 +69,15 @@ export async function runJfsCashflowCron(
 }
 
 if (process.env.NODE_ENV !== "test") {
+  const dryRun = process.env.CASHFLOW_JFS_CRON_DRY_RUN === "1";
   await runJfsCashflowCron(parseCashflowOutletIds(process.env.CASHFLOW_JFS_OUTLET_IDS), {
-    listOutlets: (ids) => prisma.outlet.findMany({
-      where: { id: { in: ids }, isActive: true, tenant: { status: "ACTIVE" } },
-      select: { id: true, tenantId: true, code: true },
-      orderBy: [{ tenantId: "asc" }, { code: "asc" }],
-    }),
+    listOutlets: dryRun
+      ? async () => []
+      : (ids) => prisma.outlet.findMany({
+          where: { id: { in: ids }, isActive: true, tenant: { status: "ACTIVE" } },
+          select: { id: true, tenantId: true, code: true },
+          orderBy: [{ tenantId: "asc" }, { code: "asc" }],
+        }),
     syncOutlet: runJfsCashflowSync,
     disconnect: () => prisma.$disconnect(),
     log: console.log,
