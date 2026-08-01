@@ -4,6 +4,22 @@ export const canonicalCodWaybill = (value: string | null | undefined) =>
 export const codSourceKey = (waybill: string) =>
   `v2:cod:${waybill.trim()}`;
 
+export type CodSettlementCategory = "COD_CASH" | "COD_QRIS" | "EXCLUDED";
+
+export function classifyCodSettlement(record: {
+  repaymentTypeCode: number | null;
+  repaymentTypeLabel: string | null;
+}): CodSettlementCategory {
+  const label = (record.repaymentTypeLabel ?? "")
+    .normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleUpperCase("id-ID");
+  if (record.repaymentTypeCode === 2 || label === "QRIS COD") return "COD_QRIS";
+  if (record.repaymentTypeCode === 1 || record.repaymentTypeCode === 3 ||
+    (record.repaymentTypeCode === null && ["COD", "COD TUNAI", "TUNAI"].includes(label))) {
+    return "COD_CASH";
+  }
+  return "EXCLUDED";
+}
+
 export function deduplicateCodEnvelope<T extends {
   waybillNo: string;
   signTime: string;

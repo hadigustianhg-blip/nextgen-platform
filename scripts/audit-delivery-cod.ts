@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import {
   canonicalCodWaybill,
+  classifyCodSettlement,
   selectLatestCodRecords,
 } from "../src/modules/delivery-settlement/cod-deduplication";
 
@@ -88,8 +89,7 @@ try {
     (sum, row) => sum.plus(row.codAmount),
     new Prisma.Decimal(0),
   );
-  const qris = (row: typeof rows[number]) =>
-    row.repaymentTypeCode === 2 || normalized(row.repaymentTypeLabel) === "QRIS COD";
+  const category = (row: typeof rows[number]) => classifyCodSettlement(row);
   const duplicates = [...groups.entries()].filter(([, versions]) => versions.length > 1);
   const payment = settlements.reduce((result, settlement) => {
     result.obligation = result.obligation.plus(settlement.totalSettlementAmount);
@@ -108,8 +108,8 @@ try {
       : sum,
     new Prisma.Decimal(0),
   );
-  const codQrisTotal = total(finalRows.filter(qris));
-  const codTotal = total(finalRows.filter((row) => !qris(row)));
+  const codQrisTotal = total(finalRows.filter((row) => category(row) === "COD_QRIS"));
+  const codTotal = total(finalRows.filter((row) => category(row) === "COD_CASH"));
   const pickupCashTotal = pickups.reduce(
     (sum, row) => normalized(row.rawPickup.settlementRaw) === "TUNAI"
       ? sum.plus(row.freightAmount)

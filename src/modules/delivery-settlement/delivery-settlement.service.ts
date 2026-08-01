@@ -7,6 +7,7 @@ import { fetchDeliverySource, DeliverySourceError } from "./delivery-settlement.
 import { codRecordSchema, dispatchRecordSchema } from "./delivery-settlement.validation";
 import { selectLatestDispatchRecords } from "./dispatch-deduplication";
 import {
+  classifyCodSettlement,
   codSourceKey,
   deduplicateCodEnvelope,
   selectLatestCodRecords,
@@ -15,6 +16,12 @@ import {
 type Scope = { tenantId: string; outletId: string };
 type Context = Scope & { actorId: string };
 type SourceFetcher = typeof fetchDeliverySource;
+
+class DeliverySourceStageError extends Error {
+  constructor(readonly stage: "FETCH_DISPATCH" | "FETCH_COD", options: { cause: unknown }) {
+    super("Delivery source request failed", options);
+  }
+}
 
 const zero = () => new Prisma.Decimal(0);
 const decimal = (value: string | number | Prisma.Decimal) => new Prisma.Decimal(String(value));
@@ -73,6 +80,29 @@ type Aggregate = {
   codQris: Prisma.Decimal;
 };
 
+export function deliverySyncFailureDiagnostic(input: {
+  requestId: string;
+  stage: string;
+  error: unknown;
+  tenantId: string;
+  outletId: string;
+  businessDate: string;
+}) {
+  return {
+    requestId: input.requestId,
+    stage: input.stage,
+    errorCode: input.error instanceof DeliverySourceError || input.error instanceof DeliverySourceStageError
+      ? "UPSTREAM_ERROR"
+      : "INTERNAL_ERROR",
+    prismaCode: input.error instanceof Prisma.PrismaClientKnownRequestError
+      ? input.error.code
+      : null,
+    tenantId: input.tenantId,
+    outletId: input.outletId,
+    businessDate: input.businessDate,
+  };
+}
+
 export function aggregateDeliveryRecords(
   dispatches: Array<{ courierNameRaw: string | null; deliveryStatusRaw: string | null; freightAmount: Prisma.Decimal }>,
   cods: Array<{ courierNameRaw: string | null; repaymentTypeCode: number | null; repaymentTypeLabel: string | null; codAmount: Prisma.Decimal }>,
@@ -102,20 +132,16 @@ export function aggregateDeliveryRecords(
   }
   for (const row of cods) {
     const target = get(row.courierNameRaw);
-    const label = normalizeComparison(row.repaymentTypeLabel);
-    const recognized = row.repaymentTypeCode === null
-      ? Boolean(label)
-      : [0, 1, 2, 3].includes(row.repaymentTypeCode);
-    if (!recognized) {
+    const category = classifyCodSettlement(row);
+    if (category === "EXCLUDED") {
       anomaly += 1;
       continue;
     }
-    const isQris = row.repaymentTypeCode === 2 || label === "QRIS COD";
     // JFS exposes QRIS as a breakdown row. It is reported separately and must
     // never be added again to the collectible COD obligation.
-    if (isQris) {
+    if (category === "COD_QRIS") {
       target.codQris = target.codQris.plus(row.codAmount);
-    } else {
+    } else if (category === "COD_CASH") {
       target.codCash = target.codCash.plus(row.codAmount);
     }
   }
@@ -135,6 +161,8 @@ export async function syncDeliverySettlement(
   context: Context,
   options: { operationalDate?: string; fetchSource?: SourceFetcher } = {},
 ) {
+  const requestId = randomUUID();
+  let stage = "INITIALIZE";
   const operationalDate = options.operationalDate ?? todayJakarta();
   const date = new Date(`${operationalDate}T00:00:00.000Z`);
   const startedAt = new Date();
@@ -150,10 +178,15 @@ export async function syncDeliverySettlement(
 
   try {
     const fetchSource = options.fetchSource ?? fetchDeliverySource;
+    stage = "FETCH_SOURCE";
     // Both reads must finish successfully before the first financial write.
     const [dispatchEnvelope, codEnvelope] = await Promise.all([
-      fetchSource("/jfs-dispatch", operationalDate),
-      fetchSource("/jfs-cod", operationalDate),
+      fetchSource("/jfs-dispatch", operationalDate).catch((error) => {
+        throw new DeliverySourceStageError("FETCH_DISPATCH", { cause: error });
+      }),
+      fetchSource("/jfs-cod", operationalDate).catch((error) => {
+        throw new DeliverySourceStageError("FETCH_COD", { cause: error });
+      }),
     ]);
     let dispatchCreated = 0, dispatchUpdated = 0, dispatchUnchanged = 0, dispatchInactive = 0;
     let codCreated = 0, codUpdated = 0, codUnchanged = 0, duplicate = 0, anomaly = 0;
@@ -176,6 +209,7 @@ export async function syncDeliverySettlement(
     const codOverlapDuplicate = parsedCods.length - uniqueCods.length;
     duplicate += codOverlapDuplicate;
 
+    stage = "NORMALIZE_AND_UPSERT";
     await prisma.$transaction(async (tx) => {
       const missingDispatches = await tx.rawDispatch.updateMany({
         where: {
@@ -270,6 +304,7 @@ export async function syncDeliverySettlement(
         }
       }
 
+      stage = "LOAD_FINAL_SOURCES";
       const [dispatchVersions, cods, pickups] = await Promise.all([
         tx.rawDispatch.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED", isActive: true } }),
         tx.rawCod.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED" } }),
@@ -284,6 +319,7 @@ export async function syncDeliverySettlement(
       ]);
       const dispatches = selectLatestDispatchRecords(dispatchVersions);
       const finalCods = selectLatestCodRecords(cods);
+      stage = "AGGREGATE_TEAM_UNION";
       const aggregate = aggregateDeliveryRecords(
         dispatches,
         finalCods,
@@ -294,6 +330,7 @@ export async function syncDeliverySettlement(
         })),
       );
       anomaly += aggregate.anomaly;
+      stage = "UPSERT_MASTER_SETORAN";
       for (const candidate of aggregate.rows) {
         const total = candidate.pickupCash.plus(candidate.dfod).plus(candidate.codCash);
         const where = { tenantId_outletId_operationalDate_courierKey: {
@@ -356,6 +393,7 @@ export async function syncDeliverySettlement(
       }
     });
 
+    stage = "COMPLETE_SYNC_RUN";
     const completedAt = new Date();
     const status: SyncRunStatus = anomaly ? "PARTIAL_SUCCESS" : "SUCCESS";
     await prisma.syncRun.update({ where: { id: run.id }, data: {
@@ -379,7 +417,7 @@ export async function syncDeliverySettlement(
       metadata: { status, dispatchFetched: dispatchEnvelope.total, codFetched: codEnvelope.total, duplicate, anomaly },
     } });
     return {
-      runId: run.id, status, startedAt, completedAt,
+      requestId, runId: run.id, status, startedAt, completedAt,
       dispatch: {
         fetched: dispatchEnvelope.total,
         accepted: parsedDispatches.length,
@@ -399,13 +437,27 @@ export async function syncDeliverySettlement(
     };
   } catch (error) {
     const completedAt = new Date();
+    const diagnostic = deliverySyncFailureDiagnostic({
+      requestId,
+      stage: error instanceof DeliverySourceStageError ? error.stage : stage,
+      error,
+      tenantId: context.tenantId,
+      outletId: context.outletId,
+      businessDate: operationalDate,
+    });
+    console.error("DELIVERY_SETTLEMENT_SYNC_FAILED", diagnostic);
     await prisma.syncRun.update({ where: { id: run.id }, data: {
       status: "FAILED", completedAt, errorMessage: "Sinkronisasi Delivery Settlement gagal.",
     } });
     await prisma.auditLog.create({ data: {
       tenantId: context.tenantId, outletId: context.outletId, actorId: context.actorId,
       action: "UPDATE", entityType: "DELIVERY_SETTLEMENT_SYNC_FAILED", entityId: run.id,
-      metadata: { errorCode: error instanceof DeliverySourceError ? "UPSTREAM_ERROR" : "INTERNAL_ERROR" },
+      metadata: {
+        requestId: diagnostic.requestId,
+        stage: diagnostic.stage,
+        errorCode: diagnostic.errorCode,
+        prismaCode: diagnostic.prismaCode,
+      },
     } });
     throw new DeliverySourceError();
   }
@@ -457,7 +509,7 @@ function mapMaster(
     courierName: row.courierName, pickupCashAmount: pickupCashAmount.toString(),
     dfodAmount: row.dfodAmount.toString(),
     codCashAmount: row.codCashAmount.toString(), codQrisAmount: row.codQrisAmount.toString(),
-    codCashOnlyAmount: row.codCashAmount.minus(row.codQrisAmount).toString(),
+    codCashOnlyAmount: row.codCashAmount.toString(),
     totalSettlement: row.totalSettlementAmount.toString(),
     cashPaidAmount: financial.cashPaidAmount.toString(), transferPaidAmount: financial.transferPaidAmount.toString(),
     totalReceived: financial.totalReceived.toString(), remainingAmount: financial.remainingAmount.toString(),
@@ -542,7 +594,7 @@ export async function listDeliverySettlements(input: Scope & {
       totalSettlement: summary.totalSettlement.toString(), totalCashReceived: summary.totalCashReceived.toString(),
       totalTransferReceived: summary.totalTransferReceived.toString(), totalOutstanding: summary.totalOutstanding.toString(),
       totalCod: summary.totalCod.toString(), totalCodQris: summary.totalCodQris.toString(),
-      totalCodCash: summary.totalCod.minus(summary.totalCodQris).toString(),
+      totalCodCash: summary.totalCod.toString(),
       totalPickupCash: summary.totalPickupCash.toString(),
       totalDfod: summary.totalDfod.toString(), courierCount: filtered.length,
       clearCount: summary.clearCount, unclearedCount: summary.unclearedCount, overpaidCount: summary.overpaidCount,
