@@ -1,109 +1,87 @@
-import { Prisma } from "@prisma/client";
 import { readFile } from "node:fs/promises";
+import { Prisma } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/db/prisma", () => ({ prisma: {} }));
 
-import { getActiveDispatchRecords } from "@/modules/delivery-settlement/active-dispatch-dataset";
-import {
-  calculateEmployeeSalary,
-  type SalaryCalculationSetting,
-} from "./salary.calculation";
+import { captureSalaryClosingSnapshots } from "./salary.snapshot.service";
 
-const d = (value: string | number) => new Prisma.Decimal(value);
-const setting: SalaryCalculationSetting = {
-  profileId: "profile-1", profileCode: "MOTORIST", profileVersion: 1,
-  basicDailySalary: d(0), fixedAllowance: d(0),
-  deliveryPerKgAmount: d(180), deliveryPerKgMinWeight: d(10), deliveryPerKgMaxWeight: d(100),
-  deliveryPerWaybillAmount: d(1800), deliveryPerWaybillMinWeight: d(1), deliveryPerWaybillMaxWeight: d(9),
-  pickupRegularRevenuePercentage: d(0), pickupRegularPerWaybillAmount: d(0),
-  pickupMarketplacePerWaybillAmount: d(0), dailyFuelMinDeliveryWaybill: 35,
-  dailyFuelAmount: d(20000), dailyExtraMinDeliveryWaybill: 35, dailyExtraAmount: d(50000),
-};
-
-const raw = (index: number, overrides: Partial<{
-  id: string; waybillNo: string; isActive: boolean; weight: number; status: string;
-  fetchedAt: Date;
-}> = {}) => ({
-  id: overrides.id ?? `dispatch-${index}`,
-  operationalDate: new Date("2026-07-31T00:00:00Z"),
-  waybillNo: overrides.waybillNo ?? `WB-${index}`,
-  courierNameRaw: "Courier A", deliveryStatusRaw: overrides.status ?? "Penerimaan Normal",
-  receiverName: null, chargeWeight: d(overrides.weight ?? 1), syncStatus: "NORMALIZED" as const,
-  isActive: overrides.isActive ?? true, sourceRecordKey: `key-${overrides.id ?? index}`,
-  sourceFetchedAt: overrides.fetchedAt ?? new Date("2026-07-31T12:00:00Z"),
-  dispatchAt: null, createdAt: new Date("2026-07-31T10:00:00Z"),
-  updatedAt: overrides.fetchedAt ?? new Date("2026-07-31T12:00:00Z"),
-});
-
-describe("Salary Closing active dispatch source", () => {
-  it("uses final active weight once and unique waybills for daily thresholds", async () => {
-    const rows = Array.from({ length: 35 }, (_, index) => raw(index));
-    rows.push(raw(0, { id: "inactive-old", isActive: false, weight: 10 }));
-    rows[0] = raw(0, { id: "active-final", weight: 12, fetchedAt: new Date("2026-07-31T13:00:00Z") });
-    const findMany = vi.fn(async (args: Prisma.RawDispatchFindManyArgs) => {
-      void args;
-      return rows;
-    });
-    const active = await getActiveDispatchRecords({
-      tenantId: "tenant-1", outletId: "outlet-1",
-      periodStart: new Date("2026-07-01T00:00:00Z"),
-      periodEnd: new Date("2026-07-31T00:00:00Z"), status: "Penerimaan Normal",
-      client: { rawDispatch: { findMany } },
-    });
-    const result = calculateEmployeeSalary({
-      pickups: [],
-      dispatches: active.map((source) => ({
-        id: source.id, sourceKey: source.sourceRecordKey,
-        employeeNameRaw: source.courierNameRaw,
-        date: source.operationalDate.toISOString().slice(0, 10),
-        waybill: source.waybillNo, status: source.deliveryStatusRaw,
-        weight: source.chargeWeight, setting,
-      })),
-    });
-    expect(findMany.mock.calls[0][0].where).toMatchObject({
-      tenantId: "tenant-1", outletId: "outlet-1",
-      syncStatus: "NORMALIZED", isActive: true,
-    });
-    expect(active).toHaveLength(35);
-    expect(active.find((source) => source.waybillNo === "WB-0")?.chargeWeight.toString()).toBe("12");
-    expect(result.dispatchCount).toBe(35);
-    expect(result.workDates).toEqual(["2026-07-31"]);
-    expect(result.sources.filter((source) => source.sourceType === "DISPATCH")).toHaveLength(35);
-    expect(result.components.find((row) => row.sourceType === "DELIVERY_PER_KG"))
-      .toMatchObject({ quantity: d(12), amount: d(2160) });
-    expect(result.components.find((row) => row.sourceType === "DAILY_FUEL")?.amount.toString()).toBe("20000");
-    expect(result.components.find((row) => row.sourceType === "DAILY_EXTRA")?.amount.toString()).toBe("50000");
+describe("Salary snapshot architecture", () => {
+  it("keeps Generate Closing isolated from operational RAW and settlement modules", async () => {
+    const [closing, snapshots, kasbon] = await Promise.all([
+      readFile(new URL("./salary.closing.service.ts", import.meta.url), "utf8"),
+      readFile(new URL("./salary.snapshot.service.ts", import.meta.url), "utf8"),
+      readFile(new URL("./salary.kasbon.service.ts", import.meta.url), "utf8"),
+    ]);
+    const production = `${closing}\n${snapshots}\n${kasbon}`;
+    expect(production).not.toMatch(/@\/modules\/(delivery-settlement|pickup-settlement|monitoring|cashflow)/);
+    expect(production).not.toMatch(/\.(rawPickup|rawDispatch|rawCod|masterSetoran)\./);
+    expect(snapshots).toContain("tx.masterPickup.findMany");
+    expect(snapshots).toContain("tx.operationalExpense.findMany");
+    expect(closing).toContain("loadSalaryOperationalSnapshots");
+    expect(kasbon).not.toContain("operationalExpense.find");
   });
 
-  it("excludes non-normal delivery status before Salary calculation", async () => {
-    const findMany = vi.fn(async (args: Prisma.RawDispatchFindManyArgs) => {
-      void args;
-      return [
-        raw(1, { status: "Belum diterima" }),
-        raw(2, { status: "Pereturan Penerimaan" }),
-      ];
-    });
-    const active = await getActiveDispatchRecords({
-      tenantId: "tenant-1", outletId: "outlet-1",
-      operationalDate: new Date("2026-07-31T00:00:00Z"),
-      status: "Penerimaan Normal", client: { rawDispatch: { findMany } },
-    });
-    expect(active).toEqual([]);
-  });
-
-  it("recalculates only DRAFT/CLOSED while preserving adjustments and Kasbon", async () => {
-    const source = await readFile(
-      new URL("./salary.closing.service.ts", import.meta.url),
+  it("persists Salary-owned snapshots and never rebuilds an existing snapshot", async () => {
+    const snapshots = await readFile(
+      new URL("./salary.snapshot.service.ts", import.meta.url),
       "utf8",
     );
-    expect(source).toContain('["DRAFT", "CLOSED"].includes(closing.status)');
-    expect(source).toContain("salaryClosingSourceRecord.deleteMany");
-    expect(source).toContain("salaryClosingComponent.deleteMany");
-    expect(source).not.toContain("salaryAdjustment.deleteMany");
-    expect(source).not.toContain("salaryKasbonAllocation.deleteMany");
-    expect(source).toContain("refreshClosingEmployeeTotals(tx, context");
-    expect(source).toContain("client: tx");
+    expect(snapshots).toContain("if (closing.snapshotCapturedAt)");
+    for (const model of [
+      "salaryEmployeeSnapshot",
+      "salaryRawPickup",
+      "salaryRawDispatch",
+      "salaryKasbonSnapshot",
+    ]) expect(snapshots).toContain(model);
+  });
+
+  it("reuses immutable snapshots without reading operational sources again", async () => {
+    const findEmployees = vi.fn().mockResolvedValue([]);
+    const masterPickupFindMany = vi.fn();
+    const operationalExpenseFindMany = vi.fn();
+    const tx = {
+      salaryEmployeeSnapshot: { findMany: findEmployees },
+      masterPickup: { findMany: masterPickupFindMany },
+      operationalExpense: { findMany: operationalExpenseFindMany },
+    } as unknown as Prisma.TransactionClient;
+    await captureSalaryClosingSnapshots(
+      tx,
+      {
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        outletId: "22222222-2222-4222-8222-222222222222",
+        actorId: "33333333-3333-4333-8333-333333333333",
+        outletCode: "SUM001A",
+      },
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        periodStart: new Date("2026-08-01T00:00:00.000Z"),
+        periodEnd: new Date("2026-08-15T00:00:00.000Z"),
+        snapshotCapturedAt: new Date("2026-08-01T12:00:00.000Z"),
+      },
+    );
+    expect(findEmployees).toHaveBeenCalledOnce();
+    expect(masterPickupFindMany).not.toHaveBeenCalled();
+    expect(operationalExpenseFindMany).not.toHaveBeenCalled();
+  });
+
+  it("adds only Salary tables and a Salary allocation snapshot link", async () => {
+    const migration = await readFile(
+      new URL(
+        "../../../prisma/migrations/20260801000200_add_salary_snapshot_architecture/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    for (const table of [
+      "SalaryEmployeeSnapshot",
+      "SalaryRawPickup",
+      "SalaryRawDispatch",
+      "SalaryKasbonSnapshot",
+      "SalaryCalculationSnapshot",
+      "SalaryAudit",
+    ]) expect(migration).toContain(`CREATE TABLE "${table}"`);
+    expect(migration).not.toMatch(/\b(TRUNCATE|DELETE FROM)\b/i);
+    expect(migration).not.toMatch(/ALTER TABLE "(Raw|Master|OperationalExpense)/);
   });
 });

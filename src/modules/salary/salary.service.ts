@@ -157,7 +157,7 @@ export async function createSalaryProfile(
           ...settingData(context, input),
         },
       });
-      await tx.auditLog.create({ data: {
+      await tx.salaryAudit.create({ data: {
         tenantId: context.tenantId,
         outletId: context.outletId,
         actorId: context.actorId,
@@ -241,7 +241,7 @@ export async function updateSalaryProfile(
       },
       update: settingData(context, input),
     });
-    await tx.auditLog.create({ data: {
+    await tx.salaryAudit.create({ data: {
       tenantId: context.tenantId,
       outletId: context.outletId,
       actorId: context.actorId,
@@ -296,7 +296,7 @@ export async function activateSalaryProfile(
       data: { status: "ACTIVE" },
       include: profileInclude,
     });
-    await tx.auditLog.create({ data: {
+    await tx.salaryAudit.create({ data: {
       tenantId: context.tenantId,
       outletId: context.outletId,
       actorId: context.actorId,
@@ -397,7 +397,7 @@ export async function createSalaryEmployeeAlias(
         normalizedAlias,
       },
     });
-    await tx.auditLog.create({
+    await tx.salaryAudit.create({
       data: {
         tenantId: context.tenantId,
         outletId: context.outletId,
@@ -434,7 +434,7 @@ export async function createSalaryEmployee(
       whatsapp: input.whatsapp || null,
       status: input.status,
     } });
-    await tx.auditLog.create({ data: {
+    await tx.salaryAudit.create({ data: {
       tenantId: context.tenantId,
       outletId: context.outletId,
       actorId: context.actorId,
@@ -491,7 +491,7 @@ export async function updateSalaryEmployee(
         status: input.status,
       },
     });
-    await tx.auditLog.create({ data: {
+    await tx.salaryAudit.create({ data: {
       tenantId: context.tenantId,
       outletId: context.outletId,
       actorId: context.actorId,
@@ -588,7 +588,7 @@ export async function assignSalaryProfile(
         where: { id: active.id },
         data: { effectiveFrom: start },
       });
-      await tx.auditLog.create({ data: {
+      await tx.salaryAudit.create({ data: {
         tenantId: context.tenantId,
         outletId: context.outletId,
         actorId: context.actorId,
@@ -633,7 +633,7 @@ export async function assignSalaryProfile(
       status: "ACTIVE",
       createdByUserId: context.actorId,
     } });
-    await tx.auditLog.create({ data: {
+    await tx.salaryAudit.create({ data: {
       tenantId: context.tenantId,
       outletId: context.outletId,
       actorId: context.actorId,
@@ -730,7 +730,7 @@ export async function createSalaryClosing(
       notes: input.notes || null,
       createdByUserId: context.actorId,
     } });
-    await tx.auditLog.create({ data: {
+    await tx.salaryAudit.create({ data: {
       tenantId: context.tenantId,
       outletId: context.outletId,
       actorId: context.actorId,
@@ -781,7 +781,7 @@ export async function createSalaryAdjustment(
       reason: input.reason,
       createdByUserId: context.actorId,
     } });
-    await tx.auditLog.create({ data: {
+    await tx.salaryAudit.create({ data: {
       tenantId: context.tenantId,
       outletId: context.outletId,
       actorId: context.actorId,
@@ -832,7 +832,7 @@ export async function voidSalaryAdjustment(
         voidReason: reason,
       },
     });
-    await tx.auditLog.create({ data: {
+    await tx.salaryAudit.create({ data: {
       tenantId: context.tenantId,
       outletId: context.outletId,
       actorId: context.actorId,

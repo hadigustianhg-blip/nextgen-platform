@@ -20,32 +20,34 @@ export async function listEligibleSalaryKasbon(
       tenantId: scope.tenantId,
       outletId: scope.outletId,
     },
-    include: {
-      salaryClosing: true,
-      employee: { include: { aliases: { where: { isActive: true } } } },
-    },
+    include: { salaryClosing: true },
   });
   if (!employee) throw new SalaryError("SALARY_SCOPE_MISMATCH", 404);
+  const employeeSnapshot = await prisma.salaryEmployeeSnapshot.findUnique({
+    where: {
+      salaryClosingId_salaryEmployeeId: {
+        salaryClosingId: closingId,
+        salaryEmployeeId: employee.employeeId,
+      },
+    },
+  });
+  if (!employeeSnapshot) throw new SalaryError("SALARY_SCOPE_MISMATCH", 404);
+  const aliases = employeeSnapshot.aliases as Array<{ aliasName: string }>;
   const acceptedNames = new Set([
-    normalizeSalaryEmployeeName(employee.employee.name),
-    ...employee.employee.aliases.map((alias) =>
+    normalizeSalaryEmployeeName(employeeSnapshot.name),
+    ...aliases.map((alias) =>
       normalizeSalaryEmployeeName(alias.aliasName)
     ),
   ]);
-  const expenses = await prisma.operationalExpense.findMany({
+  const expenses = await prisma.salaryKasbonSnapshot.findMany({
     where: {
       tenantId: scope.tenantId,
       outletId: scope.outletId,
-      operationalDate: {
-        gte: employee.salaryClosing.periodStart,
-        lte: employee.salaryClosing.periodEnd,
-      },
-      status: "VALID",
-      category: { equals: "Kasbon", mode: "insensitive" },
+      salaryClosingId: closingId,
       teamName: { not: null },
     },
     include: {
-      salaryAllocations: {
+      allocations: {
         where: { status: { in: ["DRAFT", "FINALIZED"] } },
         select: { id: true, amount: true, salaryClosingEmployeeId: true },
       },
@@ -56,7 +58,7 @@ export async function listEligibleSalaryKasbon(
     if (!acceptedNames.has(normalizeSalaryEmployeeName(expense.teamName))) {
       return [];
     }
-    const allocated = expense.salaryAllocations.reduce(
+    const allocated = expense.allocations.reduce(
       (sum, allocation) => sum.plus(allocation.amount),
       zero(),
     );
@@ -64,10 +66,11 @@ export async function listEligibleSalaryKasbon(
     return remaining.greaterThan(0)
       ? [{
         ...expense,
+        id: expense.sourceOperationalExpenseId,
         allocatedAmount: allocated,
         remainingAmount: remaining,
         matchMethod: normalizeSalaryEmployeeName(expense.teamName) ===
-          normalizeSalaryEmployeeName(employee.employee.name)
+          normalizeSalaryEmployeeName(employeeSnapshot.name)
           ? "EXACT_NAME"
           : "ALIAS",
       }]
@@ -92,32 +95,34 @@ export async function saveSalaryKasbonAllocation(
         tenantId: context.tenantId,
         outletId: context.outletId,
       },
-      include: {
-        salaryClosing: true,
-        employee: { include: { aliases: { where: { isActive: true } } } },
-      },
+      include: { salaryClosing: true },
     });
     if (!employee) throw new SalaryError("SALARY_SCOPE_MISMATCH", 404);
     if (employee.salaryClosing.status !== "CLOSED") {
       throw new SalaryError("SALARY_CLOSING_LOCKED", 409);
     }
-    const expense = await tx.operationalExpense.findFirst({
+    const employeeSnapshot = await tx.salaryEmployeeSnapshot.findUnique({
       where: {
-        id: input.operationalExpenseId,
+        salaryClosingId_salaryEmployeeId: {
+          salaryClosingId: input.closingId,
+          salaryEmployeeId: employee.employeeId,
+        },
+      },
+    });
+    if (!employeeSnapshot) throw new SalaryError("SALARY_SCOPE_MISMATCH", 404);
+    const expense = await tx.salaryKasbonSnapshot.findFirst({
+      where: {
+        salaryClosingId: input.closingId,
+        sourceOperationalExpenseId: input.operationalExpenseId,
         tenantId: context.tenantId,
         outletId: context.outletId,
-        operationalDate: {
-          gte: employee.salaryClosing.periodStart,
-          lte: employee.salaryClosing.periodEnd,
-        },
-        status: "VALID",
-        category: { equals: "Kasbon", mode: "insensitive" },
       },
     });
     if (!expense) throw new SalaryError("SALARY_KASBON_NOT_FOUND", 404);
+    const aliases = employeeSnapshot.aliases as Array<{ aliasName: string }>;
     const acceptedNames = new Set([
-      normalizeSalaryEmployeeName(employee.employee.name),
-      ...employee.employee.aliases.map((alias) =>
+      normalizeSalaryEmployeeName(employeeSnapshot.name),
+      ...aliases.map((alias) =>
         normalizeSalaryEmployeeName(alias.aliasName)
       ),
     ]);
@@ -129,7 +134,7 @@ export async function saveSalaryKasbonAllocation(
       where: {
         tenantId: context.tenantId,
         outletId: context.outletId,
-        operationalExpenseId: expense.id,
+        salaryKasbonSnapshotId: expense.id,
         status: { in: ["DRAFT", "FINALIZED"] },
         NOT: { salaryClosingEmployeeId: employee.id },
       },
@@ -143,20 +148,22 @@ export async function saveSalaryKasbonAllocation(
       where: {
         salaryClosingEmployeeId_operationalExpenseId: {
           salaryClosingEmployeeId: employee.id,
-          operationalExpenseId: expense.id,
+          operationalExpenseId: expense.sourceOperationalExpenseId,
         },
       },
       create: {
         tenantId: context.tenantId,
         outletId: context.outletId,
         salaryClosingEmployeeId: employee.id,
-        operationalExpenseId: expense.id,
+        operationalExpenseId: expense.sourceOperationalExpenseId,
+        salaryKasbonSnapshotId: expense.id,
         amount,
         status: "DRAFT",
         createdByUserId: context.actorId,
       },
       update: {
         amount,
+        salaryKasbonSnapshotId: expense.id,
         status: "DRAFT",
         voidedAt: null,
         voidedByUserId: null,
@@ -164,7 +171,7 @@ export async function saveSalaryKasbonAllocation(
       },
     });
     await refreshClosingEmployeeTotals(tx, context, employee.id);
-    await tx.auditLog.create({
+    await tx.salaryAudit.create({
       data: {
         tenantId: context.tenantId,
         outletId: context.outletId,
@@ -175,7 +182,7 @@ export async function saveSalaryKasbonAllocation(
         metadata: {
           closingId: input.closingId,
           employeeId: employee.employeeId,
-          kasbonId: expense.id,
+          kasbonId: expense.sourceOperationalExpenseId,
           amount: amount.toString(),
         },
       },
@@ -221,7 +228,7 @@ export async function voidSalaryKasbonAllocation(
       context,
       allocation.salaryClosingEmployeeId,
     );
-    await tx.auditLog.create({
+    await tx.salaryAudit.create({
       data: {
         tenantId: context.tenantId,
         outletId: context.outletId,

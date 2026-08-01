@@ -22,7 +22,7 @@ const tx = vi.hoisted(() => ({
   },
   salaryClosing: { create: vi.fn(), findFirst: vi.fn() },
   salaryClosingSequence: { upsert: vi.fn() },
-  auditLog: { create: vi.fn() },
+  salaryAudit: { create: vi.fn() },
 }));
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
 
@@ -104,7 +104,7 @@ beforeEach(() => {
   });
   tx.salaryProfileSetting.create.mockResolvedValue({ id: "setting-1" });
   tx.salaryClosingProfileSnapshot.findFirst.mockResolvedValue(null);
-  tx.auditLog.create.mockResolvedValue({ id: 1n });
+  tx.salaryAudit.create.mockResolvedValue({ id: "audit-1" });
 });
 
 describe("Salary profile validation and persistence", () => {
@@ -130,7 +130,7 @@ describe("Salary profile validation and persistence", () => {
         dispatchRequiredStatus: SALARY_DISPATCH_STATUS,
       }),
     });
-    expect(tx.auditLog.create).toHaveBeenCalledWith({
+    expect(tx.salaryAudit.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         tenantId: scope.tenantId,
         outletId: scope.outletId,
@@ -218,7 +218,7 @@ describe("Salary profile validation and persistence", () => {
       },
       select: { id: true },
     });
-    expect(tx.auditLog.create).toHaveBeenCalledWith({
+    expect(tx.salaryAudit.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         actorId: context.actorId,
         entityType: "SALARY_PROFILE",
@@ -293,7 +293,7 @@ describe("Salary team and assignment", () => {
       status: "INACTIVE",
     });
     expect(result.whatsapp).toBe("081234567890");
-    expect(tx.auditLog.create).toHaveBeenCalledWith({
+    expect(tx.salaryAudit.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         entityType: "SALARY_EMPLOYEE",
         metadata: expect.objectContaining({
@@ -440,7 +440,7 @@ describe("Salary team and assignment", () => {
       data: { effectiveFrom: new Date("2026-07-01T00:00:00.000Z") },
     });
     expect(tx.employeeSalaryAssignment.create).not.toHaveBeenCalled();
-    expect(tx.auditLog.create).toHaveBeenCalledWith({
+    expect(tx.salaryAudit.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         entityType: "SALARY_ASSIGNMENT",
         metadata: expect.objectContaining({

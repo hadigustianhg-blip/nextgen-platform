@@ -1350,6 +1350,8 @@ model SalaryClosing {
   closedAt                DateTime?                      @db.Timestamptz(3)
   processedAt             DateTime?                      @db.Timestamptz(3)
   generatedAt             DateTime?                      @db.Timestamptz(3)
+  snapshotCapturedAt      DateTime?                      @db.Timestamptz(3)
+  snapshotVersion         Int                            @default(1)
   calculationWarningCount Int                            @default(0)
   voidedAt                DateTime?                      @db.Timestamptz(3)
   voidedByUserId          String?                        @db.Uuid
@@ -1363,6 +1365,11 @@ model SalaryClosing {
   employees               SalaryClosingEmployee[]
   profileSnapshots        SalaryClosingProfileSnapshot[]
   sourceRecords           SalaryClosingSourceRecord[]
+  employeeSnapshots       SalaryEmployeeSnapshot[]
+  rawPickupSnapshots      SalaryRawPickup[]
+  rawDispatchSnapshots    SalaryRawDispatch[]
+  kasbonSnapshots         SalaryKasbonSnapshot[]
+  audits                  SalaryAudit[]
 
   @@unique([tenantId, outletId, closingNumber])
   @@index([tenantId, outletId, status, periodStart, periodEnd])
@@ -1416,6 +1423,7 @@ model SalaryClosingEmployee {
   adjustments                  SalaryAdjustment[]
   sourceRecords                SalaryClosingSourceRecord[]
   kasbonAllocations            SalaryKasbonAllocation[]
+  calculationSnapshot          SalaryCalculationSnapshot?
 
   @@unique([salaryClosingId, employeeId])
   @@index([tenantId, outletId, employeeId])
@@ -1568,6 +1576,7 @@ model SalaryKasbonAllocation {
   outletId                String                       @db.Uuid
   salaryClosingEmployeeId String                       @db.Uuid
   operationalExpenseId    String                       @db.Uuid
+  salaryKasbonSnapshotId  String?                      @db.Uuid
   amount                  Decimal                      @db.Decimal(18, 2)
   status                  SalaryKasbonAllocationStatus @default(DRAFT)
   createdByUserId         String                       @db.Uuid
@@ -1581,10 +1590,130 @@ model SalaryKasbonAllocation {
   outlet                  Outlet                       @relation(fields: [outletId], references: [id], onDelete: Restrict)
   closingEmployee         SalaryClosingEmployee        @relation(fields: [salaryClosingEmployeeId], references: [id], onDelete: Restrict)
   operationalExpense      OperationalExpense           @relation(fields: [operationalExpenseId], references: [id], onDelete: Restrict)
+  kasbonSnapshot          SalaryKasbonSnapshot?        @relation(fields: [salaryKasbonSnapshotId], references: [id], onDelete: Restrict)
   createdBy               User                         @relation("SalaryKasbonAllocationCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
   voidedBy                User?                        @relation("SalaryKasbonAllocationVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
 
   @@unique([salaryClosingEmployeeId, operationalExpenseId])
   @@index([tenantId, outletId, salaryClosingEmployeeId, status])
   @@index([tenantId, outletId, operationalExpenseId, status])
+  @@index([salaryKasbonSnapshotId, status])
+}
+
+model SalaryEmployeeSnapshot {
+  id               String               @id @default(uuid()) @db.Uuid
+  tenantId         String               @db.Uuid
+  outletId         String               @db.Uuid
+  salaryClosingId  String               @db.Uuid
+  salaryEmployeeId String               @db.Uuid
+  name             String
+  division         SalaryDivision
+  whatsapp         String?
+  status           SalaryEmployeeStatus
+  aliases          Json
+  assignments      Json
+  capturedAt       DateTime             @default(now()) @db.Timestamptz(3)
+  salaryClosing    SalaryClosing        @relation(fields: [salaryClosingId], references: [id], onDelete: Restrict)
+
+  @@unique([salaryClosingId, salaryEmployeeId])
+  @@index([tenantId, outletId, salaryClosingId])
+}
+
+model SalaryRawPickup {
+  id                   String        @id @default(uuid()) @db.Uuid
+  tenantId             String        @db.Uuid
+  outletId             String        @db.Uuid
+  salaryClosingId      String        @db.Uuid
+  sourceMasterPickupId String        @db.Uuid
+  operationalDate      DateTime      @db.Date
+  waybillNo            String
+  staffName            String?
+  freightAmount        Decimal       @db.Decimal(18, 2)
+  settlement           String?
+  sourceSyncStatus     String
+  normalizationVersion Int
+  sourceSyncedAt       DateTime      @db.Timestamptz(3)
+  capturedAt           DateTime      @default(now()) @db.Timestamptz(3)
+  salaryClosing        SalaryClosing @relation(fields: [salaryClosingId], references: [id], onDelete: Restrict)
+
+  @@unique([salaryClosingId, sourceMasterPickupId])
+  @@index([tenantId, outletId, salaryClosingId, operationalDate])
+}
+
+model SalaryRawDispatch {
+  id                     String        @id @default(uuid()) @db.Uuid
+  tenantId               String        @db.Uuid
+  outletId               String        @db.Uuid
+  salaryClosingId        String        @db.Uuid
+  sourceMasterDispatchId String        @db.Uuid
+  operationalDate        DateTime      @db.Date
+  waybillNo              String
+  courierName            String?
+  deliveryStatus         String?
+  chargeWeight           Decimal       @db.Decimal(12, 3)
+  sourceSyncStatus       String
+  normalizationVersion   Int
+  sourceSyncedAt         DateTime      @db.Timestamptz(3)
+  capturedAt             DateTime      @default(now()) @db.Timestamptz(3)
+  salaryClosing          SalaryClosing @relation(fields: [salaryClosingId], references: [id], onDelete: Restrict)
+
+  @@unique([salaryClosingId, sourceMasterDispatchId])
+  @@index([tenantId, outletId, salaryClosingId, operationalDate])
+}
+
+model SalaryKasbonSnapshot {
+  id                         String                   @id @default(uuid()) @db.Uuid
+  tenantId                   String                   @db.Uuid
+  outletId                   String                   @db.Uuid
+  salaryClosingId            String                   @db.Uuid
+  sourceOperationalExpenseId String                   @db.Uuid
+  operationalDate            DateTime                 @db.Date
+  teamName                   String?
+  category                   String
+  amount                     Decimal                  @db.Decimal(18, 2)
+  sourceStatus               OperationalExpenseStatus
+  description                String?
+  capturedAt                 DateTime                 @default(now()) @db.Timestamptz(3)
+  salaryClosing              SalaryClosing            @relation(fields: [salaryClosingId], references: [id], onDelete: Restrict)
+  allocations                SalaryKasbonAllocation[]
+
+  @@unique([salaryClosingId, sourceOperationalExpenseId])
+  @@index([tenantId, outletId, salaryClosingId, teamName])
+}
+
+model SalaryCalculationSnapshot {
+  id                      String                @id @default(uuid()) @db.Uuid
+  tenantId                String                @db.Uuid
+  outletId                String                @db.Uuid
+  salaryClosingEmployeeId String                @unique @db.Uuid
+  systemIncomeTotal       Decimal               @db.Decimal(18, 2)
+  manualAdditionTotal     Decimal               @db.Decimal(18, 2)
+  manualDeductionTotal    Decimal               @db.Decimal(18, 2)
+  netSalary               Decimal               @db.Decimal(18, 2)
+  workDayCount            Int
+  sourcePickupCount       Int
+  sourceDispatchCount     Int
+  calculationWarningCount Int
+  components              Json
+  calculatedAt            DateTime              @default(now()) @db.Timestamptz(3)
+  closingEmployee         SalaryClosingEmployee @relation(fields: [salaryClosingEmployeeId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, outletId, calculatedAt])
+}
+
+model SalaryAudit {
+  id              String         @id @default(uuid()) @db.Uuid
+  tenantId        String         @db.Uuid
+  outletId        String         @db.Uuid
+  salaryClosingId String?        @db.Uuid
+  actorId         String         @db.Uuid
+  action          String
+  entityType      String
+  entityId        String
+  metadata        Json?
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+  salaryClosing   SalaryClosing? @relation(fields: [salaryClosingId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, outletId, salaryClosingId, createdAt])
+  @@index([entityType, entityId])
 }

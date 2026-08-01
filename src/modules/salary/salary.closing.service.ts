@@ -11,13 +11,42 @@ import {
 } from "./salary.calculation";
 import { SalaryError } from "./salary.api";
 import type { SalaryContext, SalaryScope } from "./salary.service";
-import { getActiveDispatchRecords } from "@/modules/delivery-settlement/active-dispatch-dataset";
+import {
+  captureSalaryClosingSnapshots,
+  loadSalaryOperationalSnapshots,
+} from "./salary.snapshot.service";
 
 const zero = () => new Prisma.Decimal(0);
 const dateKey = (value: Date) => value.toISOString().slice(0, 10);
 const dateOnly = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const json = (value: unknown) =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+
+const exposeKasbonSnapshot = <T extends {
+  operationalExpenseId: string;
+  kasbonSnapshot: null | {
+    sourceOperationalExpenseId: string;
+    operationalDate: Date;
+    category: string;
+    amount: Prisma.Decimal;
+    description: string | null;
+    teamName: string | null;
+    sourceStatus: string;
+  };
+}>(allocation: T) => ({
+  ...allocation,
+  operationalExpense: allocation.kasbonSnapshot
+    ? {
+      id: allocation.kasbonSnapshot.sourceOperationalExpenseId,
+      operationalDate: allocation.kasbonSnapshot.operationalDate,
+      category: allocation.kasbonSnapshot.category,
+      amount: allocation.kasbonSnapshot.amount,
+      description: allocation.kasbonSnapshot.description,
+      teamName: allocation.kasbonSnapshot.teamName,
+      status: allocation.kasbonSnapshot.sourceStatus,
+    }
+    : null,
+});
 
 type Transaction = Prisma.TransactionClient;
 
@@ -125,68 +154,13 @@ export async function generateSalaryClosing(
       throw new SalaryError("SALARY_CLOSING_LOCKED", 409);
     }
 
-    const [employees, pickups, dispatches, kasbons] = await Promise.all([
-      tx.salaryEmployee.findMany({
-        where: {
-          tenantId: context.tenantId,
-          outletId: context.outletId,
-        },
-        include: {
-          aliases: { where: { isActive: true } },
-          assignments: {
-            include: { salaryProfile: { include: { setting: true } } },
-            orderBy: { effectiveFrom: "asc" },
-          },
-        },
-      }),
-      tx.rawPickup.findMany({
-        where: {
-          tenantId: context.tenantId,
-          outletId: context.outletId,
-          operationalDate: {
-            gte: closing.periodStart,
-            lte: closing.periodEnd,
-          },
-          syncStatus: { not: "ERROR" },
-        },
-        select: {
-          id: true,
-          sourceRecordKey: true,
-          operationalDate: true,
-          waybillNo: true,
-          staffNameRaw: true,
-          settlementRaw: true,
-          freight: true,
-        },
-        orderBy: [{ operationalDate: "asc" }, { id: "asc" }],
-      }),
-      getActiveDispatchRecords({
-        tenantId: context.tenantId,
-        outletId: context.outletId,
-        periodStart: closing.periodStart,
-        periodEnd: closing.periodEnd,
-        status: "Penerimaan Normal",
-        client: tx,
-      }),
-      tx.operationalExpense.findMany({
-        where: {
-          tenantId: context.tenantId,
-          outletId: context.outletId,
-          operationalDate: {
-            gte: closing.periodStart,
-            lte: closing.periodEnd,
-          },
-          status: "VALID",
-          category: { equals: "Kasbon", mode: "insensitive" },
-          teamName: { not: null },
-        },
-        select: {
-          id: true,
-          operationalDate: true,
-          teamName: true,
-        },
-      }),
-    ]);
+    const employees = await captureSalaryClosingSnapshots(
+      tx,
+      context,
+      closing,
+    );
+    const { pickups, dispatches, kasbons } =
+      await loadSalaryOperationalSnapshots(tx, context, closing.id);
 
     const pickupIds = pickups.map((row) => row.id);
     const dispatchIds = dispatches.map((row) => row.id);
@@ -254,7 +228,8 @@ export async function generateSalaryClosing(
       sourceType: "PICKUP" | "DISPATCH",
       source: {
         id: string;
-        sourceRecordKey: string;
+          sourceMasterPickupId?: string;
+          sourceMasterDispatchId?: string;
         operationalDate: Date;
         waybillNo: string;
       },
@@ -271,7 +246,8 @@ export async function generateSalaryClosing(
         salaryClosingId: closing.id,
         sourceType,
         sourceRecordId: source.id,
-        sourceKey: source.sourceRecordKey,
+        sourceKey: source.sourceMasterPickupId ??
+          source.sourceMasterDispatchId ?? source.id,
         sourceDate: source.operationalDate,
         waybillNumber: source.waybillNo,
         employeeNameRaw,
@@ -283,12 +259,12 @@ export async function generateSalaryClosing(
     };
 
     for (const source of pickups) {
-      const match = matchEmployee(source.staffNameRaw, "PICKUP");
+      const match = matchEmployee(source.staffName, "PICKUP");
       if (!match.employeeId) {
         addUnmatched(
           "PICKUP",
           source,
-          source.staffNameRaw,
+          source.staffName,
           match.reason ?? "EMPLOYEE_NOT_MATCHED",
         );
         continue;
@@ -305,7 +281,7 @@ export async function generateSalaryClosing(
         addUnmatched(
           "PICKUP",
           source,
-          source.staffNameRaw,
+          source.staffName,
           resolved.reason ?? "PROFILE_SETTING_NOT_FOUND",
           employee.id,
         );
@@ -315,23 +291,23 @@ export async function generateSalaryClosing(
         ...(pickupByEmployee.get(employee.id) ?? []),
         {
           id: source.id,
-          sourceKey: source.sourceRecordKey,
-          employeeNameRaw: source.staffNameRaw,
+          sourceKey: source.sourceMasterPickupId,
+          employeeNameRaw: source.staffName,
           date: dateKey(source.operationalDate),
           waybill: source.waybillNo,
-          settlement: source.settlementRaw,
-          freight: source.freight,
+          settlement: source.settlement,
+          freight: source.freightAmount,
           setting,
         },
       ]);
     }
     for (const source of dispatches) {
-      const match = matchEmployee(source.courierNameRaw, "DISPATCH");
+      const match = matchEmployee(source.courierName, "DISPATCH");
       if (!match.employeeId) {
         addUnmatched(
           "DISPATCH",
           source,
-          source.courierNameRaw,
+          source.courierName,
           match.reason ?? "EMPLOYEE_NOT_MATCHED",
         );
         continue;
@@ -348,7 +324,7 @@ export async function generateSalaryClosing(
         addUnmatched(
           "DISPATCH",
           source,
-          source.courierNameRaw,
+          source.courierName,
           resolved.reason ?? "PROFILE_SETTING_NOT_FOUND",
           employee.id,
         );
@@ -358,11 +334,11 @@ export async function generateSalaryClosing(
         ...(dispatchByEmployee.get(employee.id) ?? []),
         {
           id: source.id,
-          sourceKey: source.sourceRecordKey,
-          employeeNameRaw: source.courierNameRaw,
+          sourceKey: source.sourceMasterDispatchId,
+          employeeNameRaw: source.courierName,
           date: dateKey(source.operationalDate),
           waybill: source.waybillNo,
-          status: source.deliveryStatusRaw,
+          status: source.deliveryStatus,
           weight: source.chargeWeight,
           setting,
         },
@@ -512,11 +488,45 @@ export async function generateSalaryClosing(
           isActive: true,
         });
       }
-      await refreshClosingEmployeeTotals(tx, context, closingEmployee.id);
-      await tx.auditLog.create({
+      const totals = await refreshClosingEmployeeTotals(
+        tx,
+        context,
+        closingEmployee.id,
+      );
+      await tx.salaryCalculationSnapshot.upsert({
+        where: { salaryClosingEmployeeId: closingEmployee.id },
+        create: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          salaryClosingEmployeeId: closingEmployee.id,
+          systemIncomeTotal: totals.systemIncomeTotal,
+          manualAdditionTotal: totals.manualAdditionTotal,
+          manualDeductionTotal: totals.manualDeductionTotal,
+          netSalary: totals.netSalary,
+          workDayCount: calculated.workDates.length,
+          sourcePickupCount: calculated.pickupCount,
+          sourceDispatchCount: calculated.dispatchCount,
+          calculationWarningCount: warningEmployeeIds.has(employee.id) ? 1 : 0,
+          components: json(calculated.components),
+        },
+        update: {
+          systemIncomeTotal: totals.systemIncomeTotal,
+          manualAdditionTotal: totals.manualAdditionTotal,
+          manualDeductionTotal: totals.manualDeductionTotal,
+          netSalary: totals.netSalary,
+          workDayCount: calculated.workDates.length,
+          sourcePickupCount: calculated.pickupCount,
+          sourceDispatchCount: calculated.dispatchCount,
+          calculationWarningCount: warningEmployeeIds.has(employee.id) ? 1 : 0,
+          components: json(calculated.components),
+          calculatedAt: new Date(),
+        },
+      });
+      await tx.salaryAudit.create({
         data: {
           tenantId: context.tenantId,
           outletId: context.outletId,
+          salaryClosingId: closing.id,
           actorId: context.actorId,
           action: "CREATE",
           entityType: "SALARY_EMPLOYEE_CALCULATION",
@@ -607,10 +617,11 @@ export async function generateSalaryClosing(
     }
     if (sourceRows.length) {
       await tx.salaryClosingSourceRecord.createMany({ data: sourceRows });
-      await tx.auditLog.create({
+      await tx.salaryAudit.create({
         data: {
           tenantId: context.tenantId,
           outletId: context.outletId,
+          salaryClosingId: closing.id,
           actorId: context.actorId,
           action: "CREATE",
           entityType: "SALARY_SOURCE_RECORDS_LINKED",
@@ -633,10 +644,11 @@ export async function generateSalaryClosing(
         calculationWarningCount: warningCount,
       },
     });
-    await tx.auditLog.create({
+    await tx.salaryAudit.create({
       data: {
         tenantId: context.tenantId,
         outletId: context.outletId,
+        salaryClosingId: closing.id,
         actorId: context.actorId,
         action: "UPDATE",
         entityType: closing.status === "DRAFT"
@@ -686,7 +698,7 @@ export async function getSalaryClosingReview(
             adjustments: { orderBy: { createdAt: "desc" } },
             kasbonAllocations: {
               where: { status: { not: "VOID" } },
-              include: { operationalExpense: true },
+              include: { kasbonSnapshot: true },
             },
           },
         },
@@ -737,7 +749,16 @@ export async function getSalaryClosingReview(
       orderBy: [{ name: "asc" }, { version: "desc" }],
     }),
   ]);
-  return closing ? { ...closing, availableProfiles } : null;
+  return closing ? {
+    ...closing,
+    employees: closing.employees.map((employee) => ({
+      ...employee,
+      kasbonAllocations: employee.kasbonAllocations.map(
+        exposeKasbonSnapshot,
+      ),
+    })),
+    availableProfiles,
+  } : null;
 }
 
 export async function listSalaryClosingEmployeeSources(
@@ -761,7 +782,7 @@ export async function listSalaryClosingEmployees(
   scope: SalaryScope,
   closingId: string,
 ) {
-  return prisma.salaryClosingEmployee.findMany({
+  const employees = await prisma.salaryClosingEmployee.findMany({
     where: {
       tenantId: scope.tenantId,
       outletId: scope.outletId,
@@ -772,11 +793,15 @@ export async function listSalaryClosingEmployees(
       adjustments: { orderBy: { createdAt: "desc" } },
       kasbonAllocations: {
         where: { status: { not: "VOID" } },
-        include: { operationalExpense: true },
+        include: { kasbonSnapshot: true },
       },
     },
     orderBy: { employeeNameSnapshot: "asc" },
   });
+  return employees.map((employee) => ({
+    ...employee,
+    kasbonAllocations: employee.kasbonAllocations.map(exposeKasbonSnapshot),
+  }));
 }
 
 export async function getSalaryClosingEmployeeReview(
@@ -784,7 +809,7 @@ export async function getSalaryClosingEmployeeReview(
   closingId: string,
   closingEmployeeId: string,
 ) {
-  return prisma.salaryClosingEmployee.findFirst({
+  const employee = await prisma.salaryClosingEmployee.findFirst({
     where: {
       id: closingEmployeeId,
       salaryClosingId: closingId,
@@ -796,10 +821,14 @@ export async function getSalaryClosingEmployeeReview(
       adjustments: { orderBy: { createdAt: "desc" } },
       kasbonAllocations: {
         where: { status: { not: "VOID" } },
-        include: { operationalExpense: true },
+        include: { kasbonSnapshot: true },
       },
     },
   });
+  return employee ? {
+    ...employee,
+    kasbonAllocations: employee.kasbonAllocations.map(exposeKasbonSnapshot),
+  } : null;
 }
 
 export async function processSalaryClosing(
@@ -877,7 +906,7 @@ export async function processSalaryClosing(
         processedByUserId: context.actorId,
       },
     });
-    await tx.auditLog.create({
+    await tx.salaryAudit.create({
       data: {
         tenantId: context.tenantId,
         outletId: context.outletId,
@@ -944,7 +973,7 @@ export async function voidSalaryClosing(
         voidReason: reason,
       },
     });
-    await tx.auditLog.create({
+    await tx.salaryAudit.create({
       data: {
         tenantId: context.tenantId,
         outletId: context.outletId,
@@ -978,7 +1007,7 @@ export async function getSalaryRecapDetail(
   scope: SalaryScope,
   closingId: string,
 ) {
-  return prisma.salaryClosing.findFirst({
+  const closing = await prisma.salaryClosing.findFirst({
     where: {
       id: closingId,
       tenantId: scope.tenantId,
@@ -995,7 +1024,7 @@ export async function getSalaryRecapDetail(
           adjustments: { orderBy: { createdAt: "desc" } },
           kasbonAllocations: {
             where: { status: "FINALIZED" },
-            include: { operationalExpense: true },
+            include: { kasbonSnapshot: true },
           },
         },
       },
@@ -1004,6 +1033,15 @@ export async function getSalaryRecapDetail(
       },
     },
   });
+  return closing ? {
+    ...closing,
+    employees: closing.employees.map((employee) => ({
+      ...employee,
+      kasbonAllocations: employee.kasbonAllocations.map(
+        exposeKasbonSnapshot,
+      ),
+    })),
+  } : null;
 }
 
 export { refreshClosingEmployeeTotals };
