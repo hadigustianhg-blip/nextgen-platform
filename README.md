@@ -96,10 +96,14 @@ outlet sebelum upsert. Service web tetap memakai `npm run start`.
 ### Railway cron Cashflow JFS
 
 Buat service Railway dari repository yang sama dengan environment/database
-NEXTGEN yang sama dan isi `CASHFLOW_JFS_OUTLET_IDS`.
+NEXTGEN yang sama. Variable minimum service ini adalah `DATABASE_URL`,
+`JFS_MIDDLEWARE_BASE_URL`, `CASHFLOW_JFS_OUTLET_IDS` (daftar UUID outlet aktif
+dipisahkan koma), dan `NODE_ENV=production`. Runtime query hanya memakai
+`DATABASE_URL`; `DIRECT_URL` tidak dibutuhkan oleh cron.
 
 - Start command: `npm run cron:jfs-cashflow`
-- Cron schedule: `0 16 * * *` (23:00 Asia/Jakarta; scheduler Railway menggunakan UTC)
+- Cron schedule: `0 19 * * *` (02:00 Asia/Jakarta; scheduler Railway menggunakan UTC)
+- Target sinkronisasi: hari sebelumnya menurut timezone Asia/Jakarta
 
 Jalankan service secara manual sekali untuk smoke test dan pastikan log berakhir
 dengan summary `Completed`. Service web tetap memakai `npm run start`.

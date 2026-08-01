@@ -160,6 +160,24 @@ describe("JFS Cashflow source contract", () => {
     })).rejects.toMatchObject({ code: "SOURCE_UNAVAILABLE", retryable: false });
     expect(unauthorized).toHaveBeenCalledOnce();
   });
+
+  it("rejects inconsistent middleware totals and date ranges", async () => {
+    const inconsistentTotal = vi.fn(async () => new Response(JSON.stringify({
+      success: true, total: 2, startDate: "2026-08-01", endDate: "2026-08-01", data: [],
+    })));
+    await expect(fetchJfsCashflow({
+      startDate: "2026-08-01", endDate: "2026-08-01", fetcher: inconsistentTotal,
+    })).rejects.toEqual(new JfsCashflowError("INVALID_RESPONSE"));
+    expect(inconsistentTotal).toHaveBeenCalledOnce();
+
+    const inconsistentRange = vi.fn(async () => new Response(JSON.stringify({
+      success: true, total: 0, startDate: "2026-07-31", endDate: "2026-08-01", data: [],
+    })));
+    await expect(fetchJfsCashflow({
+      startDate: "2026-08-01", endDate: "2026-08-01", fetcher: inconsistentRange,
+    })).rejects.toEqual(new JfsCashflowError("INVALID_RESPONSE"));
+    expect(inconsistentRange).toHaveBeenCalledOnce();
+  });
 });
 
 describe("JFS Cashflow persistence", () => {

@@ -146,9 +146,17 @@ export async function fetchJfsCashflow(input: {
         throw new JfsCashflowError("SOURCE_UNAVAILABLE", transientStatuses.has(response.status));
       }
       const body = await response.json().catch(() => null) as
-        | { success?: boolean; data?: unknown[] }
+        | { success?: boolean; data?: unknown[]; total?: unknown; startDate?: unknown; endDate?: unknown }
         | null;
       if (body?.success !== true || !Array.isArray(body.data)) {
+        throw new JfsCashflowError("INVALID_RESPONSE", false);
+      }
+      const declaredTotal = Number(body.total);
+      if (
+        (body.total !== undefined && (!Number.isSafeInteger(declaredTotal) || declaredTotal !== body.data.length)) ||
+        (body.startDate !== undefined && body.startDate !== input.startDate) ||
+        (body.endDate !== undefined && body.endDate !== input.endDate)
+      ) {
         throw new JfsCashflowError("INVALID_RESPONSE", false);
       }
       const normalized = body.data.map(normalizeIbkRecord);
