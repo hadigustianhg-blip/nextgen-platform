@@ -38,8 +38,9 @@ describe("Monitoring Monthly", () => {
         businessDate: `2026-07-${day}`,
         teamName: index === 1 ? "RIDWAN" : "Ridwan",
         totalDelivery: 20,
-        totalTtd: [18, 20, 19][index],
-        totalPending: [2, 0, 1][index],
+      totalTtd: [18, 20, 19][index],
+      totalPending: [2, 0, 1][index],
+      deliveryWeight: ["10.1", "20.2", "30.3"][index],
       })),
     );
     expect(rows).toHaveLength(1);
@@ -49,6 +50,7 @@ describe("Monitoring Monthly", () => {
       totalPending: 3,
       achievement: 95,
       activeDays: 3,
+      deliveryWeight: "60.6",
       status: "ACHIEVE",
     });
   });

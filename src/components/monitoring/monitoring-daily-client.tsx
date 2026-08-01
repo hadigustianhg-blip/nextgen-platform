@@ -17,6 +17,7 @@ type DeliveryRow = {
   totalDelivery: number;
   totalTtd: number;
   totalPending: number;
+  deliveryWeight: string;
   achievement: number;
   target: number;
   status: "ACHIEVE" | "NOT ACHIEVE";
@@ -40,7 +41,11 @@ type MonitoringResult = {
     totalDelivery: number;
     totalTtd: number;
     totalPending: number;
+    totalDeliveryWeight: string;
+    totalPickupWaybills: number;
     pickupRevenue: string;
+    pickupRegularWeight: string;
+    pickupMarketplaceWeight: string;
     pickupWeight: string;
   };
   delivery: {
@@ -289,7 +294,7 @@ export function MonitoringDailyClient({
         </div>
       )}
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
         <MetricCard
           label="Achievement Delivery"
           value={
@@ -311,6 +316,10 @@ export function MonitoringDailyClient({
         <MetricCard
           label="Pending"
           value={`${number(result?.summary.totalPending ?? 0)} Resi`}
+        />
+        <MetricCard
+          label="Berat Delivery"
+          value={`${number(result?.summary.totalDeliveryWeight ?? "0", 3)} Kg`}
         />
         <MetricCard
           label="Pickup Omset"
@@ -339,7 +348,7 @@ export function MonitoringDailyClient({
             description="Performa delivery per nama team."
           />
           <div className="max-h-[560px] overflow-auto">
-            <table className="min-w-[880px] w-full text-left text-sm">
+            <table className="min-w-[1040px] w-full text-left text-sm">
               <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>
                   {[
@@ -348,6 +357,7 @@ export function MonitoringDailyClient({
                     "Total Delivery",
                     "Total TTD",
                     "Total Pending",
+                    "Berat Delivery",
                     "Achievement",
                     "Target",
                     "Status",
@@ -367,7 +377,7 @@ export function MonitoringDailyClient({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <LoadingRow columns={8} />
+                  <LoadingRow columns={9} />
                 ) : result?.delivery.data.length ? (
                   result.delivery.data.map((row) => (
                     <tr key={`${row.businessDate}-${row.teamName}`}>
@@ -384,6 +394,9 @@ export function MonitoringDailyClient({
                       <td className="px-4 py-3 text-right">
                         {number(row.totalPending)}
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        {number(row.deliveryWeight, 3)} Kg
+                      </td>
                       <td className="px-4 py-3 text-right font-bold">
                         {percent(row.achievement)}
                       </td>
@@ -397,7 +410,7 @@ export function MonitoringDailyClient({
                   ))
                 ) : (
                   <EmptyRow
-                    columns={8}
+                    columns={9}
                     message="Belum ada data Delivery untuk Business Date ini."
                   />
                 )}

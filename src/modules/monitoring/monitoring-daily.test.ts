@@ -1,9 +1,7 @@
-import { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
   buildDeliveryRows,
   buildDeliveryMonitoring,
-  buildPickupRows,
   calculateAchievement,
   assertDeliveryInvariant,
   DELIVERY_TARGET,
@@ -13,10 +11,6 @@ import { monitoringDailyQuerySchema } from "./monitoring-daily.validation";
 
 const date = new Date("2026-07-29T00:00:00.000Z");
 const count = (waybillNo: number) => ({ waybillNo });
-const sum = (totalFreight: number, weight: number) => ({
-  totalFreight: new Prisma.Decimal(totalFreight),
-  weight: new Prisma.Decimal(weight),
-});
 const deliveryRecord = (
   id: string,
   overrides: Partial<{
@@ -165,42 +159,6 @@ describe("Monitoring Daily", () => {
       warn: (message) => warnings.push(message),
     })).not.toThrow();
     expect(warnings).toEqual(["MONITORING_DAILY_DELIVERY_INVARIANT_FAILED"]);
-  });
-
-  it("separates regular and marketplace pickup weight and sorts revenue", () => {
-    const rows = buildPickupRows(
-      [
-        {
-          operationalDate: date,
-          staffNameRaw: "STAFF A",
-          _count: count(3),
-          _sum: sum(500_000, 20),
-        },
-        {
-          operationalDate: date,
-          staffNameRaw: "STAFF B",
-          _count: count(2),
-          _sum: sum(750_000, 10),
-        },
-      ],
-      [
-        {
-          operationalDate: date,
-          staffNameRaw: "STAFF A",
-          _count: count(1),
-          _sum: sum(100_000, 8),
-        },
-      ],
-    );
-
-    expect(rows.map((row) => row.staffName)).toEqual(["STAFF B", "STAFF A"]);
-    expect(rows[1]).toMatchObject({
-      totalWaybills: 3,
-      regularRevenue: "500000",
-      regularWeight: "12",
-      marketplaceWeight: "8",
-      totalWeight: "20",
-    });
   });
 
   it("accepts empty optional filters and applies pagination defaults", () => {

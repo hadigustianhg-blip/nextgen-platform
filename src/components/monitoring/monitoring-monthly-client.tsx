@@ -22,6 +22,7 @@ type DeliveryRow = {
   totalDelivery: number;
   totalTtd: number;
   totalPending: number;
+  deliveryWeight: string;
   achievement: number;
   target: number;
   status: "ACHIEVE" | "NOT ACHIEVE";
@@ -46,7 +47,11 @@ type Result = {
     totalDelivery: number;
     totalTtd: number;
     totalPending: number;
+    totalDeliveryWeight: string;
+    totalPickupWaybills: number;
     pickupRevenue: string;
+    pickupRegularWeight: string;
+    pickupMarketplaceWeight: string;
     pickupWeight: string;
   };
   delivery: Pagination & { items: DeliveryRow[] };
@@ -256,7 +261,7 @@ export function MonitoringMonthlyClient({
         </div>
       )}
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <MetricCard
           label="Achievement Delivery"
           value={
@@ -279,8 +284,24 @@ export function MonitoringMonthlyClient({
           value={`${number(result?.summary.totalPending ?? 0)} Resi`}
         />
         <MetricCard
-          label="Pickup Omset"
+          label="Total Berat Delivery"
+          value={`${number(result?.summary.totalDeliveryWeight ?? "0", 3)} Kg`}
+        />
+        <MetricCard
+          label="Total Resi Pickup"
+          value={`${number(result?.summary.totalPickupWaybills ?? 0)} Resi`}
+        />
+        <MetricCard
+          label="Total Omset Reguler"
           value={money(result?.summary.pickupRevenue ?? "0")}
+        />
+        <MetricCard
+          label="Total Berat Reguler"
+          value={`${number(result?.summary.pickupRegularWeight ?? "0", 3)} Kg`}
+        />
+        <MetricCard
+          label="Total Berat Marketplace"
+          value={`${number(result?.summary.pickupMarketplaceWeight ?? "0", 3)} Kg`}
         />
         <MetricCard
           label="Total Berat Pickup"
@@ -308,7 +329,7 @@ export function MonitoringMonthlyClient({
             description="Akumulasi delivery per nama team."
           />
           <div className="max-h-[560px] overflow-auto">
-            <table className="min-w-[980px] w-full text-left text-sm">
+            <table className="min-w-[1120px] w-full text-left text-sm">
               <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>
                   {[
@@ -316,6 +337,7 @@ export function MonitoringMonthlyClient({
                     "Total Delivery",
                     "Total TTD",
                     "Total Pending",
+                    "Berat Delivery",
                     "Achievement",
                     "Target",
                     "Status",
@@ -336,7 +358,7 @@ export function MonitoringMonthlyClient({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
-                  <EmptyRow columns={8} message="Memuat data…" />
+                  <EmptyRow columns={9} message="Memuat data…" />
                 ) : result?.delivery.items.length ? (
                   result.delivery.items.map((row) => (
                     <tr key={row.teamName}>
@@ -346,6 +368,7 @@ export function MonitoringMonthlyClient({
                       <NumberCell>{number(row.totalDelivery)}</NumberCell>
                       <NumberCell>{number(row.totalTtd)}</NumberCell>
                       <NumberCell>{number(row.totalPending)}</NumberCell>
+                      <NumberCell>{number(row.deliveryWeight, 3)} Kg</NumberCell>
                       <NumberCell className="font-bold">
                         {percent(row.achievement)}
                       </NumberCell>
@@ -358,7 +381,7 @@ export function MonitoringMonthlyClient({
                   ))
                 ) : (
                   <EmptyRow
-                    columns={8}
+                    columns={9}
                     message="Belum ada data Delivery pada periode ini."
                   />
                 )}

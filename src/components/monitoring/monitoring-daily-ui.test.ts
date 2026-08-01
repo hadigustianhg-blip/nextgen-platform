@@ -12,6 +12,7 @@ describe("Monitoring Daily UI contract", () => {
       "Total Delivery",
       "Total TTD",
       "Pending",
+      "Berat Delivery",
       "Pickup Omset",
       "Total Berat Pickup",
       "Delivery Monitoring",
@@ -21,6 +22,7 @@ describe("Monitoring Daily UI contract", () => {
     }
     expect(source).toContain('<section className="space-y-6">');
     expect(source).not.toContain("xl:grid-cols-2");
+    expect(source).toContain('"Total Pending",\n                    "Berat Delivery"');
   });
 
   it("uses the shared NEXTGEN card system and exact empty states", async () => {

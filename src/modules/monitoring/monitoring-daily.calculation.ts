@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import {
   selectLatestDispatchRecords,
 } from "@/modules/delivery-settlement/dispatch-deduplication";
@@ -9,13 +8,6 @@ export type DeliveryAggregate = {
   operationalDate: Date;
   courierNameRaw: string | null;
   _count: { waybillNo: number };
-};
-
-export type PickupAggregate = {
-  operationalDate: Date;
-  staffNameRaw: string | null;
-  _count: { waybillNo: number };
-  _sum: { totalFreight: Prisma.Decimal | null; weight: Prisma.Decimal | null };
 };
 
 export type DeliverySourceRecord = {
@@ -38,8 +30,6 @@ const nameKey = (value: string | null) =>
   (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ");
 const aggregateKey = (date: Date, name: string | null) =>
   `${dateKey(date)}\u0000${nameKey(name).toLocaleUpperCase("id-ID")}`;
-const decimal = (value: Prisma.Decimal | null | undefined) =>
-  value ?? new Prisma.Decimal(0);
 const canonical = (value: string | null | undefined) =>
   (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ")
     .toLocaleUpperCase("id-ID");
@@ -177,39 +167,6 @@ export function buildDeliveryRows(
       (left, right) =>
         right.achievement - left.achievement ||
         right.totalDelivery - left.totalDelivery,
-    );
-}
-
-export function buildPickupRows(
-  totals: PickupAggregate[],
-  marketplace: PickupAggregate[],
-) {
-  const marketplaceByGroup = new Map(
-    marketplace.map((row) => [
-      aggregateKey(row.operationalDate, row.staffNameRaw),
-      decimal(row._sum.weight),
-    ]),
-  );
-  return totals
-    .map((row) => {
-      const totalWeight = decimal(row._sum.weight);
-      const marketplaceWeight =
-        marketplaceByGroup.get(
-          aggregateKey(row.operationalDate, row.staffNameRaw),
-        ) ?? new Prisma.Decimal(0);
-      return {
-        businessDate: dateKey(row.operationalDate),
-        staffName: nameKey(row.staffNameRaw) || "Tanpa Staff",
-        totalWaybills: row._count.waybillNo,
-        regularRevenue: decimal(row._sum.totalFreight).toString(),
-        regularWeight: totalWeight.minus(marketplaceWeight).toString(),
-        marketplaceWeight: marketplaceWeight.toString(),
-        totalWeight: totalWeight.toString(),
-      };
-    })
-    .sort(
-      (left, right) =>
-        Number(right.regularRevenue) - Number(left.regularRevenue),
     );
 }
 

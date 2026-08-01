@@ -14,6 +14,11 @@ describe("Monitoring Monthly contracts", () => {
       "Bulan Ini",
       "1–15",
       "16–Akhir Bulan",
+      "Total Berat Delivery",
+      "Total Omset Reguler",
+      "Total Berat Reguler",
+      "Total Berat Marketplace",
+      "Total Berat Pickup",
       "Belum ada data Delivery pada periode ini.",
       "Belum ada data Pickup pada periode ini.",
     ]) {
@@ -36,8 +41,10 @@ describe("Monitoring Monthly contracts", () => {
     expect(source).toContain("gte: dateValue(input.startDate)");
     expect(source).toContain("lte: dateValue(input.endDate)");
     expect(source).toContain("getActiveDispatchRecords");
-    expect(source).toContain("buildDailyActiveDeliveryRows");
-    expect(source).toContain("prisma.rawPickup.groupBy");
+    expect(source).toContain("aggregateDeliveryMonitoringMetrics");
+    expect(source).toContain("aggregatePickupMonitoringMetrics");
+    expect(source).toContain("summarizeMonitoringMetrics");
+    expect(source).toContain("prisma.rawPickup.findMany");
     expect(source).not.toContain("prisma.rawDispatch.groupBy");
   });
 

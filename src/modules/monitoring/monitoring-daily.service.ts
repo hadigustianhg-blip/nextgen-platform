@@ -1,14 +1,16 @@
 import "server-only";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { resolveOperationalBusinessDate } from "@/modules/operational-settlement/operational-settlement.service";
 import { getActiveDispatchDataset } from "@/modules/delivery-settlement/active-dispatch-dataset";
 import {
-  buildDeliveryMonitoring,
-  buildPickupRows,
   DELIVERY_TARGET,
   selectFinalDeliveryRecords,
 } from "./monitoring-daily.calculation";
+import {
+  aggregateDeliveryMonitoringMetrics,
+  aggregatePickupMonitoringMetrics,
+  summarizeMonitoringMetrics,
+} from "./monitoring-metrics";
 
 const canonical = (value: string | null | undefined) =>
   (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ")
@@ -53,53 +55,43 @@ export async function getMonitoringDaily(input: {
 
   const [
     deliveryRecords,
-    pickupTotals,
-    pickupMarketplace,
+    pickupRecords,
   ] = await Promise.all([
     getActiveDispatchDataset({
       tenantId: input.tenantId,
       outletId: input.outletId,
       operationalDate,
     }),
-    prisma.rawPickup.groupBy({
-      by: ["operationalDate", "staffNameRaw"],
+    prisma.rawPickup.findMany({
       where: whereScope,
-      _count: { waybillNo: true },
-      _sum: { totalFreight: true, weight: true },
-    }),
-    prisma.rawPickup.groupBy({
-      by: ["operationalDate", "staffNameRaw"],
-      where: {
-        ...whereScope,
-        serviceRaw: { equals: "Marketplace", mode: "insensitive" },
+      select: {
+        id: true, operationalDate: true, waybillNo: true, staffNameRaw: true,
+        settlementRaw: true, freight: true, weight: true,
+        sourceFetchedAt: true, updatedAt: true,
       },
-      _count: { waybillNo: true },
-      _sum: { totalFreight: true, weight: true },
     }),
   ]);
 
-  const delivery = buildDeliveryMonitoring(deliveryRecords, businessDate);
-  const deliveryRows = delivery.rows;
-  const pickupRows = buildPickupRows(pickupTotals, pickupMarketplace);
-  const pickupRevenue = pickupRows.reduce(
-    (total, row) => total.plus(row.regularRevenue),
-    new Prisma.Decimal(0),
-  );
-  const pickupWeight = pickupRows.reduce(
-    (total, row) => total.plus(row.totalWeight),
-    new Prisma.Decimal(0),
-  );
+  const deliveryRows = aggregateDeliveryMonitoringMetrics(deliveryRecords);
+  const pickupRows = aggregatePickupMonitoringMetrics(pickupRecords);
+  const metrics = summarizeMonitoringMetrics(deliveryRows, pickupRows);
+  const totalDelivery = deliveryRows.reduce((sum, row) => sum + row.totalDelivery, 0);
+  const totalTtd = deliveryRows.reduce((sum, row) => sum + row.totalTtd, 0);
 
   return {
     businessDate,
     target: DELIVERY_TARGET,
     summary: {
-      deliveryAchievement: delivery.summary.deliveryAchievement,
-      totalDelivery: delivery.summary.totalDelivery,
-      totalTtd: delivery.summary.totalTtd,
-      totalPending: delivery.summary.totalPending,
-      pickupRevenue: pickupRevenue.toString(),
-      pickupWeight: pickupWeight.toString(),
+      deliveryAchievement: totalDelivery === 0 ? 0 : totalTtd / totalDelivery * 100,
+      totalDelivery,
+      totalTtd,
+      totalPending: totalDelivery - totalTtd,
+      totalDeliveryWeight: metrics.deliveryWeight,
+      totalPickupWaybills: metrics.totalPickupWaybills,
+      pickupRevenue: metrics.regularRevenue,
+      pickupRegularWeight: metrics.regularWeight,
+      pickupMarketplaceWeight: metrics.marketplaceWeight,
+      pickupWeight: metrics.totalPickupWeight,
     },
     delivery: paginate(deliveryRows, input.deliveryPage, input.pageSize),
     pickup: paginate(pickupRows, input.pickupPage, input.pageSize),

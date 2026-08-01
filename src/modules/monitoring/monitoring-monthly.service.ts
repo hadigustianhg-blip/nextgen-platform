@@ -1,18 +1,20 @@
 import "server-only";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import {
-  buildPickupRows,
   calculateAchievement,
   DELIVERY_TARGET,
 } from "./monitoring-daily.calculation";
 import { getActiveDispatchRecords } from "@/modules/delivery-settlement/active-dispatch-dataset";
 import {
-  buildDailyActiveDeliveryRows,
   buildMonthlyDeliveryRows,
   buildMonthlyPickupRows,
   paginateMonthly,
 } from "./monitoring-monthly.calculation";
+import {
+  aggregateDeliveryMonitoringMetrics,
+  aggregatePickupMonitoringMetrics,
+  summarizeMonitoringMetrics,
+} from "./monitoring-metrics";
 
 const dateValue = (value: string) => new Date(`${value}T00:00:00.000Z`);
 
@@ -36,8 +38,7 @@ export async function getMonitoringMonthly(input: {
   };
   const [
     deliveryRecords,
-    pickupTotals,
-    pickupMarketplace,
+    pickupRecords,
   ] = await Promise.all([
     getActiveDispatchRecords({
       tenantId: input.tenantId,
@@ -45,42 +46,30 @@ export async function getMonitoringMonthly(input: {
       periodStart: dateValue(input.startDate),
       periodEnd: dateValue(input.endDate),
     }),
-    prisma.rawPickup.groupBy({
-      by: ["operationalDate", "staffNameRaw"],
+    prisma.rawPickup.findMany({
       where: whereScope,
-      _count: { waybillNo: true },
-      _sum: { totalFreight: true, weight: true },
-    }),
-    prisma.rawPickup.groupBy({
-      by: ["operationalDate", "staffNameRaw"],
-      where: {
-        ...whereScope,
-        serviceRaw: { equals: "Marketplace", mode: "insensitive" },
+      select: {
+        id: true, operationalDate: true, waybillNo: true, staffNameRaw: true,
+        settlementRaw: true, freight: true, weight: true,
+        sourceFetchedAt: true, updatedAt: true,
       },
-      _count: { waybillNo: true },
-      _sum: { totalFreight: true, weight: true },
     }),
   ]);
 
+  const dailyDeliveryRows = aggregateDeliveryMonitoringMetrics(deliveryRecords);
+  const dailyPickupRows = aggregatePickupMonitoringMetrics(pickupRecords);
   const deliveryRows = buildMonthlyDeliveryRows(
-    buildDailyActiveDeliveryRows(deliveryRecords),
+    dailyDeliveryRows,
   );
   const pickupRows = buildMonthlyPickupRows(
-    buildPickupRows(pickupTotals, pickupMarketplace),
+    dailyPickupRows,
   );
   const totalDelivery = deliveryRows.reduce(
     (sum, row) => sum + row.totalDelivery,
     0,
   );
   const totalTtd = deliveryRows.reduce((sum, row) => sum + row.totalTtd, 0);
-  const pickupRevenue = pickupRows.reduce(
-    (sum, row) => sum.plus(row.regularRevenue),
-    new Prisma.Decimal(0),
-  );
-  const pickupWeight = pickupRows.reduce(
-    (sum, row) => sum.plus(row.totalWeight),
-    new Prisma.Decimal(0),
-  );
+  const metrics = summarizeMonitoringMetrics(dailyDeliveryRows, dailyPickupRows);
 
   return {
     period: { startDate: input.startDate, endDate: input.endDate },
@@ -93,8 +82,12 @@ export async function getMonitoringMonthly(input: {
         (sum, row) => sum + row.totalPending,
         0,
       ),
-      pickupRevenue: pickupRevenue.toString(),
-      pickupWeight: pickupWeight.toString(),
+      totalDeliveryWeight: metrics.deliveryWeight,
+      totalPickupWaybills: metrics.totalPickupWaybills,
+      pickupRevenue: metrics.regularRevenue,
+      pickupRegularWeight: metrics.regularWeight,
+      pickupMarketplaceWeight: metrics.marketplaceWeight,
+      pickupWeight: metrics.totalPickupWeight,
     },
     delivery: paginateMonthly(deliveryRows, input.deliveryPage, input.pageSize),
     pickup: paginateMonthly(pickupRows, input.pickupPage, input.pageSize),

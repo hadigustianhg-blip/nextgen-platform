@@ -16,6 +16,7 @@ export type DailyDeliveryRow = {
   totalDelivery: number;
   totalTtd: number;
   totalPending: number;
+  deliveryWeight?: string;
 };
 
 export type DailyPickupRow = {
@@ -49,10 +50,13 @@ export function buildDailyActiveDeliveryRows(records: ActiveDispatchRecord[]) {
       totalDelivery: 0,
       totalTtd: 0,
       totalPending: 0,
+      deliveryWeight: "0",
     };
     row.totalDelivery += 1;
     if (canonicalDispatchText(record.deliveryStatusRaw) === "PENERIMAAN NORMAL") {
       row.totalTtd += 1;
+      row.deliveryWeight = new Prisma.Decimal(row.deliveryWeight ?? 0)
+        .plus(record.chargeWeight).toString();
     } else {
       row.totalPending += 1;
     }
@@ -72,6 +76,7 @@ export function buildMonthlyDeliveryRows(rows: DailyDeliveryRow[]) {
       totalDelivery: number;
       totalTtd: number;
       totalPending: number;
+      deliveryWeight: Prisma.Decimal;
       activeDates: Set<string>;
     }
   >();
@@ -82,11 +87,13 @@ export function buildMonthlyDeliveryRows(rows: DailyDeliveryRow[]) {
       totalDelivery: 0,
       totalTtd: 0,
       totalPending: 0,
+      deliveryWeight: new Prisma.Decimal(0),
       activeDates: new Set<string>(),
     };
     group.totalDelivery += row.totalDelivery;
     group.totalTtd += row.totalTtd;
     group.totalPending += row.totalPending;
+    group.deliveryWeight = group.deliveryWeight.plus(row.deliveryWeight ?? 0);
     group.activeDates.add(row.businessDate);
     groups.set(key, group);
   }
@@ -101,6 +108,7 @@ export function buildMonthlyDeliveryRows(rows: DailyDeliveryRow[]) {
         totalDelivery: group.totalDelivery,
         totalTtd: group.totalTtd,
         totalPending: group.totalPending,
+        deliveryWeight: group.deliveryWeight.toString(),
         achievement,
         target: DELIVERY_TARGET,
         status:
