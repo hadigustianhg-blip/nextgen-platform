@@ -7,6 +7,29 @@ export function isVoidStatus(value: string | null | undefined) {
   );
 }
 
+export function normalizeCurrentScanType(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("id-ID");
+}
+
+export function currentScanTypeOptions(
+  rows: Array<{ currentScanType: string | null }>,
+) {
+  const values = new Map<string, string>();
+  for (const row of rows) {
+    const key = normalizeCurrentScanType(row.currentScanType);
+    if (!key || values.has(key)) continue;
+    values.set(key, row.currentScanType!.normalize("NFKC").trim().replace(/\s+/g, " "));
+  }
+  return [...values.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((left, right) =>
+      left.label.localeCompare(right.label, "id-ID", { sensitivity: "base" }));
+}
+
 type InventoryRow = {
   id: string;
   businessDate: Date;
@@ -105,6 +128,7 @@ export async function listWaybillStuckDelivery(input: {
   customer?: string;
   goodsName?: string;
   currentScanSite?: string;
+  currentScanType?: string;
   problem?: string;
   void?: "" | "true" | "false";
   page: number;
@@ -162,7 +186,17 @@ export async function listWaybillStuckDelivery(input: {
       })
     : [];
   const joined = joinInventoryWithStatus(inventory, statuses);
+  const availableCurrentScanTypes = currentScanTypeOptions(joined);
+  const selectedCurrentScanType = normalizeCurrentScanType(input.currentScanType);
+  const selectedCurrentScanTypeAvailable = !selectedCurrentScanType || joined.some(
+    (row) => normalizeCurrentScanType(row.currentScanType) === selectedCurrentScanType,
+  );
   const filtered = joined
+    .filter(
+      (row) =>
+        !selectedCurrentScanType ||
+        normalizeCurrentScanType(row.currentScanType) === selectedCurrentScanType,
+    )
     .filter(
       (row) =>
         !input.currentScanSite ||
@@ -186,6 +220,8 @@ export async function listWaybillStuckDelivery(input: {
   return {
     data: filtered.slice(start, start + input.pageSize),
     summary: summarizeWaybillStuck(filtered),
+    availableCurrentScanTypes,
+    selectedCurrentScanTypeAvailable,
     pagination: {
       page: input.page,
       pageSize: input.pageSize,

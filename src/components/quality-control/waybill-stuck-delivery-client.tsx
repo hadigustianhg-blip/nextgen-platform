@@ -31,6 +31,8 @@ type Row = {
 };
 type Result = {
   data: Row[];
+  availableCurrentScanTypes: Array<{ value: string; label: string }>;
+  selectedCurrentScanTypeAvailable: boolean;
   summary: {
     totalInventory: number;
     uniqueWaybills: number;
@@ -44,6 +46,8 @@ type Result = {
 };
 const empty: Result = {
   data: [],
+  availableCurrentScanTypes: [],
+  selectedCurrentScanTypeAvailable: true,
   summary: {
     totalInventory: 0, uniqueWaybills: 0, statusFound: 0,
     statusNotFound: 0, totalProblem: 0, totalVoid: 0,
@@ -72,6 +76,7 @@ export function WaybillStuckDeliveryClient({ canSync }: { canSync: boolean }) {
   const [inputs, setInputs] = useState({ waybill: "", customer: "", goodsName: "", currentScanSite: "", problem: "" });
   const [filters, setFilters] = useState(inputs);
   const [voidFilter, setVoidFilter] = useState("");
+  const [currentScanType, setCurrentScanType] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -92,19 +97,26 @@ export function WaybillStuckDeliveryClient({ canSync }: { canSync: boolean }) {
       const query = new URLSearchParams({
         businessDate,
         ...filters,
+        currentScanType,
         void: voidFilter,
         page: String(page),
         pageSize: "20",
       });
       const response = await fetch(`/api/quality-control/waybill-stuck-delivery?${query}`, { cache: "no-store" });
       if (!response.ok) throw new Error();
-      setResult(await response.json());
+      const payload = (await response.json()) as Result;
+      if (currentScanType && !payload.selectedCurrentScanTypeAvailable) {
+        setCurrentScanType("");
+        setPage(1);
+        return;
+      }
+      setResult(payload);
     } catch {
       setNotice("Data Waybill Stuck Delivery tidak dapat dimuat.");
     } finally {
       setLoading(false);
     }
-  }, [businessDate, filters, page, voidFilter]);
+  }, [businessDate, currentScanType, filters, page, voidFilter]);
 
   useEffect(() => {
     queueMicrotask(() => void load());
@@ -161,6 +173,10 @@ export function WaybillStuckDeliveryClient({ canSync }: { canSync: boolean }) {
         <input aria-label="Customer" value={inputs.customer} onChange={(event) => update("customer", event.target.value)} placeholder="Customer" className={nextgenControlClass}/>
         <input aria-label="Goods Name" value={inputs.goodsName} onChange={(event) => update("goodsName", event.target.value)} placeholder="Goods Name" className={nextgenControlClass}/>
         <input aria-label="Current Scan Site" value={inputs.currentScanSite} onChange={(event) => update("currentScanSite", event.target.value)} placeholder="Current Scan Site" className={nextgenControlClass}/>
+        <select aria-label="Current Scan Type" value={currentScanType} onChange={(event) => { setPage(1); setCurrentScanType(event.target.value); }} className={nextgenControlClass}>
+          <option value="">Semua Current Scan Type</option>
+          {result.availableCurrentScanTypes.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
         <input aria-label="Problem" value={inputs.problem} onChange={(event) => update("problem", event.target.value)} placeholder="Problem" className={nextgenControlClass}/>
         <select aria-label="Void" value={voidFilter} onChange={(event) => { setPage(1); setVoidFilter(event.target.value); }} className={nextgenControlClass}><option value="">Semua Void</option><option value="true">Void</option><option value="false">Tidak Void</option></select>
       </div>
@@ -170,7 +186,7 @@ export function WaybillStuckDeliveryClient({ canSync }: { canSync: boolean }) {
     </section>
     <TableCard footer={<div className="flex items-center justify-between"><span>{result.pagination.total} inventory</span><div className="flex gap-2"><button disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)} className="rounded-lg border px-3 py-1.5 disabled:opacity-40">Sebelumnya</button><span className="px-2 py-1.5">{page} / {Math.max(1,result.pagination.totalPages)}</span><button disabled={page >= result.pagination.totalPages || loading} onClick={() => setPage((value) => value + 1)} className="rounded-lg border px-3 py-1.5 disabled:opacity-40">Berikutnya</button></div></div>}>
       <div className="overflow-x-auto"><table className="min-w-[1600px] w-full text-left text-sm"><thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500"><tr>{["Business Date","Waybill","Customer","Goods Name","Inventory Hours","Current Scan Site","Current Scan Time","Current Scan Type","Scan Type","Problem Reason","Void","Status"].map((label)=><th key={label} className="px-4 py-3">{label}</th>)}</tr></thead>
-      <tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan={12} className="py-14 text-center text-slate-500"><LoaderCircle className="mx-auto mb-2 animate-spin"/>Memuat data…</td></tr> : result.data.length === 0 ? <tr><td colSpan={12} className="py-14 text-center text-slate-500">Belum ada data Inventory pada Business Date ini.</td></tr> : result.data.map((row)=><tr key={row.id}><td className="px-4 py-3">{date(row.businessDate)}</td><td className="px-4 py-3 font-semibold">{row.waybill}</td><td className="px-4 py-3">{row.customer ?? "—"}</td><td className="max-w-72 truncate px-4 py-3" title={row.goodsName ?? ""}>{row.goodsName ?? "—"}</td><td className="px-4 py-3 text-right tabular-nums">{row.inventoryHours.toLocaleString("id-ID")}</td><td className="px-4 py-3">{row.currentScanSite ?? "—"}</td><td className="px-4 py-3">{row.currentScanTime ?? "—"}</td><td className="px-4 py-3">{row.currentScanType ?? "—"}</td><td className="px-4 py-3">{row.scanType ?? "—"}</td><td className="max-w-72 truncate px-4 py-3" title={row.problemReason ?? ""}>{row.problemReason ?? "—"}</td><td className="px-4 py-3">{row.void ?? "—"}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusTone[row.status]}`}>{statusLabel[row.status]}</span></td></tr>)}</tbody>
+      <tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan={12} className="py-14 text-center text-slate-500"><LoaderCircle className="mx-auto mb-2 animate-spin"/>Memuat data…</td></tr> : result.data.length === 0 ? <tr><td colSpan={12} className="py-14 text-center text-slate-500">{currentScanType ? "Tidak ada Waybill Stuck Delivery untuk Current Scan Type ini." : "Belum ada data Inventory pada Business Date ini."}</td></tr> : result.data.map((row)=><tr key={row.id}><td className="px-4 py-3">{date(row.businessDate)}</td><td className="px-4 py-3 font-semibold">{row.waybill}</td><td className="px-4 py-3">{row.customer ?? "—"}</td><td className="max-w-72 truncate px-4 py-3" title={row.goodsName ?? ""}>{row.goodsName ?? "—"}</td><td className="px-4 py-3 text-right tabular-nums">{row.inventoryHours.toLocaleString("id-ID")}</td><td className="px-4 py-3">{row.currentScanSite ?? "—"}</td><td className="px-4 py-3">{row.currentScanTime ?? "—"}</td><td className="px-4 py-3">{row.currentScanType ?? "—"}</td><td className="px-4 py-3">{row.scanType ?? "—"}</td><td className="max-w-72 truncate px-4 py-3" title={row.problemReason ?? ""}>{row.problemReason ?? "—"}</td><td className="px-4 py-3">{row.void ?? "—"}</td><td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusTone[row.status]}`}>{statusLabel[row.status]}</span></td></tr>)}</tbody>
       </table></div>
     </TableCard>
   </div>;

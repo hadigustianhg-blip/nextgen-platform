@@ -63,9 +63,11 @@ import {
   canSyncWaybillStuck,
 } from "./waybill-stuck-delivery.authorization";
 import {
+  currentScanTypeOptions,
   isVoidStatus,
   joinInventoryWithStatus,
   listWaybillStuckDelivery,
+  normalizeCurrentScanType,
   summarizeWaybillStuck,
 } from "./waybill-stuck-delivery.service";
 import {
@@ -238,6 +240,20 @@ describe("Waybill Stuck join and read", () => {
     expect(isVoidStatus("tidak")).toBe(false);
   });
 
+  it("normalizes current scan type case and whitespace and excludes empty options", () => {
+    expect(normalizeCurrentScanType(" PENGAMBILAN   PAKET ")).toBe("pengambilan paket");
+    expect(currentScanTypeOptions([
+      { currentScanType: "pengambilan paket" },
+      { currentScanType: " PENGAMBILAN   PAKET " },
+      { currentScanType: "Scan Paket Bermasalah" },
+      { currentScanType: null },
+      { currentScanType: "   " },
+    ])).toEqual([
+      { value: "pengambilan paket", label: "pengambilan paket" },
+      { value: "scan paket bermasalah", label: "Scan Paket Bermasalah" },
+    ]);
+  });
+
   it("keeps tenant/outlet/date isolation and summarizes before pagination", async () => {
     memory.rawInventoryDetail.findMany.mockResolvedValue(inventory);
     memory.rawWaybillStatus.findMany.mockResolvedValue(statuses);
@@ -251,10 +267,94 @@ describe("Waybill Stuck join and read", () => {
     });
     expect(memory.rawWaybillStatus.findMany.mock.calls[0][0].where).toMatchObject({
       tenantId: "tenant-1", outletId: "outlet-1",
+      businessDate: new Date("2026-07-30T00:00:00.000Z"),
+      sourceWaybill: { in: ["WB1", "WB2"] },
     });
     expect(result.data).toHaveLength(1);
     expect(result.summary.totalInventory).toBe(2);
     expect(result.pagination).toMatchObject({ total: 2, totalPages: 2 });
+    expect(result.availableCurrentScanTypes).toEqual([{ value: "inbound", label: "Inbound" }]);
+    expect(result.selectedCurrentScanTypeAvailable).toBe(true);
+  });
+
+  it("filters exact canonical current scan type before summary and pagination", async () => {
+    const inventoryRows = [
+      ...inventory,
+      {
+        ...inventory[0]!, id: "three", billCode: "WB3", customerName: "Customer C",
+        goodsName: "Goods C", inventoryHours: 30,
+      },
+    ];
+    const statusRows = [
+      { ...statuses[0]!, currentScanType: " pengambilan   paket ", currentScanSite: "SITE-A", problemReason: "Problem", isVoid: "tidak" },
+      { ...statuses[0]!, sourceWaybill: "WB2", currentScanType: "PENGAMBILAN PAKET", currentScanSite: "SITE-A", problemReason: "", isVoid: "ya" },
+      { ...statuses[0]!, sourceWaybill: "WB3", currentScanType: "Scan Bermasalah", currentScanSite: "SITE-B", problemReason: "Problem", isVoid: "tidak" },
+    ];
+    memory.rawInventoryDetail.findMany.mockResolvedValue(inventoryRows);
+    memory.rawWaybillStatus.findMany.mockResolvedValue(statusRows);
+
+    const result = await listWaybillStuckDelivery({
+      tenantId: "tenant-1", outletId: "outlet-1", businessDate: "2026-07-30",
+      currentScanType: "PENGAMBILAN   PAKET", page: 1, pageSize: 1,
+    });
+
+    expect(result.availableCurrentScanTypes).toEqual([
+      { value: "pengambilan paket", label: "pengambilan paket" },
+      { value: "scan bermasalah", label: "Scan Bermasalah" },
+    ]);
+    expect(result.selectedCurrentScanTypeAvailable).toBe(true);
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]!.waybill).toBe("WB1");
+    expect(result.pagination).toMatchObject({ total: 2, totalPages: 2 });
+    expect(result.summary).toEqual({
+      totalInventory: 2,
+      uniqueWaybills: 2,
+      statusFound: 2,
+      statusNotFound: 0,
+      totalProblem: 1,
+      totalVoid: 1,
+      averageInventoryHours: 15,
+    });
+  });
+
+  it("combines current scan type with site, problem, void, and inventory search filters", async () => {
+    memory.rawInventoryDetail.findMany.mockResolvedValue(inventory);
+    memory.rawWaybillStatus.findMany.mockResolvedValue([
+      { ...statuses[0]!, currentScanType: "Inbound", currentScanSite: "SUM001A", isVoid: "tidak" },
+      { ...statuses[0]!, sourceWaybill: "WB2", currentScanType: "Inbound", currentScanSite: "OTHER", isVoid: "ya" },
+    ]);
+    const result = await listWaybillStuckDelivery({
+      tenantId: "tenant-1", outletId: "outlet-1", businessDate: "2026-07-30",
+      waybill: "WB1", customer: "Customer A", goodsName: "Goods A",
+      currentScanType: "inbound", currentScanSite: "SUM", problem: "Problem",
+      void: "false", page: 1, pageSize: 20,
+    });
+    expect(memory.rawInventoryDetail.findMany.mock.calls[0]![0].where).toMatchObject({
+      tenantId: "tenant-1", outletId: "outlet-1",
+      businessDate: new Date("2026-07-30T00:00:00.000Z"),
+      billCode: { contains: "WB1", mode: "insensitive" },
+      customerName: { contains: "Customer A", mode: "insensitive" },
+      goodsName: { contains: "Goods A", mode: "insensitive" },
+    });
+    expect(result.data.map((row) => row.waybill)).toEqual(["WB1"]);
+    expect(result.summary.totalInventory).toBe(1);
+  });
+
+  it("returns zero summary instead of falling back when the selected type has no rows", async () => {
+    memory.rawInventoryDetail.findMany.mockResolvedValue(inventory);
+    memory.rawWaybillStatus.findMany.mockResolvedValue(statuses);
+    const result = await listWaybillStuckDelivery({
+      tenantId: "tenant-1", outletId: "outlet-1", businessDate: "2026-07-30",
+      currentScanType: "Missing", page: 1, pageSize: 20,
+    });
+    expect(result.data).toEqual([]);
+    expect(result.selectedCurrentScanTypeAvailable).toBe(false);
+    expect(result.pagination).toMatchObject({ total: 0, totalPages: 0 });
+    expect(result.summary).toEqual({
+      totalInventory: 0, uniqueWaybills: 0, statusFound: 0,
+      statusNotFound: 0, totalProblem: 0, totalVoid: 0,
+      averageInventoryHours: 0,
+    });
   });
 });
 
@@ -295,5 +395,19 @@ describe("Waybill Stuck UI and RBAC", () => {
     expect(ui).toContain("queueMicrotask(() => void load())");
     expect(ui).toContain("setBusinessDate(event.target.value)");
     expect(ui).toContain('onClick={() => void load()}');
+  });
+
+  it("uses backend scan type options, resets pagination, and renders the filtered empty state", async () => {
+    const ui = await readFile(
+      new URL("../../components/quality-control/waybill-stuck-delivery-client.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(ui).toContain("Semua Current Scan Type");
+    expect(ui).toContain("result.availableCurrentScanTypes.map");
+    expect(ui).toContain("!payload.selectedCurrentScanTypeAvailable");
+    expect(ui).toContain("currentScanType,");
+    expect(ui).toContain('setPage(1); setCurrentScanType(event.target.value)');
+    expect(ui).toContain("Tidak ada Waybill Stuck Delivery untuk Current Scan Type ini.");
+    expect(ui).not.toContain("result.data.filter");
   });
 });
