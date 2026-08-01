@@ -17,9 +17,26 @@ type Scope = { tenantId: string; outletId: string };
 type Context = Scope & { actorId: string };
 type SourceFetcher = typeof fetchDeliverySource;
 
-class DeliverySourceStageError extends Error {
-  constructor(readonly stage: "FETCH_DISPATCH" | "FETCH_COD", options: { cause: unknown }) {
-    super("Delivery source request failed", options);
+export async function fetchDeliverySources(
+  fetchSource: SourceFetcher,
+  operationalDate: string,
+  onStage: (stage: "FETCH_DISPATCH" | "FETCH_COD") => void = () => {},
+) {
+  onStage("FETCH_DISPATCH");
+  const dispatchEnvelope = await fetchSource("/jfs-dispatch", operationalDate);
+  onStage("FETCH_COD");
+  const codEnvelope = await fetchSource("/jfs-cod", operationalDate);
+  return { dispatchEnvelope, codEnvelope };
+}
+
+export class DeliverySyncError extends Error {
+  constructor(readonly reference: {
+    requestId: string;
+    stage: string;
+    code: string;
+  }) {
+    super("Sinkronisasi Delivery Settlement gagal.");
+    this.name = "DeliverySyncError";
   }
 }
 
@@ -91,12 +108,19 @@ export function deliverySyncFailureDiagnostic(input: {
   return {
     requestId: input.requestId,
     stage: input.stage,
-    errorCode: input.error instanceof DeliverySourceError || input.error instanceof DeliverySourceStageError
-      ? "UPSTREAM_ERROR"
+    errorCode: input.error instanceof DeliverySourceError
+      ? input.error.diagnostic.code
       : "INTERNAL_ERROR",
     prismaCode: input.error instanceof Prisma.PrismaClientKnownRequestError
       ? input.error.code
       : null,
+    target: input.error instanceof DeliverySourceError ? input.error.diagnostic.target : null,
+    httpStatus: input.error instanceof DeliverySourceError ? input.error.diagnostic.httpStatus : null,
+    contentType: input.error instanceof DeliverySourceError ? input.error.diagnostic.contentType : null,
+    bodyPreview: input.error instanceof DeliverySourceError ? input.error.diagnostic.bodyPreview : null,
+    connectionCode: input.error instanceof DeliverySourceError ? input.error.diagnostic.connectionCode : null,
+    attemptCount: input.error instanceof DeliverySourceError ? input.error.diagnostic.attemptCount : 0,
+    durationMs: input.error instanceof DeliverySourceError ? input.error.diagnostic.durationMs : 0,
     tenantId: input.tenantId,
     outletId: input.outletId,
     businessDate: input.businessDate,
@@ -163,6 +187,8 @@ export async function syncDeliverySettlement(
 ) {
   const requestId = randomUUID();
   let stage = "INITIALIZE";
+  let dispatchFetch: { httpStatus: number | null; attemptCount: number; durationMs: number } | null = null;
+  let codFetch: { httpStatus: number | null; attemptCount: number; durationMs: number } | null = null;
   const operationalDate = options.operationalDate ?? todayJakarta();
   const date = new Date(`${operationalDate}T00:00:00.000Z`);
   const startedAt = new Date();
@@ -178,16 +204,14 @@ export async function syncDeliverySettlement(
 
   try {
     const fetchSource = options.fetchSource ?? fetchDeliverySource;
-    stage = "FETCH_SOURCE";
     // Both reads must finish successfully before the first financial write.
-    const [dispatchEnvelope, codEnvelope] = await Promise.all([
-      fetchSource("/jfs-dispatch", operationalDate).catch((error) => {
-        throw new DeliverySourceStageError("FETCH_DISPATCH", { cause: error });
-      }),
-      fetchSource("/jfs-cod", operationalDate).catch((error) => {
-        throw new DeliverySourceStageError("FETCH_COD", { cause: error });
-      }),
-    ]);
+    const { dispatchEnvelope, codEnvelope } = await fetchDeliverySources(
+      fetchSource,
+      operationalDate,
+      (currentStage) => { stage = currentStage; },
+    );
+    dispatchFetch = "diagnostic" in dispatchEnvelope ? dispatchEnvelope.diagnostic : null;
+    codFetch = "diagnostic" in codEnvelope ? codEnvelope.diagnostic : null;
     let dispatchCreated = 0, dispatchUpdated = 0, dispatchUnchanged = 0, dispatchInactive = 0;
     let codCreated = 0, codUpdated = 0, codUnchanged = 0, duplicate = 0, anomaly = 0;
     const parsedDispatches: DispatchSourceRecord[] = [];
@@ -409,6 +433,13 @@ export async function syncDeliverySettlement(
         codUniqueWaybillCount: uniqueCods.length,
         codOverlapDuplicateCount: codOverlapDuplicate,
         codUnchangedCount: codUnchanged,
+        dispatchHttpStatus: dispatchFetch?.httpStatus ?? null,
+        codHttpStatus: codFetch?.httpStatus ?? null,
+        dispatchAttemptCount: dispatchFetch?.attemptCount ?? 1,
+        codAttemptCount: codFetch?.attemptCount ?? 1,
+        dispatchDurationMs: dispatchFetch?.durationMs ?? null,
+        codDurationMs: codFetch?.durationMs ?? null,
+        requestId,
       },
     } });
     await prisma.auditLog.create({ data: {
@@ -439,7 +470,7 @@ export async function syncDeliverySettlement(
     const completedAt = new Date();
     const diagnostic = deliverySyncFailureDiagnostic({
       requestId,
-      stage: error instanceof DeliverySourceStageError ? error.stage : stage,
+      stage,
       error,
       tenantId: context.tenantId,
       outletId: context.outletId,
@@ -457,9 +488,14 @@ export async function syncDeliverySettlement(
         stage: diagnostic.stage,
         errorCode: diagnostic.errorCode,
         prismaCode: diagnostic.prismaCode,
+        dispatchHttpStatus: stage === "FETCH_DISPATCH" ? diagnostic.httpStatus : dispatchFetch?.httpStatus ?? null,
+        codHttpStatus: stage === "FETCH_COD" ? diagnostic.httpStatus : codFetch?.httpStatus ?? null,
+        dispatchAttemptCount: stage === "FETCH_DISPATCH" ? diagnostic.attemptCount : dispatchFetch?.attemptCount ?? 0,
+        codAttemptCount: stage === "FETCH_COD" ? diagnostic.attemptCount : codFetch?.attemptCount ?? 0,
+        durationMs: Date.now() - startedAt.getTime(),
       },
     } });
-    throw new DeliverySourceError();
+    throw new DeliverySyncError({ requestId, stage, code: diagnostic.errorCode });
   }
 }
 

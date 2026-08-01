@@ -70,4 +70,12 @@ describe("Delivery Settlement UI contract", () => {
     expect(client).toContain("operationalDate: syncDate");
     expect(client).toContain("await load(refreshedQuery)");
   });
+
+  it("shows a safe fetch-stage message and a short diagnostic reference", () => {
+    expect(client).toContain("body.error?.message");
+    expect(client).toContain("body.error?.requestId");
+    expect(client).toContain("Kode referensi:");
+    expect(client).not.toContain("body.error?.target");
+    expect(client).not.toContain("body.error?.bodyPreview");
+  });
 });

@@ -9,6 +9,7 @@ import {
   calculateDeliveryFinancials,
   deduplicateDispatchEnvelope,
   deliverySyncFailureDiagnostic,
+  fetchDeliverySources,
   normalizeComparison,
   sourceHash,
   summarizeDeliveryRows,
@@ -167,7 +168,7 @@ describe("Delivery Settlement aggregation", () => {
       outletId: "outlet-1",
       businessDate: "2026-07-31",
     });
-    expect(diagnostic).toEqual({
+    expect(diagnostic).toMatchObject({
       requestId: "request-1",
       stage: "UPSERT_MASTER_SETORAN",
       errorCode: "INTERNAL_ERROR",
@@ -177,6 +178,36 @@ describe("Delivery Settlement aggregation", () => {
       businessDate: "2026-07-31",
     });
     expect(JSON.stringify(diagnostic)).not.toContain("sensitive database detail");
+  });
+
+  it("does not fetch COD or enter later stages when Dispatch fails", async () => {
+    const stages: string[] = [];
+    const fetcher = vi.fn(async (endpoint: "/jfs-dispatch" | "/jfs-cod") => {
+      if (endpoint === "/jfs-dispatch") throw new Error("dispatch failed");
+      return { success: true, total: 0, data: [], diagnostic: {
+        endpoint, httpStatus: 200, contentType: "application/json",
+        attemptCount: 1, durationMs: 1,
+      } };
+    });
+    await expect(fetchDeliverySources(fetcher, "2026-07-31", (stage) => stages.push(stage)))
+      .rejects.toThrow("dispatch failed");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(stages).toEqual(["FETCH_DISPATCH"]);
+  });
+
+  it("reports COD independently after a successful Dispatch fetch", async () => {
+    const stages: string[] = [];
+    const fetcher = vi.fn(async (endpoint: "/jfs-dispatch" | "/jfs-cod") => {
+      if (endpoint === "/jfs-cod") throw new Error("cod failed");
+      return { success: true, total: 0, data: [], diagnostic: {
+        endpoint, httpStatus: 200, contentType: "application/json",
+        attemptCount: 1, durationMs: 1,
+      } };
+    });
+    await expect(fetchDeliverySources(fetcher, "2026-07-31", (stage) => stages.push(stage)))
+      .rejects.toThrow("cod failed");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(stages).toEqual(["FETCH_DISPATCH", "FETCH_COD"]);
   });
 
   it("uses the union of pickup, DFOD, and COD teams, including pickup-only teams", () => {

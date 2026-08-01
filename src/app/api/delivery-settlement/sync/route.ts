@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { canSyncDelivery, deliveryOperationalDateSchema, deliveryScope, syncDeliverySettlement } from "@/modules/delivery-settlement";
+import { canSyncDelivery, DeliverySyncError, deliveryOperationalDateSchema, deliveryScope, syncDeliverySettlement } from "@/modules/delivery-settlement";
 
 export async function POST(request: Request) {
   const session = await getSession();
@@ -15,7 +15,16 @@ export async function POST(request: Request) {
   if (parsed && !parsed.success) return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Tanggal tidak valid." } }, { status: 400 });
   try {
     return NextResponse.json({ data: await syncDeliverySettlement({ ...scope, actorId: session.userId }, { operationalDate: parsed?.data }) });
-  } catch {
+  } catch (error) {
+    if (error instanceof DeliverySyncError) {
+      const source = error.reference.stage === "FETCH_DISPATCH" ? "Dispatch" : error.reference.stage === "FETCH_COD" ? "COD" : "sumber";
+      return NextResponse.json({ error: {
+        code: error.reference.code,
+        stage: error.reference.stage,
+        requestId: error.reference.requestId,
+        message: `Sinkronisasi gagal saat mengambil data ${source}.`,
+      } }, { status: 502 });
+    }
     return NextResponse.json({ error: { code: "DELIVERY_SYNC_FAILED", message: "Sinkronisasi Delivery Settlement gagal." } }, { status: 502 });
   }
 }

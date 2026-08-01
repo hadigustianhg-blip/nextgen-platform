@@ -69,4 +69,4 @@ export const sourceEnvelopeSchema = z.object({
   success: z.boolean().optional(),
   total: z.number().int().nonnegative(),
   data: z.array(z.unknown()),
-});
+}).refine((value) => value.success !== false, { message: "Middleware response is not successful" });

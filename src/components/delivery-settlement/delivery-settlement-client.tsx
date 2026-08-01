@@ -97,7 +97,12 @@ export function DeliverySettlementClient({ outletCode }: { outletCode: string })
         body: JSON.stringify({ operationalDate: syncDate }),
       });
       const body = await response.json();
-      if (!response.ok) throw new Error();
+      if (!response.ok) {
+        const reference = typeof body.error?.requestId === "string"
+          ? ` Kode referensi: ${body.error.requestId.slice(0, 8).toUpperCase()}`
+          : "";
+        throw new Error(`${body.error?.message ?? "Sinkronisasi gagal. Data lama tetap dipertahankan."}${reference}`);
+      }
       const cod = body.data?.cod ?? {};
       const successText = [
         "Delivery Settlement berhasil disinkronkan:",
@@ -121,7 +126,10 @@ export function DeliverySettlementClient({ outletCode }: { outletCode: string })
         await load();
       }
       setNotice({ tone: "success", text: successText });
-    } catch { setNotice({ tone: "error", text: "Sinkronisasi gagal. Data lama tetap dipertahankan." }); }
+    } catch (error) {
+      const details = error instanceof Error ? error.message : "";
+      setNotice({ tone: "error", text: details || "Sinkronisasi gagal. Data lama tetap dipertahankan." });
+    }
     finally { setSyncing(false); }
   }
 
