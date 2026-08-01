@@ -67,6 +67,7 @@ export function deduplicateDispatchEnvelope(records: DispatchSourceRecord[]) {
 type Aggregate = {
   courierKey: string;
   courierName: string;
+  pickupCash: Prisma.Decimal;
   dfod: Prisma.Decimal;
   codCash: Prisma.Decimal;
   codQris: Prisma.Decimal;
@@ -75,6 +76,7 @@ type Aggregate = {
 export function aggregateDeliveryRecords(
   dispatches: Array<{ courierNameRaw: string | null; deliveryStatusRaw: string | null; freightAmount: Prisma.Decimal }>,
   cods: Array<{ courierNameRaw: string | null; repaymentTypeCode: number | null; repaymentTypeLabel: string | null; codAmount: Prisma.Decimal }>,
+  pickups: Array<{ staffName: string | null; settlementRaw: string | null; freightAmount: Prisma.Decimal }> = [],
 ) {
   const aggregates = new Map<string, Aggregate>();
   let anomaly = 0;
@@ -87,7 +89,7 @@ export function aggregateDeliveryRecords(
       courierName: normalizeComparison(name)
         ? name!.trim().replace(/\s+/g, " ")
         : "Team Belum Terpetakan",
-      dfod: zero(), codCash: zero(), codQris: zero(),
+      pickupCash: zero(), dfod: zero(), codCash: zero(), codQris: zero(),
     };
     aggregates.set(courierKey, created);
     return created;
@@ -108,12 +110,19 @@ export function aggregateDeliveryRecords(
       anomaly += 1;
       continue;
     }
-    // codCash is the existing persistence field for total COD obligation.
-    // QRIS is a reporting subset and must not be added to COD a second time.
-    target.codCash = target.codCash.plus(row.codAmount);
-    if (row.repaymentTypeCode === 2 || label === "QRIS COD") {
+    const isQris = row.repaymentTypeCode === 2 || label === "QRIS COD";
+    // JFS exposes QRIS as a breakdown row. It is reported separately and must
+    // never be added again to the collectible COD obligation.
+    if (isQris) {
       target.codQris = target.codQris.plus(row.codAmount);
+    } else {
+      target.codCash = target.codCash.plus(row.codAmount);
     }
+  }
+  for (const row of pickups) {
+    if (normalizeComparison(row.settlementRaw) !== "TUNAI") continue;
+    const target = get(row.staffName);
+    target.pickupCash = target.pickupCash.plus(row.freightAmount);
   }
   return { rows: [...aggregates.values()], anomaly };
 }
@@ -261,16 +270,32 @@ export async function syncDeliverySettlement(
         }
       }
 
-      const [dispatchVersions, cods] = await Promise.all([
+      const [dispatchVersions, cods, pickups] = await Promise.all([
         tx.rawDispatch.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED", isActive: true } }),
         tx.rawCod.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED" } }),
+        tx.masterPickup.findMany({
+          where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date },
+          select: {
+            staffName: true,
+            freightAmount: true,
+            rawPickup: { select: { settlementRaw: true } },
+          },
+        }),
       ]);
       const dispatches = selectLatestDispatchRecords(dispatchVersions);
       const finalCods = selectLatestCodRecords(cods);
-      const aggregate = aggregateDeliveryRecords(dispatches, finalCods);
+      const aggregate = aggregateDeliveryRecords(
+        dispatches,
+        finalCods,
+        pickups.map((row) => ({
+          staffName: row.staffName,
+          freightAmount: row.freightAmount,
+          settlementRaw: row.rawPickup.settlementRaw,
+        })),
+      );
       anomaly += aggregate.anomaly;
       for (const candidate of aggregate.rows) {
-        const total = candidate.dfod.plus(candidate.codCash);
+        const total = candidate.pickupCash.plus(candidate.dfod).plus(candidate.codCash);
         const where = { tenantId_outletId_operationalDate_courierKey: {
           tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, courierKey: candidate.courierKey,
         } };
@@ -280,10 +305,10 @@ export async function syncDeliverySettlement(
             tenantId: context.tenantId, outletId: context.outletId, operationalDate: date,
             courierKey: candidate.courierKey, courierName: candidate.courierName,
             dfodAmount: candidate.dfod, codCashAmount: candidate.codCash, codQrisAmount: candidate.codQris,
-            totalSettlementAmount: total, normalizationVersion: 2,
+            totalSettlementAmount: total, normalizationVersion: 3,
             sourceFetchedFrom: startedAt, sourceFetchedTo: new Date(),
           } });
-        } else if (existing.normalizationVersion < 2) {
+        } else if (existing.normalizationVersion < 3) {
           await tx.masterSetoran.update({ where: { id: existing.id }, data: {
             courierName: candidate.courierName, dfodAmount: candidate.dfod,
             codCashAmount: candidate.codCash, codQrisAmount: candidate.codQris,
@@ -291,12 +316,12 @@ export async function syncDeliverySettlement(
             needsReview: false, proposedDfodAmount: null, proposedCodCashAmount: null,
             proposedCodQrisAmount: null, proposedObligationAmount: null,
             reviewDecision: null, reviewedAt: null, reviewedByUserId: null,
-            normalizationVersion: 2, obligationVersion: { increment: 1 },
+            normalizationVersion: 3, obligationVersion: { increment: 1 },
             sourceFetchedTo: new Date(),
           } });
           await tx.auditLog.create({ data: {
             tenantId: context.tenantId, outletId: context.outletId, actorId: context.actorId,
-            action: "UPDATE", entityType: "DELIVERY_SETTLEMENT_COD_DEDUPLICATED",
+            action: "UPDATE", entityType: "DELIVERY_SETTLEMENT_SEMANTICS_ALIGNED",
             entityId: existing.id, metadata: {
               previous: existing.totalSettlementAmount.toString(), current: total.toString(),
             },
@@ -418,11 +443,19 @@ const paymentInclude = {
   },
 };
 
-function mapMaster(row: Prisma.MasterSetoranGetPayload<{ include: typeof paymentInclude }>) {
+function pickupAggregationKey(date: Date, staffName: string | null) {
+  return `${date.toISOString().slice(0, 10)}:${normalizeComparison(staffName) || "TEAM BELUM TERPETAKAN"}`;
+}
+
+function mapMaster(
+  row: Prisma.MasterSetoranGetPayload<{ include: typeof paymentInclude }>,
+  pickupCashAmount: Prisma.Decimal = zero(),
+) {
   const financial = calculateDeliveryFinancials(row);
   return {
     id: row.id, updatedAt: row.updatedAt, operationalDate: row.operationalDate,
-    courierName: row.courierName, dfodAmount: row.dfodAmount.toString(),
+    courierName: row.courierName, pickupCashAmount: pickupCashAmount.toString(),
+    dfodAmount: row.dfodAmount.toString(),
     codCashAmount: row.codCashAmount.toString(), codQrisAmount: row.codQrisAmount.toString(),
     codCashOnlyAmount: row.codCashAmount.minus(row.codQrisAmount).toString(),
     totalSettlement: row.totalSettlementAmount.toString(),
@@ -444,6 +477,7 @@ export function summarizeDeliveryRows(rows: Array<{
   codCashAmount: string;
   codQrisAmount: string;
   dfodAmount: string;
+  pickupCashAmount?: string;
   paymentStatus: "UNCLEARED" | "CLEAR" | "OVERPAID";
 }>) {
   return rows.reduce((sum, row) => {
@@ -454,11 +488,12 @@ export function summarizeDeliveryRows(rows: Array<{
     sum.totalCod = sum.totalCod.plus(row.codCashAmount);
     sum.totalCodQris = sum.totalCodQris.plus(row.codQrisAmount);
     sum.totalDfod = sum.totalDfod.plus(row.dfodAmount);
+    sum.totalPickupCash = sum.totalPickupCash.plus(row.pickupCashAmount ?? 0);
     if (row.paymentStatus === "CLEAR") sum.clearCount += 1;
     else if (row.paymentStatus === "UNCLEARED") sum.unclearedCount += 1;
     else sum.overpaidCount += 1;
     return sum;
-  }, { totalSettlement: zero(), totalCashReceived: zero(), totalTransferReceived: zero(), totalOutstanding: zero(), totalCod: zero(), totalCodQris: zero(), totalDfod: zero(), clearCount: 0, unclearedCount: 0, overpaidCount: 0 });
+  }, { totalSettlement: zero(), totalCashReceived: zero(), totalTransferReceived: zero(), totalOutstanding: zero(), totalCod: zero(), totalCodQris: zero(), totalDfod: zero(), totalPickupCash: zero(), clearCount: 0, unclearedCount: 0, overpaidCount: 0 });
 }
 
 export async function listDeliverySettlements(input: Scope & {
@@ -473,7 +508,29 @@ export async function listDeliverySettlements(input: Scope & {
     },
     include: paymentInclude, orderBy: [{ operationalDate: "desc" }, { courierName: "asc" }, { id: "desc" }],
   });
-  const filtered = candidates.map(mapMaster)
+  const pickupRows = candidates.length === 0 ? [] : await prisma.masterPickup.findMany({
+    where: {
+      tenantId: input.tenantId,
+      outletId: input.outletId,
+      operationalDate: { in: [...new Map(candidates.map((row) => [row.operationalDate.toISOString(), row.operationalDate])).values()] },
+    },
+    select: {
+      operationalDate: true,
+      staffName: true,
+      freightAmount: true,
+      rawPickup: { select: { settlementRaw: true } },
+    },
+  });
+  const pickupByTeam = new Map<string, Prisma.Decimal>();
+  for (const pickup of pickupRows) {
+    if (normalizeComparison(pickup.rawPickup.settlementRaw) !== "TUNAI") continue;
+    const key = pickupAggregationKey(pickup.operationalDate, pickup.staffName);
+    pickupByTeam.set(key, (pickupByTeam.get(key) ?? zero()).plus(pickup.freightAmount));
+  }
+  const filtered = candidates.map((row) => mapMaster(
+    row,
+    pickupByTeam.get(pickupAggregationKey(row.operationalDate, row.courierName)) ?? zero(),
+  ))
     .filter((row) => !input.paymentStatus || row.paymentStatus === input.paymentStatus)
     .filter((row) => !input.paymentMethod || row.paymentMethodSummary === input.paymentMethod);
   const summary = summarizeDeliveryRows(filtered);
@@ -485,6 +542,8 @@ export async function listDeliverySettlements(input: Scope & {
       totalSettlement: summary.totalSettlement.toString(), totalCashReceived: summary.totalCashReceived.toString(),
       totalTransferReceived: summary.totalTransferReceived.toString(), totalOutstanding: summary.totalOutstanding.toString(),
       totalCod: summary.totalCod.toString(), totalCodQris: summary.totalCodQris.toString(),
+      totalCodCash: summary.totalCod.minus(summary.totalCodQris).toString(),
+      totalPickupCash: summary.totalPickupCash.toString(),
       totalDfod: summary.totalDfod.toString(), courierCount: filtered.length,
       clearCount: summary.clearCount, unclearedCount: summary.unclearedCount, overpaidCount: summary.overpaidCount,
     },
@@ -493,7 +552,19 @@ export async function listDeliverySettlements(input: Scope & {
 
 export async function getDeliverySettlement(scope: Scope, id: string) {
   const row = await prisma.masterSetoran.findFirst({ where: { id, ...scope }, include: paymentInclude });
-  return row ? mapMaster(row) : null;
+  if (!row) return null;
+  const pickups = await prisma.masterPickup.findMany({
+    where: { ...scope, operationalDate: row.operationalDate },
+    select: { staffName: true, freightAmount: true, rawPickup: { select: { settlementRaw: true } } },
+  });
+  const pickupCash = pickups.reduce(
+    (sum, pickup) => normalizeComparison(pickup.staffName) === row.courierKey &&
+      normalizeComparison(pickup.rawPickup.settlementRaw) === "TUNAI"
+      ? sum.plus(pickup.freightAmount)
+      : sum,
+    zero(),
+  );
+  return mapMaster(row, pickupCash);
 }
 
 export async function adjustDeliverySettlement(

@@ -97,15 +97,15 @@ describe("Delivery Settlement aggregation", () => {
     expect(result.rows[0].dfod.toString()).toBe("300000");
   });
 
-  it("classifies COD codes 0 and 1 as cash and 2 as QRIS", () => {
+  it("keeps QRIS breakdown out of the collectible COD sum", () => {
     const result = aggregateDeliveryRecords([], [
       { courierNameRaw: "RIDWAN", repaymentTypeCode: 0, repaymentTypeLabel: "COD", codAmount: d(400000) },
       { courierNameRaw: "RIDWAN", repaymentTypeCode: 1, repaymentTypeLabel: "COD", codAmount: d(400000) },
       { courierNameRaw: "RIDWAN", repaymentTypeCode: 2, repaymentTypeLabel: "Qris COD", codAmount: d(108813) },
     ]);
-    expect(result.rows[0].codCash.toString()).toBe("908813");
+    expect(result.rows[0].codCash.toString()).toBe("800000");
     expect(result.rows[0].codQris.toString()).toBe("108813");
-    expect(result.rows[0].dfod.plus(result.rows[0].codCash).toString()).toBe("908813");
+    expect(result.rows[0].dfod.plus(result.rows[0].codCash).toString()).toBe("800000");
   });
 
   it("uses normalized TYPE label when a known code is unavailable", () => {
@@ -114,7 +114,7 @@ describe("Delivery Settlement aggregation", () => {
       { courierNameRaw: "A", repaymentTypeCode: null, repaymentTypeLabel: "Tunai", codAmount: d(20) },
     ]);
     expect(result.rows[0].codQris.toString()).toBe("10");
-    expect(result.rows[0].codCash.toString()).toBe("30");
+    expect(result.rows[0].codCash.toString()).toBe("20");
   });
 
   it("keeps missing couriers under Team Belum Terpetakan and rejects unknown COD type", () => {
@@ -137,9 +137,40 @@ describe("Delivery Settlement aggregation", () => {
     expect(result.rows).toHaveLength(2);
     expect(result.rows.find((row) => row.courierKey === "RIDWAN KUSNAWAN")?.dfod.toString()).toBe("3");
   });
+
+  it("aggregates active cash pickups by the same normalized team key", () => {
+    const result = aggregateDeliveryRecords([], [], [
+      { staffName: " Ridwan  Kusnawan ", settlementRaw: "Tunai", freightAmount: d(185000) },
+      { staffName: "RIDWAN KUSNAWAN", settlementRaw: "Transfer", freightAmount: d(999999) },
+      { staffName: null, settlementRaw: "tunai", freightAmount: d(44000) },
+    ]);
+    expect(result.rows.find((row) => row.courierKey === "RIDWAN KUSNAWAN")?.pickupCash.toString()).toBe("185000");
+    expect(result.rows.find((row) => row.courierKey === "TEAM BELUM TERPETAKAN")?.pickupCash.toString()).toBe("44000");
+  });
 });
 
 describe("Delivery Settlement financial calculation", () => {
+  it("reconciles the 31 July COD, QRIS, pickup cash, and DFOD semantics", () => {
+    const totalCod = d(21876610);
+    const codQris = d(614800);
+    const pickupCash = d(511000);
+    const dfod = d(1535422);
+    const totalSettlement = pickupCash.plus(dfod).plus(totalCod);
+    expect(totalCod.minus(codQris).toString()).toBe("21261810");
+    expect(totalSettlement.toString()).toBe("23923032");
+    expect(totalSettlement.equals(pickupCash.plus(dfod).plus(totalCod).plus(codQris))).toBe(false);
+  });
+
+  it.each([
+    { courier: "LILI SOBARI", pickup: 0, dfod: 89542, cod: 5722812, qris: 310881, settlement: 5812354 },
+    { courier: "M KURNIA", pickup: 0, dfod: 71800, cod: 2252817, qris: 160556, settlement: 2324617 },
+    { courier: "RIDWAN KUSNAWAN", pickup: 185000, dfod: 345551, cod: 5481608, qris: 143363, settlement: 6012159 },
+  ])("keeps QRIS out of $courier settlement while exposing its breakdown", ({ pickup, dfod, cod, qris, settlement }) => {
+    const total = d(pickup).plus(dfod).plus(cod);
+    expect(total.toString()).toBe(String(settlement));
+    expect(d(cod).minus(qris).plus(qris).toString()).toBe(String(cod));
+  });
+
   it("keeps QRIS as a subset of total COD instead of adding it twice", () => {
     const summary = summarizeDeliveryRows([{
       totalSettlement: "150000", cashPaidAmount: "50000",

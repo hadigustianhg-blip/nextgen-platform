@@ -20,7 +20,7 @@ const normalized = (value: string | null | undefined) =>
 const date = new Date(`${args.date}T00:00:00.000Z`);
 
 try {
-  const [rows, dispatches, settlements] = await Promise.all([
+  const [rows, dispatches, pickups, settlements] = await Promise.all([
     prisma.rawCod.findMany({ where: {
       tenantId: args.tenantId,
       outletId: args.outletId,
@@ -46,6 +46,23 @@ try {
         ? { waybillNo: { contains: args.waybill, mode: "insensitive" } }
         : {}),
     } }),
+    prisma.masterPickup.findMany({
+      where: {
+        tenantId: args.tenantId,
+        outletId: args.outletId,
+        operationalDate: date,
+        ...(args.courier
+          ? { staffName: { contains: args.courier, mode: "insensitive" } }
+          : {}),
+        ...(args.waybill
+          ? { waybillNo: { contains: args.waybill, mode: "insensitive" } }
+          : {}),
+      },
+      select: {
+        freightAmount: true,
+        rawPickup: { select: { settlementRaw: true } },
+      },
+    }),
     prisma.masterSetoran.findMany({
       where: {
         tenantId: args.tenantId, outletId: args.outletId, operationalDate: date,
@@ -91,7 +108,15 @@ try {
       : sum,
     new Prisma.Decimal(0),
   );
-  const finalObligation = total(finalRows).plus(dfodTotal);
+  const codQrisTotal = total(finalRows.filter(qris));
+  const codTotal = total(finalRows.filter((row) => !qris(row)));
+  const pickupCashTotal = pickups.reduce(
+    (sum, row) => normalized(row.rawPickup.settlementRaw) === "TUNAI"
+      ? sum.plus(row.freightAmount)
+      : sum,
+    new Prisma.Decimal(0),
+  );
+  const finalObligation = pickupCashTotal.plus(dfodTotal).plus(codTotal);
   console.log(JSON.stringify({
     dryRun: true,
     date: args.date,
@@ -100,8 +125,11 @@ try {
     duplicateWaybillCount: duplicates.length,
     extraDuplicateRows: rows.length - finalRows.length,
     rawObligationTotal: total(rows).toString(),
-    uniqueObligationTotal: total(finalRows).toString(),
-    qrisTotal: total(finalRows.filter(qris)).toString(),
+    uniqueSourceTotal: total(finalRows).toString(),
+    codTotal: codTotal.toString(),
+    qrisTotal: codQrisTotal.toString(),
+    codCashTotal: codTotal.minus(codQrisTotal).toString(),
+    pickupCashTotal: pickupCashTotal.toString(),
     dfodTotal: dfodTotal.toString(),
     finalObligationTotal: finalObligation.toString(),
     paymentTotal: payment.cash.toString(),
