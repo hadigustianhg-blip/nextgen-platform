@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   payments: [] as Array<Record<string, any>>,
   movements: [] as Array<Record<string, any>>,
   audits: [] as Array<Record<string, any>>,
+  masterFindMany: vi.fn(),
 }));
 const master = {
   id: "10000000-0000-4000-8000-000000000010",
@@ -15,6 +16,7 @@ const master = {
   waybillNo: "WB-001",
   operationalDate: new Date("2026-07-20T00:00:00Z"),
   freightAmount: new Prisma.Decimal(1000),
+  rawPickup: { settlementRaw: "Tunai", senderName: null, receiverName: null },
   settlementRevisions: [{ discountAmount: new Prisma.Decimal(0) }],
   payments: [] as Array<Record<string, any>>,
 };
@@ -70,12 +72,16 @@ const tx = {
   auditLog: { create: vi.fn(async ({ data }: any) => { state.audits.push(data); return data; }) },
 };
 vi.mock("@/lib/db/prisma", () => ({
-  prisma: { $transaction: vi.fn(async (callback: any) => callback(tx)) },
+  prisma: {
+    $transaction: vi.fn(async (callback: any) => callback(tx)),
+    masterPickup: { findMany: state.masterFindMany },
+  },
 }));
 
 import {
-  bulkAdjustPickupPayments, createPickupPayment, pickupReceivableStatus, receivableAgeBucket,
-  receivableAgeDays, voidPickupPayment,
+  bulkAdjustPickupPayments, createPickupPayment, isCashPickupSettlement,
+  listPickupPayment, normalizePickupSettlement, pickupReceivableStatus,
+  receivableAgeBucket, receivableAgeDays, voidPickupPayment,
 } from "./pickup-payment.service";
 import { cashBalance } from "./cash-flow.service";
 import { pickupPaymentBulkAdjustmentSchema, pickupPaymentInputSchema, pickupPaymentListSchema } from "./pickup-payment.validation";
@@ -94,10 +100,20 @@ const input = {
 
 beforeEach(() => {
   state.payments.length = 0; state.movements.length = 0; state.audits.length = 0;
+  master.rawPickup.settlementRaw = "Tunai";
+  secondMaster.rawPickup.settlementRaw = "Tunai";
+  state.masterFindMany.mockResolvedValue([]);
   vi.clearAllMocks();
 });
 
 describe("Pickup Payment AR formulas", () => {
+  it.each([
+    ["Tunai", true], ["TUNAI", true], ["  tunai  ", true], ["  TuNaI   ", true],
+    ["DFOD", false], ["Bulanan", false], [null, false], ["", false], ["Tunai Transfer", false],
+  ])("canonicalizes Settlement %s", (settlement, expected) => {
+    expect(isCashPickupSettlement(settlement)).toBe(expected);
+    if (expected) expect(normalizePickupSettlement(settlement)).toBe("TUNAI");
+  });
   it.each([
     [0, "BELUM_BAYAR"], [400, "SEBAGIAN"], [1000, "LUNAS"], [1200, "LEBIH_BAYAR"],
   ])("derives status for paid %s", (paid, expected) => {
@@ -134,6 +150,12 @@ describe("Pickup Payment transaction and cash flow", () => {
       method: "TRANSFER", bank: "BCA",
     });
     expect(state.movements[0].channel).toBe("BANK");
+  });
+  it.each(["DFOD", "Bulanan", null])("rejects non-cash Settlement %s without payment or movement", async (settlement) => {
+    master.rawPickup.settlementRaw = settlement as string;
+    await expect(createPickupPayment(context, input)).rejects.toThrow("PICKUP_PAYMENT_NOT_CASH_SETTLEMENT");
+    expect(state.payments).toHaveLength(0);
+    expect(state.movements).toHaveLength(0);
   });
   it("requires confirmation for overpayment and supports it after confirmation", async () => {
     await expect(createPickupPayment(context, {
@@ -177,6 +199,26 @@ describe("Pickup Payment validation, filters, pagination, and RBAC", () => {
     expect(canManagePickupPayment(session(["OPERATIONAL"]))).toBe(false);
     expect(canManagePickupPayment(session(["ADMIN"]))).toBe(true);
     expect(canManagePickupPayment(session(["OWNER"]))).toBe(true);
+  });
+});
+
+describe("Pickup Payment cash-only list and summary", () => {
+  const listInput = {
+    tenantId: master.tenantId, outletId: master.outletId, page: 1, pageSize: 25,
+    status: "" as const, age: "" as const, method: "" as const,
+  };
+  it.each(["Tunai", "TUNAI", "  tunai  "])("includes canonical cash Settlement %s", async (settlement) => {
+    state.masterFindMany.mockResolvedValue([{ ...master, rawPickup: { ...master.rawPickup, settlementRaw: settlement }, payments: [] }]);
+    const result = await listPickupPayment(listInput);
+    expect(result.data).toHaveLength(1);
+    expect(result.summary.outstandingWaybills).toBe(1);
+    expect(result.summary.totalOutstanding).toBe("1000");
+  });
+  it.each(["DFOD", "Bulanan", null, "", "Lainnya"])("excludes Settlement %s from list and every summary", async (settlement) => {
+    state.masterFindMany.mockResolvedValue([{ ...master, rawPickup: { ...master.rawPickup, settlementRaw: settlement }, payments: [] }]);
+    const result = await listPickupPayment(listInput);
+    expect(result.data).toHaveLength(0);
+    expect(result.summary).toMatchObject({ totalOutstanding: "0", outstandingWaybills: 0, overdueOver7: 0 });
   });
 });
 
@@ -238,6 +280,15 @@ describe("Pickup Payment bulk adjustment", () => {
       masterPickupIds: [master.id],
     })).rejects.toThrow("PICKUP_PAYMENT_NOT_ELIGIBLE");
     expect(state.payments).toHaveLength(1);
+  });
+
+  it.each(["DFOD", "Bulanan"])("rolls back the entire batch when one Settlement is %s", async (settlement) => {
+    secondMaster.rawPickup.settlementRaw = settlement;
+    await expect(bulkAdjustPickupPayments(context, bulkInput))
+      .rejects.toThrow("PICKUP_PAYMENT_NOT_CASH_SETTLEMENT");
+    expect(state.payments).toHaveLength(0);
+    expect(state.movements).toHaveLength(0);
+    expect(state.audits.some((item) => item.entityType === "PICKUP_PAYMENT_BULK_ADJUSTED")).toBe(false);
   });
 
   it("validates empty, duplicate, oversized, negative, and transfer payloads", () => {

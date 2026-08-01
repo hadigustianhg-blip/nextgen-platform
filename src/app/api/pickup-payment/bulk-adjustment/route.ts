@@ -25,6 +25,9 @@ export async function POST(request: Request) {
   } catch (error) {
     const code = error instanceof Error ? error.message : "BULK_ADJUSTMENT_FAILED";
     const status = code === "PICKUP_PAYMENT_NOT_FOUND" ? 404 : code.includes("CONFLICT") ? 409 : 400;
-    return NextResponse.json({ error: { code } }, { status });
+    const message = code === "PICKUP_PAYMENT_NOT_CASH_SETTLEMENT"
+      ? "Waybill ini bukan Pickup Tunai dan tidak dapat diproses melalui Pickup Payment."
+      : undefined;
+    return NextResponse.json({ error: { code, message } }, { status });
   }
 }

@@ -29,7 +29,9 @@ export async function POST(request: Request) {
     return payment ? NextResponse.json({ data: payment }, { status: 201 }) : NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
   } catch (error) {
     const code = error instanceof Error ? error.message : "PAYMENT_FAILED";
-    return NextResponse.json({ error: { code } }, { status: code === "OVERPAYMENT_CONFIRMATION_REQUIRED" ? 409 : 400 });
+    const message = code === "PICKUP_PAYMENT_NOT_CASH_SETTLEMENT"
+      ? "Waybill ini bukan Pickup Tunai dan tidak dapat diproses melalui Pickup Payment."
+      : undefined;
+    return NextResponse.json({ error: { code, message } }, { status: code === "OVERPAYMENT_CONFIRMATION_REQUIRED" ? 409 : 400 });
   }
 }
-

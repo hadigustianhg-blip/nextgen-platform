@@ -316,6 +316,7 @@ export function PickupPaymentClient({
         title="Pickup Payment"
         description="Accounts Receivable pickup dan history pembayaran."
       />
+      <p className="text-sm text-slate-500">Pickup Payment hanya menampilkan waybill dengan Settlement Tunai.</p>
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         {[
           ["Outstanding", money(summary.totalOutstanding)],

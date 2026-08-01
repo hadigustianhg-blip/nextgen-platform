@@ -12,6 +12,15 @@ const decimal = (value: string | number | Prisma.Decimal) => new Prisma.Decimal(
 const dateValue = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const isCash = (value: string) => ["CASH", "TUNAI"].includes(value.trim().toUpperCase());
 const prismaScope = (scope: Scope) => ({ tenantId: scope.tenantId, outletId: scope.outletId });
+export const normalizePickupSettlement = (value: string | null | undefined) =>
+  (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ")
+    .toLocaleUpperCase("id-ID");
+export const isCashPickupSettlement = (value: string | null | undefined) =>
+  normalizePickupSettlement(value) === "TUNAI";
+const pickupPaymentEligibleScope = (scope: Scope) => ({
+  ...prismaScope(scope),
+  rawPickup: { settlementRaw: { contains: "tunai", mode: "insensitive" as const } },
+});
 
 export function pickupReceivableStatus(obligation: Prisma.Decimal, paid: Prisma.Decimal) {
   if (paid.isZero()) return "BELUM_BAYAR" as const;
@@ -33,7 +42,7 @@ export function receivableAgeBucket(days: number) {
 }
 
 const pickupInclude = {
-  rawPickup: { select: { receiverName: true, senderName: true } },
+  rawPickup: { select: { receiverName: true, senderName: true, settlementRaw: true } },
   settlementRevisions: {
     where: { recordStatus: "VALID" as const },
     orderBy: { revision: "desc" as const },
@@ -56,7 +65,7 @@ type ListInput = Scope & {
 export async function listPickupPayment(input: ListInput) {
   const rows = await prisma.masterPickup.findMany({
     where: {
-      tenantId: input.tenantId, outletId: input.outletId,
+      ...pickupPaymentEligibleScope(input),
       ...(input.pickupDate ? { operationalDate: dateValue(input.pickupDate) } : {}),
       ...(input.waybill ? { waybillNo: { contains: input.waybill, mode: "insensitive" } } : {}),
       ...(input.customer ? { senderName: { contains: input.customer, mode: "insensitive" } } : {}),
@@ -71,7 +80,7 @@ export async function listPickupPayment(input: ListInput) {
     include: pickupInclude,
     orderBy: [{ operationalDate: "asc" }, { waybillNo: "asc" }],
   });
-  const mapped = rows.map((row) => {
+  const mapped = rows.filter((row) => isCashPickupSettlement(row.rawPickup.settlementRaw)).map((row) => {
     const obligation = row.freightAmount.minus(row.settlementRevisions[0]?.discountAmount ?? zero());
     const paid = row.payments.reduce((sum, payment) => sum.plus(payment.receivedAmount), zero());
     const outstanding = obligation.minus(paid);
@@ -89,7 +98,8 @@ export async function listPickupPayment(input: ListInput) {
     (!input.age || row.ageBucket === input.age) &&
     (!input.method || row.methods.includes(input.method)));
   const skip = (input.page - 1) * input.pageSize;
-  const allPayments = rows.flatMap((row) => row.payments);
+  const allPayments = rows.filter((row) => isCashPickupSettlement(row.rawPickup.settlementRaw))
+    .flatMap((row) => row.payments);
   const month = jakartaOperationalDate().slice(0, 7);
   const monthly = allPayments.filter((payment) => payment.paymentDate.toISOString().slice(0, 7) === month);
   return {
@@ -107,7 +117,7 @@ export async function listPickupPayment(input: ListInput) {
 
 export async function getPickupPaymentDetail(scope: Scope, masterPickupId: string) {
   const row = await prisma.masterPickup.findFirst({
-    where: { id: masterPickupId, ...scope },
+    where: { id: masterPickupId, ...pickupPaymentEligibleScope(scope) },
     include: {
       ...pickupInclude,
       payments: {
@@ -116,7 +126,7 @@ export async function getPickupPaymentDetail(scope: Scope, masterPickupId: strin
       },
     },
   });
-  if (!row) return null;
+  if (!row || !isCashPickupSettlement(row.rawPickup.settlementRaw)) return null;
   const obligation = row.freightAmount.minus(row.settlementRevisions[0]?.discountAmount ?? zero());
   const paid = row.payments.filter((payment) => payment.recordStatus === "VALID")
     .reduce((sum, payment) => sum.plus(payment.receivedAmount), zero());
@@ -150,6 +160,9 @@ async function validatePayment(
     include: pickupInclude,
   });
   if (!master) return null;
+  if (!isCashPickupSettlement(master.rawPickup.settlementRaw)) {
+    throw new Error("PICKUP_PAYMENT_NOT_CASH_SETTLEMENT");
+  }
   const obligation = master.freightAmount.minus(master.settlementRevisions[0]?.discountAmount ?? zero());
   const paid = master.payments.filter((payment) => payment.id !== excludedPaymentId)
     .reduce((sum, payment) => sum.plus(payment.receivedAmount), zero());
@@ -285,6 +298,9 @@ export async function bulkAdjustPickupPayments(context: Context, input: BulkPaym
       include: pickupInclude,
     });
     if (masters.length !== masterPickupIds.length) throw new Error("PICKUP_PAYMENT_NOT_FOUND");
+    if (masters.some((master) => !isCashPickupSettlement(master.rawPickup.settlementRaw))) {
+      throw new Error("PICKUP_PAYMENT_NOT_CASH_SETTLEMENT");
+    }
 
     const adjustments = masters.map((master) => {
       const obligation = master.freightAmount.minus(master.settlementRevisions[0]?.discountAmount ?? zero());
