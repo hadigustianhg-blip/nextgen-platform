@@ -36,6 +36,24 @@ export function periodBankDeposit(movements: Movement[]) {
     .reduce((sum, row) => sum.plus(row.amount), zero());
 }
 
+export function periodBankBalance(
+  movements: Movement[],
+  periodStart: string,
+  periodEnd: string,
+) {
+  return settlementBalances(
+    movements
+      .filter((row) =>
+        row.recordStatus === "VALID" && row.channel === "BANK"
+        && row.businessDate >= periodStart && row.businessDate <= periodEnd)
+      .map((row) => ({
+        channel: row.channel,
+        direction: row.direction,
+        amount: row.amount,
+      })),
+  ).bankBalance;
+}
+
 export function periodOperationalTotals(movements: Movement[]) {
   const valid = movements.filter((row) => row.recordStatus === "VALID");
   const receivedTypes = ["PICKUP_PAYMENT", "DELIVERY_PAYMENT"];
@@ -148,10 +166,10 @@ export async function getPaymentSettlement(
   const periodEndDate = new Date(dateValue(nextMonth).valueOf() - 86_400_000);
   const periodEnd = dateString(periodEndDate);
   const whereScope = { tenantId: scope.tenantId, outletId: scope.outletId };
-  const [globalGroups, opening, movements, pickups, deliveries, closings] = await Promise.all([
+  const [globalCashGroups, opening, movements, pickups, deliveries, closings] = await Promise.all([
     prisma.cashMovement.groupBy({
       by: ["channel", "direction", "movementType"],
-      where: { ...whereScope, recordStatus: "VALID" },
+      where: { ...whereScope, recordStatus: "VALID", channel: "CASH" },
       _sum: { amount: true },
     }),
     prisma.cashMovement.groupBy({
@@ -184,7 +202,7 @@ export async function getPaymentSettlement(
       select: { operationalDate: true, status: true, physicalCash: true, cashVariance: true },
     }),
   ]);
-  const globalBalance = settlementBalances(globalGroups.map((row) => ({
+  const globalBalance = settlementBalances(globalCashGroups.map((row) => ({
     channel: row.channel, direction: row.direction, amount: row._sum.amount ?? zero(),
   })));
   const pickupRows: Receivable[] = pickups.map((row) => ({
@@ -199,6 +217,7 @@ export async function getPaymentSettlement(
   }));
   const movementRows: Movement[] = movements.map((row) => ({ ...row, businessDate: dateString(row.businessDate) }));
   const operational = periodOperationalTotals(movementRows);
+  const bankBalance = periodBankBalance(movementRows, periodStart, periodEnd);
   const openingCash = opening.reduce((sum, row) => {
     const amount = row._sum.amount ?? zero();
     return row.direction === "IN" ? sum.plus(amount) : sum.minus(amount);
@@ -212,7 +231,7 @@ export async function getPaymentSettlement(
   return {
     summary: {
       cashOnHand: globalBalance.cashOnHand.toString(),
-      bankBalance: globalBalance.bankBalance.toString(),
+      bankBalance: bankBalance.toString(),
       operationalCashReceived: operational.cashReceived.toString(),
       operationalTransferReceived: operational.transferReceived.toString(),
       operationalExpense: operational.operationalExpense.toString(),

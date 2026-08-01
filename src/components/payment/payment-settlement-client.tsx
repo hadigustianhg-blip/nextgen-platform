@@ -194,9 +194,9 @@ export function PaymentSettlementClient({ outletId }: { outletId: string }) {
           ],
           ["Cash On Hand", result?.summary.cashOnHand, ""],
           [
-            "Saldo Bank Tercatat",
+            "Saldo Bank Periode",
             result?.summary.bankBalance,
-            "Saldo berdasarkan mutasi NEXTGEN, bukan saldo realtime bank.",
+            "Saldo bersih channel bank pada periode terpilih.",
           ],
           ["Pickup Belum Bayar", result?.summary.pickupOutstanding, ""],
           ["Delivery Belum Clear", result?.summary.deliveryOutstanding, ""],

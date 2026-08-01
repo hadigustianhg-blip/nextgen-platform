@@ -1,12 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
+const prismaMocks = vi.hoisted(() => ({
+  groupBy: vi.fn(),
+  cashFindMany: vi.fn(),
+  pickupFindMany: vi.fn(),
+  deliveryFindMany: vi.fn(),
+  closingFindMany: vi.fn(),
+}));
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/db/prisma", () => ({ prisma: {} }));
+vi.mock("@/lib/db/prisma", () => ({ prisma: {
+  cashMovement: { groupBy: prismaMocks.groupBy, findMany: prismaMocks.cashFindMany },
+  masterPickup: { findMany: prismaMocks.pickupFindMany },
+  masterSetoran: { findMany: prismaMocks.deliveryFindMany },
+  operationalClosing: { findMany: prismaMocks.closingFindMany },
+} }));
 
 import {
-  calculateSettlementPeriod, outstandingAsOf, periodBankDeposit, settlementBalances,
-  periodOperationalTotals,
+  calculateSettlementPeriod, getPaymentSettlement, outstandingAsOf, periodBankDeposit, settlementBalances,
+  periodBankBalance, periodOperationalTotals,
 } from "./payment-settlement.service";
 import { paymentSettlementQuerySchema } from "./payment-settlement.validation";
 import { canReadPaymentSettlement } from "./payment-settlement.authorization";
@@ -103,6 +115,65 @@ describe("Payment Settlement outstanding and period behavior", () => {
       movement("2026-07-21", "IN", "BANK", "BANK_DEPOSIT", 30),
       movement("2026-07-21", "OUT", "CASH", "BANK_DEPOSIT", 100, "VOID"),
     ]).toString()).toBe("50");
+  });
+
+  it("calculates bank balance only from valid BANK movements in the selected period", () => {
+    const movements = [
+      movement("2026-07-20", "IN", "BANK", "PICKUP_PAYMENT", 5_000_000),
+      movement("2026-08-01", "IN", "BANK", "PICKUP_PAYMENT", 1_500_000),
+      movement("2026-08-15", "OUT", "BANK", "MANUAL_EXPENSE", 300_000),
+      movement("2026-08-20", "IN", "CASH", "PICKUP_PAYMENT", 9_000_000),
+      movement("2026-08-21", "IN", "BANK", "PICKUP_PAYMENT", 7_000_000, "VOID"),
+      movement("2026-09-01", "IN", "BANK", "PICKUP_PAYMENT", 8_000_000),
+    ];
+    expect(periodBankBalance(movements, "2026-08-01", "2026-08-31").toString())
+      .toBe("1200000");
+    expect(periodBankBalance(movements, "2026-07-01", "2026-07-31").toString())
+      .toBe("5000000");
+    expect(periodBankBalance(movements, "2026-06-01", "2026-06-30").toString())
+      .toBe("0");
+  });
+
+  it("scopes the backend period query and keeps other summary formulas unchanged", async () => {
+    prismaMocks.groupBy
+      .mockResolvedValueOnce([
+        { channel: "CASH", direction: "IN", movementType: "PICKUP_PAYMENT", _sum: { amount: d(1000) } },
+        { channel: "CASH", direction: "OUT", movementType: "OPERATIONAL_EXPENSE", _sum: { amount: d(250) } },
+        { channel: "BANK", direction: "IN", movementType: "PICKUP_PAYMENT", _sum: { amount: d(6_500_000) } },
+        { channel: "BANK", direction: "OUT", movementType: "MANUAL_EXPENSE", _sum: { amount: d(300_000) } },
+      ])
+      .mockResolvedValueOnce([]);
+    prismaMocks.cashFindMany.mockResolvedValueOnce([
+      { businessDate: new Date("2026-08-01T00:00:00.000Z"), direction: "IN", channel: "BANK", movementType: "PICKUP_PAYMENT", amount: d(1_500_000), recordStatus: "VALID" },
+      { businessDate: new Date("2026-08-15T00:00:00.000Z"), direction: "OUT", channel: "BANK", movementType: "MANUAL_EXPENSE", amount: d(300_000), recordStatus: "VALID" },
+    ]);
+    prismaMocks.pickupFindMany.mockResolvedValueOnce([]);
+    prismaMocks.deliveryFindMany.mockResolvedValueOnce([]);
+    prismaMocks.closingFindMany.mockResolvedValueOnce([]);
+
+    const result = await getPaymentSettlement(
+      { tenantId: "tenant-a", outletId: "outlet-a" },
+      { month: 8, year: 2026, closingStatus: "CLOSED" },
+    );
+
+    expect(prismaMocks.cashFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        tenantId: "tenant-a", outletId: "outlet-a",
+        businessDate: {
+          gte: new Date("2026-08-01T00:00:00.000Z"),
+          lte: new Date("2026-08-31T00:00:00.000Z"),
+        },
+      },
+    }));
+    expect(prismaMocks.groupBy.mock.calls[0]![0].where).toEqual({
+      tenantId: "tenant-a", outletId: "outlet-a", recordStatus: "VALID", channel: "CASH",
+    });
+    expect(result.summary.bankBalance).toBe("1200000");
+    expect(result.summary.cashOnHand).toBe("750");
+    expect(result.summary.operationalTransferReceived).toBe("1500000");
+    expect(result.period).toMatchObject({
+      month: 8, year: 2026, startDate: "2026-08-01", endDate: "2026-08-31",
+    });
   });
 
   it("summarizes operational cash, transfer, and expense from the same ledger", () => {
