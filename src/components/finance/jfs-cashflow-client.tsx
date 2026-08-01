@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Download, LoaderCircle } from "lucide-react";
 import {
   AppCard, FilterCard, MetricCard, PageHeader, TableCard,
@@ -14,6 +14,15 @@ type Result = {
   income: Row[]; expense: Row[];
   summary: { totalIncome: number; totalExpense: number; difference: number };
   receivedAt: string;
+  lastSync: null | {
+    status: string; triggerSource: "MANUAL" | "CRON";
+    periodStart: string; periodEnd: string; completedAt: string | null;
+    fetchedCount: number; createdCount: number; updatedCount: number; skippedCount: number;
+    errorCode: string | null;
+  };
+  sync?: {
+    fetchedCount: number; createdCount: number; updatedCount: number; skippedCount: number;
+  };
 };
 const today = jakartaOperationalDate();
 const money = (value: number) => new Intl.NumberFormat("id-ID", {
@@ -23,6 +32,7 @@ const initial: Result = {
   income: [], expense: [],
   summary: { totalIncome: 0, totalExpense: 0, difference: 0 },
   receivedAt: "",
+  lastSync: null,
 };
 
 function validRange(startDate: string, endDate: string) {
@@ -37,10 +47,28 @@ export function JfsCashflowClient({ canExport }: { canExport: boolean }) {
   const [endDate, setEndDate] = useState(today);
   const [result, setResult] = useState(initial);
   const [hasChecked, setHasChecked] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState("");
   const [exportError, setExportError] = useState("");
+
+  const readStored = useCallback(async () => {
+    if (!validRange(startDate, endDate)) return;
+    setLoading(true);
+    try {
+      const query = new URLSearchParams({ startDate, endDate });
+      const response = await fetch(`/api/finance/cashflow-jfs/check?${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error();
+      setResult(await response.json());
+      setHasChecked(true);
+    } catch {
+      setNotice("Data Cashflow JFS tersimpan tidak dapat dimuat.");
+    } finally {
+      setLoading(false);
+    }
+  }, [endDate, startDate]);
+
+  useEffect(() => { queueMicrotask(() => void readStored()); }, [readStored]);
 
   async function check() {
     if (!validRange(startDate, endDate)) {
@@ -56,10 +84,12 @@ export function JfsCashflowClient({ canExport }: { canExport: boolean }) {
         cache: "no-store",
       });
       if (!response.ok) throw new Error();
-      setResult(await response.json());
+      const body = await response.json() as Result;
+      setResult(body);
       setHasChecked(true);
+      setNotice(`Data berhasil disinkronkan · diterima: ${body.sync?.fetchedCount || 0} · dibuat: ${body.sync?.createdCount || 0} · diperbarui: ${body.sync?.updatedCount || 0} · dilewati: ${body.sync?.skippedCount || 0}`);
     } catch {
-      setNotice("Layanan Cashflow JFS sedang tidak tersedia.");
+      setNotice("Sinkronisasi gagal. Data tersimpan tetap tersedia.");
     } finally {
       setLoading(false);
     }
@@ -117,8 +147,9 @@ export function JfsCashflowClient({ canExport }: { canExport: boolean }) {
         <CashflowPanel title="PENGELUARAN" rows={result.expense} total={result.summary.totalExpense}/>
       </section>
       <AppCard className="px-4 py-3 text-sm text-slate-600">
-        <strong className="text-emerald-700">Data berhasil diambil</strong>
-        <span className="ml-2">{received} WIB</span>
+        <strong className="text-emerald-700">Terakhir berhasil disinkronkan</strong>
+        <span className="ml-2">{received ? `${received} WIB` : "Belum tersedia"}</span>
+        {result.lastSync && <span className="ml-2">· {result.lastSync.triggerSource === "CRON" ? "Otomatis" : "Manual"} · {result.lastSync.periodStart} s.d. {result.lastSync.periodEnd} · {result.lastSync.status}</span>}
       </AppCard>
     </>}
   </div>;

@@ -59,6 +59,11 @@ enum SyncRunType {
   COD
 }
 
+enum JfsCashflowTrigger {
+  MANUAL
+  CRON
+}
+
 enum OperationalExpenseStatus {
   VALID
   VOID
@@ -248,6 +253,9 @@ model Tenant {
   salaryEmployeeAliases      SalaryEmployeeAlias[]
   salaryClosingSources       SalaryClosingSourceRecord[]
   salaryKasbonAllocations    SalaryKasbonAllocation[]
+  jfsCashflowRecords         JfsCashflowRecord[]
+  jfsCashflowSyncRuns        JfsCashflowSyncRun[]
+  jfsCashflowSyncLocks       JfsCashflowSyncLock[]
 }
 
 model Outlet {
@@ -298,6 +306,9 @@ model Outlet {
   salaryEmployeeAliases      SalaryEmployeeAlias[]
   salaryClosingSources       SalaryClosingSourceRecord[]
   salaryKasbonAllocations    SalaryKasbonAllocation[]
+  jfsCashflowRecords         JfsCashflowRecord[]
+  jfsCashflowSyncRuns        JfsCashflowSyncRun[]
+  jfsCashflowSyncLocks       JfsCashflowSyncLock[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -478,6 +489,76 @@ model SyncRun {
   @@index([tenantId, outletId, startedAt])
   @@index([tenantId, outletId, operationalDate])
   @@index([status])
+}
+
+model JfsCashflowSyncRun {
+  id               String              @id @default(uuid()) @db.Uuid
+  tenantId         String              @db.Uuid
+  outletId         String              @db.Uuid
+  periodStart      DateTime            @db.Date
+  periodEnd        DateTime            @db.Date
+  triggerSource    JfsCashflowTrigger
+  status           SyncRunStatus       @default(RUNNING)
+  fetchedCount     Int                 @default(0)
+  uniqueCount      Int                 @default(0)
+  createdCount     Int                 @default(0)
+  updatedCount     Int                 @default(0)
+  skippedCount     Int                 @default(0)
+  anomalyCount     Int                 @default(0)
+  startedAt        DateTime            @db.Timestamptz(3)
+  completedAt      DateTime?           @db.Timestamptz(3)
+  requestId        String              @unique
+  errorCode        String?
+  createdAt        DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime            @updatedAt @db.Timestamptz(3)
+  tenant           Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet           Outlet              @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  firstSeenRecords JfsCashflowRecord[] @relation("JfsCashflowFirstSeenRun")
+  lastSeenRecords  JfsCashflowRecord[] @relation("JfsCashflowLastSeenRun")
+
+  @@index([tenantId, outletId, startedAt])
+  @@index([tenantId, outletId, periodStart, periodEnd])
+  @@index([status])
+}
+
+model JfsCashflowRecord {
+  id                String             @id @default(uuid()) @db.Uuid
+  tenantId          String             @db.Uuid
+  outletId          String             @db.Uuid
+  businessDate      DateTime           @db.Date
+  direction         String
+  transactionType   String
+  category          String
+  amount            Decimal            @db.Decimal(18, 2)
+  sourceReference   String?
+  sourceRecordKey   String
+  sourcePayloadHash String
+  firstSeenRunId    String             @db.Uuid
+  lastSeenRunId     String             @db.Uuid
+  fetchedAt         DateTime           @db.Timestamptz(3)
+  createdAt         DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime           @updatedAt @db.Timestamptz(3)
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet            Outlet             @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  firstSeenRun      JfsCashflowSyncRun @relation("JfsCashflowFirstSeenRun", fields: [firstSeenRunId], references: [id], onDelete: Restrict)
+  lastSeenRun       JfsCashflowSyncRun @relation("JfsCashflowLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, outletId, sourceRecordKey])
+  @@index([tenantId, outletId, businessDate])
+  @@index([tenantId, outletId, direction, businessDate])
+}
+
+model JfsCashflowSyncLock {
+  tenantId     String   @db.Uuid
+  outletId     String   @db.Uuid
+  businessDate DateTime @db.Date
+  requestId    String
+  acquiredAt   DateTime @db.Timestamptz(3)
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outlet       Outlet   @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, outletId, businessDate])
+  @@index([requestId])
 }
 
 model RawPickup {

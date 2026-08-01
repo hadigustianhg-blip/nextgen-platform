@@ -56,6 +56,7 @@ Never use the default development password in a shared or production environment
 | `INTEGRATION_ENCRYPTION_KEY` | Yes for integrations | Base64-encoded 32-byte AES-256-GCM key |
 | `SEED_OWNER_PASSWORD` | Production seed only | Password for the seeded development owner |
 | `SLA_CUT_OFF_OUTLET_IDS` | SLA cron only | UUID outlet aktif yang terhubung ke network middleware, dipisahkan koma |
+| `CASHFLOW_JFS_OUTLET_IDS` | Cashflow JFS cron only | UUID outlet aktif yang disinkronkan, dipisahkan koma |
 
 ## Quality checks
 
@@ -91,6 +92,17 @@ environment/database NEXTGEN yang sama, dan isi `SLA_CUT_OFF_OUTLET_IDS`.
 Jalankan service secara manual sekali untuk smoke test dan pastikan log berakhir
 dengan summary `Completed`. Network sumber selalu divalidasi terhadap kode
 outlet sebelum upsert. Service web tetap memakai `npm run start`.
+
+### Railway cron Cashflow JFS
+
+Buat service Railway dari repository yang sama dengan environment/database
+NEXTGEN yang sama dan isi `CASHFLOW_JFS_OUTLET_IDS`.
+
+- Start command: `npm run cron:jfs-cashflow`
+- Cron schedule: `0 16 * * *` (23:00 Asia/Jakarta; scheduler Railway menggunakan UTC)
+
+Jalankan service secara manual sekali untuk smoke test dan pastikan log berakhir
+dengan summary `Completed`. Service web tetap memakai `npm run start`.
 
 ## Security notes
 

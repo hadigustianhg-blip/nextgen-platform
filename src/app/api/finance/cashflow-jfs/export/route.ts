@@ -3,7 +3,7 @@ import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import { operationalScope } from "@/modules/operational-settlement";
 import {
-  canExportFinance, createWorkbook, fetchJfsCashflow, financeRangeSchema,
+  canExportFinance, createWorkbook, financeRangeSchema, readJfsCashflow,
 } from "@/modules/finance";
 
 export async function GET(request: Request) {
@@ -15,7 +15,7 @@ export async function GET(request: Request) {
   const parsed = financeRangeSchema.safeParse(Object.fromEntries(new URL(request.url).searchParams));
   if (!parsed.success) return NextResponse.json({ error: { code: "INVALID_DATE_RANGE" } }, { status: 400 });
   try {
-    const result = await fetchJfsCashflow(parsed.data);
+    const result = await readJfsCashflow({ ...scope, ...parsed.data });
     const workbook = await createWorkbook([
       {
         name: "Summary",
@@ -50,6 +50,6 @@ export async function GET(request: Request) {
       },
     });
   } catch {
-    return NextResponse.json({ error: { code: "SOURCE_UNAVAILABLE" } }, { status: 502 });
+    return NextResponse.json({ error: { code: "EXPORT_FAILED" } }, { status: 500 });
   }
 }
