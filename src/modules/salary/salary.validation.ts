@@ -104,6 +104,28 @@ export const salaryClosingSchema = z.object({
   message: "Tanggal akhir tidak boleh sebelum tanggal awal.",
 });
 
+export const salaryPreviewQuerySchema = z.object({
+  startDate: date,
+  endDate: date,
+}).superRefine((value, context) => {
+  if (value.endDate < value.startDate) {
+    context.addIssue({
+      code: "custom", path: ["endDate"],
+      message: "Tanggal akhir tidak boleh sebelum tanggal awal.",
+    });
+    return;
+  }
+  const start = Date.parse(`${value.startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${value.endDate}T00:00:00.000Z`);
+  const totalDays = Math.floor((end - start) / 86_400_000) + 1;
+  if (totalDays > 366) {
+    context.addIssue({
+      code: "custom", path: ["endDate"],
+      message: "Periode preview maksimal 366 hari.",
+    });
+  }
+});
+
 export const salaryAdjustmentSchema = z.object({
   salaryClosingEmployeeId: z.string().uuid(),
   type: z.enum(["ADDITION", "DEDUCTION"]),

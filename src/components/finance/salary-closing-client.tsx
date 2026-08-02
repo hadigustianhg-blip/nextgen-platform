@@ -2,8 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Eye, LoaderCircle, Plus } from "lucide-react";
 import {
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  LoaderCircle,
+  Plus,
+  X,
+} from "lucide-react";
+import {
+  MetricCard,
+  ModalCard,
   PageHeader,
   SectionCard,
   TableCard,
@@ -12,6 +21,10 @@ import {
   nextgenNeutralButtonClass,
 } from "@/components/ui";
 import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
+import {
+  salaryPreviewMonthRange,
+  shiftedSalaryPreviewMonthRange,
+} from "@/modules/salary/salary.preview-date";
 
 type Closing = {
   id: string;
@@ -31,6 +44,53 @@ type Closing = {
   }>;
 };
 
+type PreviewRow = {
+  employeeId: string;
+  name: string;
+  division: string;
+  workDayCount: number;
+  pickupCount: number;
+  dispatchCount: number;
+  systemIncomeTotal: string;
+  manualAdditionTotal: string;
+  manualDeductionTotal: string;
+  kasbonDeductionTotal: string;
+  estimatedNetTotal: string;
+  profileStatus: "MAPPED" | "UNMAPPED";
+  components: Array<{
+    code: string;
+    name: string;
+    quantity: string;
+    rate: string;
+    amount: string;
+  }>;
+};
+
+type Preview = {
+  period: { startDate: string; endDate: string };
+  summary: {
+    teamCount: number;
+    workDayCount: number;
+    pickupCount: number;
+    dispatchCount: number;
+    systemIncomeTotal: string;
+    manualAdditionTotal: string;
+    manualDeductionTotal: string;
+    kasbonDeductionTotal: string;
+    estimatedNetTotal: string;
+  };
+  data: PreviewRow[];
+};
+
+const divisionLabel: Record<string, string> = {
+  ADMIN: "Admin",
+  ADMIN_OPS: "Admin Ops",
+  SALES: "Sales",
+  THREE_WHEEL_DRIVER: "Driver Roda Tiga",
+  MOTORIST: "Motoris",
+  DRIVER: "Driver",
+};
+
 const statusLabel: Record<string, string> = {
   DRAFT: "Draft",
   CLOSED: "Dalam Review",
@@ -47,6 +107,7 @@ const rupiah = (value: number) =>
 
 export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
   const today = jakartaOperationalDate();
+  const currentMonth = salaryPreviewMonthRange(today);
   const [periodStart, setPeriodStart] = useState(`${today.slice(0, 7)}-01`);
   const [periodEnd, setPeriodEnd] = useState(today);
   const [notes, setNotes] = useState("");
@@ -55,6 +116,12 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [previewStart, setPreviewStart] = useState(currentMonth.startDate);
+  const [previewEnd, setPreviewEnd] = useState(currentMonth.endDate);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(true);
+  const [previewError, setPreviewError] = useState("");
+  const [previewDetail, setPreviewDetail] = useState<PreviewRow | null>(null);
 
   async function loadClosings() {
     setLoading(true);
@@ -74,6 +141,44 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
   useEffect(() => {
     queueMicrotask(() => void loadClosings());
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadPreview() {
+      setPreviewLoading(true);
+      setPreviewError("");
+      try {
+        const query = new URLSearchParams({
+          startDate: previewStart,
+          endDate: previewEnd,
+        });
+        const response = await fetch(`/api/finance/salary/preview?${query}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(result.error?.message || "Preview Salary gagal dimuat.");
+        }
+        setPreview(result.data);
+      } catch (cause) {
+        if (controller.signal.aborted) return;
+        setPreviewError(cause instanceof Error
+          ? cause.message
+          : "Preview Salary gagal dimuat.");
+      } finally {
+        if (!controller.signal.aborted) setPreviewLoading(false);
+      }
+    }
+    void loadPreview();
+    return () => controller.abort();
+  }, [previewStart, previewEnd]);
+
+  function changePreviewMonth(offset: number) {
+    const range = shiftedSalaryPreviewMonthRange(previewStart, offset);
+    setPreviewStart(range.startDate);
+    setPreviewEnd(range.endDate);
+  }
 
   async function createDraft() {
     if (saving) return;
@@ -110,6 +215,79 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
       description="Hitung, review, dan finalisasi penghasilan team berdasarkan periode."/>
     {notice && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
     {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>}
+    <SectionCard title="Preview Salary Periode">
+      <div className="grid gap-3 md:grid-cols-5">
+        <button type="button" disabled={previewLoading}
+          onClick={() => changePreviewMonth(-1)} className={nextgenNeutralButtonClass}>
+          <ChevronLeft size={17}/>Bulan Sebelumnya
+        </button>
+        <button type="button" disabled={previewLoading}
+          onClick={() => {
+            setPreviewStart(currentMonth.startDate);
+            setPreviewEnd(currentMonth.endDate);
+          }} className={nextgenNeutralButtonClass}>Bulan Ini</button>
+        <button type="button" disabled={previewLoading}
+          onClick={() => changePreviewMonth(1)} className={nextgenNeutralButtonClass}>
+          Bulan Berikutnya<ChevronRight size={17}/>
+        </button>
+        <label className="text-sm font-semibold text-slate-700">Tanggal Awal
+          <input type="date" value={previewStart}
+            onChange={(event) => setPreviewStart(event.target.value)}
+            className={`${nextgenControlClass} mt-1`}/>
+        </label>
+        <label className="text-sm font-semibold text-slate-700">Tanggal Akhir
+          <input type="date" value={previewEnd}
+            onChange={(event) => setPreviewEnd(event.target.value)}
+            className={`${nextgenControlClass} mt-1`}/>
+        </label>
+      </div>
+      {previewError && <div role="alert"
+        className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+        {previewError}
+      </div>}
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <MetricCard label="Jumlah Team" value={previewLoading ? "…" : preview?.summary.teamCount ?? 0}/>
+        <MetricCard label="Hari Kerja Total" value={previewLoading ? "…" : preview?.summary.workDayCount ?? 0}/>
+        <MetricCard label="Pickup Terhitung" value={previewLoading ? "…" : preview?.summary.pickupCount ?? 0}/>
+        <MetricCard label="Dispatch Terhitung" value={previewLoading ? "…" : preview?.summary.dispatchCount ?? 0}/>
+        <MetricCard label="Penghasilan Sistem" value={previewLoading ? "…" : rupiah(Number(preview?.summary.systemIncomeTotal ?? 0))}/>
+        <MetricCard label="Tambahan" value={previewLoading ? "…" : rupiah(Number(preview?.summary.manualAdditionTotal ?? 0))}/>
+        <MetricCard label="Potongan Manual" value={previewLoading ? "…" : rupiah(Number(preview?.summary.manualDeductionTotal ?? 0))}/>
+        <MetricCard label="Potongan Kasbon" value={previewLoading ? "…" : rupiah(Number(preview?.summary.kasbonDeductionTotal ?? 0))}/>
+        <MetricCard label="Estimasi Total Bersih" value={previewLoading ? "…" : rupiah(Number(preview?.summary.estimatedNetTotal ?? 0))}/>
+      </div>
+      <TableCard className="mt-4"><div className="overflow-x-auto">
+        <table className="w-full min-w-[1320px] text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>
+            {["Nama", "Divisi", "Hari Kerja", "Pickup", "Dispatch", "Penghasilan Sistem", "Tambahan", "Potongan", "Kasbon", "Estimasi Total Bersih", "Status Profile", "Detail"]
+              .map((label) => <th key={label} className="px-3 py-3">{label}</th>)}
+          </tr></thead>
+          <tbody className="divide-y">{preview?.data.map((row) => <tr key={row.employeeId}>
+            <td className="px-3 py-3 font-semibold">{row.name}</td>
+            <td className="px-3 py-3">{divisionLabel[row.division] ?? row.division}</td>
+            <td className="px-3 py-3">{row.workDayCount}</td>
+            <td className="px-3 py-3">{row.pickupCount}</td>
+            <td className="px-3 py-3">{row.dispatchCount}</td>
+            <td className="px-3 py-3">{rupiah(Number(row.systemIncomeTotal))}</td>
+            <td className="px-3 py-3">{rupiah(Number(row.manualAdditionTotal))}</td>
+            <td className="px-3 py-3">{rupiah(Number(row.manualDeductionTotal))}</td>
+            <td className="px-3 py-3">{rupiah(Number(row.kasbonDeductionTotal))}</td>
+            <td className="px-3 py-3 font-semibold">{rupiah(Number(row.estimatedNetTotal))}</td>
+            <td className="px-3 py-3">{row.profileStatus === "MAPPED"
+              ? "Terpetakan"
+              : "Tidak terpetakan"}</td>
+            <td className="px-3 py-3"><button type="button"
+              onClick={() => setPreviewDetail(row)} className={nextgenNeutralButtonClass}>
+              <Eye size={16}/>Detail
+            </button></td>
+          </tr>)}</tbody>
+        </table>
+        {!previewLoading && !preview?.data.length && <p
+          className="p-8 text-center text-sm text-slate-500">
+          Belum ada data Salary untuk periode ini.
+        </p>}
+      </div></TableCard>
+    </SectionCard>
     {canManage && <SectionCard title="Buat Draft Closing">
       <div className="grid gap-3 md:grid-cols-4">
         <label className="text-sm font-semibold text-slate-700">Tanggal Awal
@@ -167,5 +345,38 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
         {!loading && !closings.length && <p className="p-8 text-center text-sm text-slate-500">Belum ada draft salary closing.</p>}
       </div></TableCard>
     </SectionCard>
+    {previewDetail && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4">
+      <ModalCard className="max-w-3xl">
+        <div className="flex items-center justify-between border-b p-5">
+          <div>
+            <p className="text-sm font-semibold text-sky-700">Preview — belum dikunci</p>
+            <h2 className="text-xl font-bold">{previewDetail.name}</h2>
+          </div>
+          <button type="button" aria-label="Tutup detail preview"
+            onClick={() => setPreviewDetail(null)}><X/></button>
+        </div>
+        <div className="max-h-[65vh] overflow-y-auto p-5">
+          <TableCard><div className="overflow-x-auto"><table className="w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>
+              {['Komponen', 'Kuantitas', 'Tarif', 'Nominal'].map((label) =>
+                <th key={label} className="px-3 py-3">{label}</th>)}
+            </tr></thead>
+            <tbody className="divide-y">{previewDetail.components.map((component) => <tr key={component.code}>
+              <td className="px-3 py-3 font-semibold">{component.name}</td>
+              <td className="px-3 py-3">{component.quantity}</td>
+              <td className="px-3 py-3">{rupiah(Number(component.rate))}</td>
+              <td className="px-3 py-3">{rupiah(Number(component.amount))}</td>
+            </tr>)}</tbody>
+          </table></div></TableCard>
+          {!previewDetail.components.length && <p className="py-8 text-center text-sm text-slate-500">
+            Belum ada komponen penghasilan yang terpetakan.
+          </p>}
+        </div>
+        <div className="flex justify-end border-t p-4">
+          <button type="button" onClick={() => setPreviewDetail(null)}
+            className={nextgenNeutralButtonClass}>Tutup</button>
+        </div>
+      </ModalCard>
+    </div>}
   </div>;
 }

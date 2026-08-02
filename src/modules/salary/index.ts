@@ -3,6 +3,8 @@ export * from "./salary.authorization";
 export * from "./salary.calculation";
 export * from "./salary.closing.service";
 export * from "./salary.kasbon.service";
+export * from "./salary.preview.service";
+export * from "./salary.preview-date";
 export * from "./salary.domain";
 export * from "./salary.service";
 export * from "./salary.validation";
