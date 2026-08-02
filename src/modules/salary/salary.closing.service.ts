@@ -933,6 +933,174 @@ export async function processSalaryClosing(
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
+export async function completeSalaryClosing(
+  context: SalaryContext,
+  closingId: string,
+) {
+  return prisma.$transaction(async (tx) => {
+    const closing = await tx.salaryClosing.findFirst({
+      where: {
+        id: closingId,
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+      },
+      include: {
+        employees: {
+          include: {
+            calculationSnapshot: true,
+            adjustments: { where: { voidedAt: null } },
+          },
+        },
+        profileSnapshots: true,
+        sourceRecords: {
+          where: { isActive: true, calculationStatus: "UNMATCHED" },
+          select: { id: true, exclusionReason: true },
+        },
+        kasbonSnapshots: {
+          include: {
+            allocations: { where: { status: { not: "VOID" } } },
+          },
+        },
+      },
+    });
+    if (!closing) throw new SalaryError("SALARY_CLOSING_NOT_FOUND", 404);
+    if (closing.status === "COMPLETED") {
+      return { ...closing, alreadyCompleted: true };
+    }
+    if (closing.status !== "CLOSED") {
+      throw new SalaryError("SALARY_CLOSING_NOT_REVIEW", 409);
+    }
+    if (
+      !closing.snapshotCapturedAt ||
+      !closing.generatedAt ||
+      !closing.employees.length ||
+      closing.employees.some((employee) => !employee.calculationSnapshot)
+    ) {
+      throw new SalaryError("SALARY_CLOSING_NOT_GENERATED", 409);
+    }
+    if (
+      closing.sourceRecords.length ||
+      closing.employees.some((employee) => employee.calculationWarningCount > 0)
+    ) {
+      const profileReasons = new Set([
+        "PROFILE_NOT_ASSIGNED",
+        "PROFILE_NOT_ACTIVE",
+        "PROFILE_NOT_EFFECTIVE",
+        "PROFILE_SETTING_NOT_FOUND",
+      ]);
+      throw new SalaryError(
+        closing.sourceRecords.some((row) =>
+          row.exclusionReason && profileReasons.has(row.exclusionReason)
+        )
+          ? "SALARY_CLOSING_HAS_PROFILE_WARNINGS"
+          : "SALARY_CLOSING_HAS_WARNINGS",
+        409,
+      );
+    }
+    const profileIds = new Set(
+      closing.profileSnapshots.map((snapshot) => snapshot.salaryProfileId),
+    );
+    const invalidProfile = closing.employees.some((employee) =>
+      !profileIds.has(employee.salaryProfileId)
+    ) || closing.profileSnapshots.some((snapshot) =>
+      (snapshot.effectiveFrom != null &&
+        snapshot.effectiveFrom > closing.periodEnd) ||
+      (snapshot.effectiveTo != null &&
+        snapshot.effectiveTo < closing.periodStart)
+    );
+    if (invalidProfile) {
+      throw new SalaryError("SALARY_CLOSING_HAS_PROFILE_WARNINGS", 409);
+    }
+    const invalidAdjustment = closing.employees.some((employee) =>
+      employee.adjustments.some((adjustment) =>
+        !adjustment.amount.greaterThan(0) || adjustment.reason.trim().length < 5
+      )
+    );
+    const invalidTotal = closing.employees.some((employee) =>
+      employee.systemIncomeTotal.lessThan(0) ||
+      employee.manualAdditionTotal.lessThan(0) ||
+      employee.manualDeductionTotal.lessThan(0) ||
+      employee.netSalary.lessThan(0)
+    );
+    if (invalidAdjustment || invalidTotal) {
+      throw new SalaryError("SALARY_CLOSING_INVALID_TOTAL", 409);
+    }
+    const unresolvedKasbon = closing.kasbonSnapshots.filter(
+      (snapshot) => !snapshot.allocations.length,
+    );
+    if (unresolvedKasbon.length) {
+      const teamNames = [...new Set(unresolvedKasbon.map((snapshot) =>
+        snapshot.teamName?.trim() || "Team tidak terpetakan"
+      ))].join(", ");
+      throw new SalaryError("SALARY_KASBON_REVIEW_REQUIRED", 409, {
+        teamNames,
+      });
+    }
+
+    const processedAt = new Date();
+    await tx.salaryKasbonAllocation.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        status: "DRAFT",
+        closingEmployee: { salaryClosingId: closing.id },
+      },
+      data: { status: "FINALIZED", finalizedAt: processedAt },
+    });
+    const updated = await tx.salaryClosing.updateMany({
+      where: {
+        id: closing.id,
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        status: "CLOSED",
+      },
+      data: {
+        status: "COMPLETED",
+        processedAt,
+        processedByUserId: context.actorId,
+      },
+    });
+    if (!updated.count) {
+      const current = await tx.salaryClosing.findFirst({
+        where: {
+          id: closing.id,
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+        },
+      });
+      if (current?.status === "COMPLETED") {
+        return { ...current, alreadyCompleted: true };
+      }
+      throw new SalaryError("SALARY_CLOSING_NOT_REVIEW", 409);
+    }
+    await tx.salaryAudit.create({
+      data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryClosingId: closing.id,
+        actorId: context.actorId,
+        action: "UPDATE",
+        entityType: "SALARY_CLOSING_COMPLETED",
+        entityId: closing.id,
+        metadata: {
+          employeeCount: closing.employees.length,
+          systemIncomeTotal: closing.employees.reduce(
+            (sum, employee) => sum.plus(employee.systemIncomeTotal),
+            zero(),
+          ).toString(),
+          completedAt: processedAt.toISOString(),
+        },
+      },
+    });
+    return {
+      id: closing.id,
+      status: "COMPLETED" as const,
+      processedAt,
+      alreadyCompleted: false,
+    };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
 export async function voidSalaryClosing(
   context: SalaryContext,
   closingId: string,

@@ -95,6 +95,7 @@ const divisionLabel: Record<string, string> = {
 const statusLabel: Record<string, string> = {
   DRAFT: "Draft",
   CLOSED: "Dalam Review",
+  COMPLETED: "Closing Success",
   PROCESSED: "Masuk Rekap",
   PAID: "Dibayar",
   VOID: "Dibatalkan",
@@ -114,6 +115,11 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
   const [periodEnd, setPeriodEnd] = useState(today);
   const [notes, setNotes] = useState("");
   const [closings, setClosings] = useState<Closing[]>([]);
+  const [closingStatusFilter, setClosingStatusFilter] = useState("ACTIVE");
+  const [closingPage, setClosingPage] = useState(1);
+  const [closingPagination, setClosingPagination] = useState({
+    page: 1, pageSize: 25, total: 0, totalPages: 1,
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
@@ -132,11 +138,18 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
   async function loadClosings() {
     setLoading(true);
     try {
-      const response = await fetch("/api/finance/salary/closings", {
+      const query = new URLSearchParams({
+        statusFilter: closingStatusFilter,
+        page: String(closingPage),
+        pageSize: "25",
+      });
+      const response = await fetch(`/api/finance/salary/closings?${query}`, {
         cache: "no-store",
       });
       if (!response.ok) throw new Error();
-      setClosings((await response.json()).data);
+      const result = await response.json();
+      setClosings(result.data);
+      setClosingPagination(result.pagination);
     } catch {
       setError("Salary closing gagal dimuat.");
     } finally {
@@ -146,7 +159,9 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
 
   useEffect(() => {
     queueMicrotask(() => void loadClosings());
-  }, []);
+  // The list filter and pagination do not affect Salary Preview state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closingStatusFilter, closingPage]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -365,6 +380,26 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
       </div>
     </SectionCard>}
     <SectionCard title="Daftar Salary Closing">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <label className="min-w-60 text-sm font-semibold text-slate-700">
+          Filter Status
+          <select value={closingStatusFilter}
+            onChange={(event) => {
+              setClosingStatusFilter(event.target.value);
+              setClosingPage(1);
+            }} className={`${nextgenControlClass} mt-1`}>
+            <option value="ACTIVE">Closing Aktif</option>
+            <option value="ALL">Semua Status</option>
+            <option value="REVIEW">Dalam Review</option>
+            <option value="SUCCESS">Closing Success</option>
+            <option value="DRAFT">Draft</option>
+            <option value="VOID">Dibatalkan / Void</option>
+          </select>
+        </label>
+        <p className="text-sm text-slate-500">
+          {closingPagination.total.toLocaleString("id-ID")} closing
+        </p>
+      </div>
       <TableCard><div className="overflow-x-auto">
         <table className="w-full min-w-[1180px] text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>
@@ -381,7 +416,15 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
             return <tr key={closing.id}>
             <td className="px-3 py-3 font-semibold">{closing.closingNumber}</td>
             <td className="px-3 py-3">{closing.periodStart.slice(0, 10)} — {closing.periodEnd.slice(0, 10)}</td>
-            <td className="px-3 py-3">{statusLabel[closing.status] ?? closing.status}</td>
+            <td className="px-3 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+              closing.status === "COMPLETED"
+                ? "bg-emerald-100 text-emerald-800"
+                : closing.status === "VOID"
+                  ? "bg-slate-200 text-slate-700"
+                  : closing.status === "CLOSED"
+                    ? "bg-amber-100 text-amber-800"
+                    : "bg-blue-100 text-blue-800"
+            }`}>{statusLabel[closing.status] ?? closing.status}</span></td>
             <td className="px-3 py-3">{closing.employees.length}</td>
             <td className="px-3 py-3">{rupiah(totals.system)}</td>
             <td className="px-3 py-3">{rupiah(totals.addition)}</td>
@@ -397,6 +440,18 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
         </table>
         {!loading && !closings.length && <p className="p-8 text-center text-sm text-slate-500">Belum ada draft salary closing.</p>}
       </div></TableCard>
+      <div className="mt-4 flex items-center justify-end gap-3">
+        <button type="button" disabled={loading || closingPage <= 1}
+          onClick={() => setClosingPage((page) => Math.max(1, page - 1))}
+          className={nextgenNeutralButtonClass}>Sebelumnya</button>
+        <span className="text-sm text-slate-600">
+          Halaman {closingPagination.page} dari {closingPagination.totalPages}
+        </span>
+        <button type="button"
+          disabled={loading || closingPage >= closingPagination.totalPages}
+          onClick={() => setClosingPage((page) => page + 1)}
+          className={nextgenNeutralButtonClass}>Berikutnya</button>
+      </div>
     </SectionCard>
     {previewDetail && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4">
       <ModalCard className="max-w-3xl">

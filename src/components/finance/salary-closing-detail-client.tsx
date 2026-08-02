@@ -143,6 +143,7 @@ const rupiah = (value: string | number) =>
 const statusLabel: Record<string, string> = {
   DRAFT: "Draft",
   CLOSED: "Dalam Review",
+  COMPLETED: "Closing Success",
   PROCESSED: "Masuk Rekap",
   PAID: "Dibayar",
   VOID: "Dibatalkan",
@@ -211,7 +212,7 @@ export function SalaryClosingDetailClient({
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [confirmAction, setConfirmAction] =
-    useState<"generate" | "process" | "void" | null>(null);
+    useState<"generate" | "complete" | "process" | "void" | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [voidItem, setVoidItem] = useState<{
     type: "adjustment" | "kasbon";
@@ -268,14 +269,21 @@ export function SalaryClosingDetailClient({
         },
       );
       const result = await response.json();
-      if (!response.ok) throw new Error(
-        result.error?.message || "Proses salary gagal.",
-      );
+      if (!response.ok) {
+        const teams = result.error?.details?.teamNames;
+        throw new Error(teams
+          ? `${result.error?.message} Team: ${teams}.`
+          : result.error?.message || "Proses salary gagal.");
+      }
       const warningCount = result.data?.warnings
         ? result.data.warnings.unmatchedPickup +
           result.data.warnings.unmatchedDispatch
         : 0;
-      setNotice(confirmAction === "process"
+      setNotice(confirmAction === "complete"
+        ? result.data?.alreadyCompleted
+          ? "Salary Closing sudah berstatus Closing Success."
+          : "Salary Closing berhasil difinalisasi."
+        : confirmAction === "process"
         ? "Salary berhasil diproses ke Salary Recap."
         : confirmAction === "void"
           ? "Salary Closing berhasil dibatalkan."
@@ -467,6 +475,7 @@ export function SalaryClosingDetailClient({
     </div>;
   }
   if (!closing) return <p>Salary Closing tidak ditemukan.</p>;
+  const finalReadOnly = readOnly || closing.status === "COMPLETED";
 
   const totals = closing.employees.reduce((result, employee) => ({
     workDays: result.workDays + employee.workDayCount,
@@ -517,23 +526,27 @@ export function SalaryClosingDetailClient({
       actions={<>
         <Link href="/dashboard/finance/salary-closing"
           className={nextgenNeutralButtonClass}>Kembali</Link>
-        {!readOnly && canManage && closing.status === "DRAFT" &&
+        {!finalReadOnly && canManage && closing.status === "DRAFT" &&
           <button type="button" disabled={actionLoading}
             onClick={() => setConfirmAction("generate")}
             className={nextgenButtonClass}>
             <RefreshCw size={17}/>Generate Salary
           </button>}
-        {!readOnly && canManage && closing.status === "CLOSED" &&
+        {!finalReadOnly && canManage && closing.status === "CLOSED" &&
           <button type="button" disabled={actionLoading}
             onClick={() => setConfirmAction("generate")}
             className={nextgenNeutralButtonClass}>
             <RefreshCw size={17}/>Hitung Ulang
           </button>}
-        {!readOnly && canProcess && closing.status === "CLOSED" &&
+        {!finalReadOnly && canManage && closing.status === "CLOSED" &&
+          <button type="button" disabled={actionLoading}
+            onClick={() => setConfirmAction("complete")}
+            className={nextgenButtonClass}>Closing Success</button>}
+        {!finalReadOnly && canProcess && closing.status === "CLOSED" &&
           <button type="button" disabled={actionLoading}
             onClick={() => setConfirmAction("process")}
             className={nextgenButtonClass}>Proses ke Salary Recap</button>}
-        {!readOnly && canManage && ["DRAFT", "CLOSED"].includes(closing.status) &&
+        {!finalReadOnly && canManage && ["DRAFT", "CLOSED"].includes(closing.status) &&
           <button type="button" disabled={actionLoading}
             onClick={() => setConfirmAction("void")}
             className={nextgenNeutralButtonClass}>Void Closing</button>}
@@ -545,8 +558,10 @@ export function SalaryClosingDetailClient({
     </div>}
     {notice && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
     {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>}
-    {readOnly && <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-      Salary sudah diproses dan dikunci.
+    {finalReadOnly && <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+      {closing.status === "COMPLETED"
+        ? "Closing Success sudah final dan tidak dapat dibatalkan dari menu ini."
+        : "Salary sudah diproses dan dikunci."}
     </div>}
     <AppCard className="grid gap-3 p-5 text-sm md:grid-cols-3">
       <p><span className="text-slate-500">Status</span><br/><strong>{statusLabel[closing.status] ?? closing.status}</strong></p>
@@ -572,7 +587,7 @@ export function SalaryClosingDetailClient({
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
         Pickup: {closing.sourceRecords.filter((row) => row.sourceType === "PICKUP").length} record · Dispatch: {closing.sourceRecords.filter((row) => row.sourceType === "DISPATCH").length} record
       </div>
-      {!readOnly && canManage && profileIssueGroups.length > 0 &&
+      {!finalReadOnly && canManage && profileIssueGroups.length > 0 &&
         <button type="button" onClick={() => {
           setProfileEdits(Object.fromEntries(profileIssueGroups.map((group) => {
             const assignment = group.employee.assignments[0];
@@ -662,7 +677,7 @@ export function SalaryClosingDetailClient({
                   <span>{row.category}<small className="block text-slate-500">{row.reason}</small></span>
                   <span className="flex items-center gap-2">
                     <strong>{row.type === "DEDUCTION" ? "−" : "+"}{rupiah(row.amount)}</strong>
-                    {!readOnly && closing.status === "CLOSED" && canAdjust &&
+                    {!finalReadOnly && closing.status === "CLOSED" && canAdjust &&
                       <button type="button" onClick={() => setVoidItem({
                         type: "adjustment",
                         id: row.id,
@@ -679,7 +694,7 @@ export function SalaryClosingDetailClient({
                   <small className="block text-slate-500">{row.operationalExpense.description || "Kasbon"}</small></span>
                 <span className="flex items-center gap-2">
                   <strong>{rupiah(row.amount)}</strong>
-                  {!readOnly && closing.status === "CLOSED" && canAdjust &&
+                  {!finalReadOnly && closing.status === "CLOSED" && canAdjust &&
                     <button type="button" onClick={() => setVoidItem({
                       type: "kasbon",
                       id: row.id,
@@ -700,7 +715,7 @@ export function SalaryClosingDetailClient({
           <button type="button" disabled={actionLoading}
             onClick={() => void openSources(selectedEmployee)}
             className={nextgenNeutralButtonClass}>Lihat Rincian Sumber</button>
-          {!readOnly && canAdjust && closing.status === "CLOSED" && <>
+          {!finalReadOnly && canAdjust && closing.status === "CLOSED" && <>
             <button type="button" onClick={() => setAdjustmentType("ADDITION")}
               className={nextgenNeutralButtonClass}><Plus size={16}/>Tambah Penghasilan</button>
             <button type="button" onClick={() => setAdjustmentType("DEDUCTION")}
@@ -939,18 +954,39 @@ export function SalaryClosingDetailClient({
     {confirmAction && <div className="fixed inset-0 z-[70] grid place-items-center bg-slate-950/55 p-4">
       <ModalCard className="max-w-lg">
         <div className="border-b p-5"><h2 className="text-xl font-bold">
-          {confirmAction === "process" ? "Proses ke Salary Recap"
-            : confirmAction === "void" ? "Void Salary Closing"
-              : closing.status === "CLOSED" ? "Hitung Ulang Salary" : "Generate Salary"}
+          {confirmAction === "complete" ? "Closing Success"
+            : confirmAction === "process" ? "Proses ke Salary Recap"
+              : confirmAction === "void" ? "Void Salary Closing"
+                : closing.status === "CLOSED" ? "Hitung Ulang Salary" : "Generate Salary"}
         </h2></div>
         <div className="space-y-4 p-5 text-sm text-slate-600">
-          <p>{confirmAction === "generate" && closing.status === "CLOSED"
+          {confirmAction === "complete" ? <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                ["Nomor closing", closing.closingNumber],
+                ["Periode", `${closing.periodStart.slice(0, 10)} — ${closing.periodEnd.slice(0, 10)}`],
+                ["Jumlah team", String(closing.employees.length)],
+                ["Penghasilan sistem", rupiah(totals.system)],
+                ["Tambahan", rupiah(totals.addition)],
+                ["Potongan manual", rupiah(Math.max(0, totals.deduction - totals.kasbon))],
+                ["Potongan kasbon", rupiah(totals.kasbon)],
+                ["Total bersih", rupiah(totals.net)],
+              ].map(([label, value]) => <div key={label}
+                className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+                <p className="mt-1 font-bold text-slate-900">{value}</p>
+              </div>)}
+            </div>
+            <p className="font-semibold text-amber-800">
+              Setelah Closing Success, hasil Salary tidak dapat dihitung ulang atau diubah.
+            </p>
+          </> : <p>{confirmAction === "generate" && closing.status === "CLOSED"
             ? "Perhitungan sistem akan dibuat ulang berdasarkan data operasional dan Salary Setting terbaru. Tambahan dan potongan manual tetap dipertahankan."
             : confirmAction === "process"
               ? "Hasil salary akan dikunci dan masuk Salary Recap."
               : confirmAction === "void"
                 ? "Source reservation dan alokasi Kasbon draft akan dilepas."
-                : "Data operasional pada periode ini akan dihitung ke Salary Closing."}</p>
+                : "Data operasional pada periode ini akan dihitung ke Salary Closing."}</p>}
           {confirmAction === "void" && <textarea value={voidReason}
             placeholder="Alasan pembatalan"
             onChange={(event) => setVoidReason(event.target.value)}

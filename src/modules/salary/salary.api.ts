@@ -25,6 +25,12 @@ const messages: Record<string, string> = {
   SALARY_CLOSING_OVERLAP: "Periode salary closing bertumpang tindih.",
   SALARY_CLOSING_NOT_FOUND: "Salary closing tidak ditemukan.",
   SALARY_CLOSING_LOCKED: "Salary closing sudah dikunci dan tidak dapat diubah.",
+  SALARY_CLOSING_NOT_REVIEW:
+    "Hanya Salary Closing Dalam Review yang dapat difinalisasi.",
+  SALARY_CLOSING_NOT_GENERATED:
+    "Snapshot dan hasil Salary Closing belum lengkap.",
+  SALARY_CLOSING_INVALID_TOTAL:
+    "Salary Closing memiliki nominal yang tidak valid.",
   SALARY_CLOSING_EMPTY: "Salary closing belum memiliki hasil perhitungan team.",
   SALARY_CLOSING_HAS_WARNINGS:
     "Data yang belum terpetakan harus diselesaikan sebelum salary diproses.",
@@ -37,6 +43,8 @@ const messages: Record<string, string> = {
   SALARY_KASBON_NOT_FOUND: "Kasbon tidak tersedia untuk team dan periode ini.",
   SALARY_KASBON_EXCEEDS_REMAINING:
     "Potongan Kasbon melebihi sisa yang tersedia.",
+  SALARY_KASBON_REVIEW_REQUIRED:
+    "Masih ada Kasbon yang belum direview.",
   SALARY_SAVE_FAILED: "Data salary gagal disimpan.",
 };
 

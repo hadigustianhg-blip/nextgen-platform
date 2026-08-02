@@ -6,7 +6,7 @@ vi.mock("server-only", () => ({}));
 const db = vi.hoisted(() => ({
   salaryProfile: { findMany: vi.fn(), findFirst: vi.fn() },
   salaryEmployee: { findMany: vi.fn() },
-  salaryClosing: { findMany: vi.fn(), findFirst: vi.fn() },
+  salaryClosing: { findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
   $transaction: vi.fn(),
 }));
 const tx = vi.hoisted(() => ({
@@ -118,6 +118,7 @@ beforeEach(() => {
   tx.salaryClosingSourceRecord.findFirst.mockResolvedValue(null);
   tx.employeeSalaryAssignment.findFirst.mockResolvedValue(null);
   tx.salaryAudit.create.mockResolvedValue({ id: "audit-1" });
+  db.salaryClosing.count.mockResolvedValue(0);
 });
 
 describe("Salary profile validation and persistence", () => {
@@ -671,11 +672,38 @@ describe("Salary closing foundation", () => {
     await listSalaryClosings(scope);
     expect(db.salaryClosing.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { tenantId: scope.tenantId, outletId: scope.outletId },
+        where: {
+          tenantId: scope.tenantId,
+          outletId: scope.outletId,
+          status: { in: ["DRAFT", "CLOSED", "COMPLETED"] },
+        },
+        skip: 0,
+        take: 25,
       }),
     );
     expect(JSON.stringify(db)).not.toContain("rawPickup");
     expect(JSON.stringify(db)).not.toContain("rawDispatch");
+  });
+
+  it.each([
+    ["ALL", undefined],
+    ["REVIEW", "CLOSED"],
+    ["SUCCESS", "COMPLETED"],
+    ["DRAFT", "DRAFT"],
+    ["VOID", "VOID"],
+  ] as const)("applies backend closing filter %s", async (statusFilter, status) => {
+    db.salaryClosing.findMany.mockResolvedValueOnce([]);
+    db.salaryClosing.count.mockResolvedValueOnce(0);
+    await listSalaryClosings(scope, { statusFilter, page: 2, pageSize: 10 });
+    const where = {
+      tenantId: scope.tenantId,
+      outletId: scope.outletId,
+      ...(status ? { status } : {}),
+    };
+    expect(db.salaryClosing.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where, skip: 10, take: 10 }),
+    );
+    expect(db.salaryClosing.count).toHaveBeenCalledWith({ where });
   });
 
   it("rejects an invalid date order at the API boundary", () => {
@@ -758,10 +786,26 @@ describe("Salary domain, permissions, UI and migration contracts", () => {
     expect(migration).not.toMatch(/\b(DROP|TRUNCATE|DELETE FROM)\b/i);
   });
 
+  it("adds an unambiguous additive Closing Success status without rewriting existing rows", async () => {
+    const [schema, migration] = await Promise.all([
+      readFile(new URL("../../../prisma/schema.prisma", import.meta.url), "utf8"),
+      readFile(new URL(
+        "../../../prisma/migrations/20260802000200_add_salary_closing_completed_status/migration.sql",
+        import.meta.url,
+      ), "utf8"),
+    ]);
+    expect(schema).toMatch(/enum SalaryClosingStatus \{[\s\S]*CLOSED[\s\S]*COMPLETED/);
+    expect(migration).toContain(
+      'ALTER TYPE "SalaryClosingStatus" ADD VALUE IF NOT EXISTS \'COMPLETED\'',
+    );
+    expect(migration).not.toMatch(/\b(UPDATE|DELETE|DROP|TRUNCATE)\b/i);
+  });
+
   it("provides responsive pages, safe empty states and no native dialogs", async () => {
-    const [setting, closing, recap, sidebar] = await Promise.all([
+    const [setting, closing, closingDetail, recap, sidebar] = await Promise.all([
       readFile(new URL("../../components/finance/salary-setting-client.tsx", import.meta.url), "utf8"),
       readFile(new URL("../../components/finance/salary-closing-client.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../../components/finance/salary-closing-detail-client.tsx", import.meta.url), "utf8"),
       readFile(new URL("../../components/finance/salary-recap-empty.tsx", import.meta.url), "utf8"),
       readFile(new URL("../../components/layout/sidebar.tsx", import.meta.url), "utf8"),
     ]);
@@ -790,6 +834,14 @@ describe("Salary domain, permissions, UI and migration contracts", () => {
     expect(closing).toContain("if (!preview || closingSaving || !closingRequestId) return");
     expect(closing).toContain("Periode bertabrakan dengan closing");
     expect(closing).toContain("Dalam Review");
+    expect(closing).toContain('value="ACTIVE">Closing Aktif');
+    expect(closing).toContain('value="ALL">Semua Status');
+    expect(closing).toContain('value="SUCCESS">Closing Success');
+    expect(closing).toContain('value="VOID">Dibatalkan / Void');
+    expect(closing).toContain("setClosingPage(1)");
+    expect(closingDetail).toContain('closing.status === "COMPLETED"');
+    expect(closingDetail).toContain("Closing Success sudah final dan tidak dapat dibatalkan dari menu ini.");
+    expect(closingDetail).toContain("Setelah Closing Success, hasil Salary tidak dapat dihitung ulang atau diubah.");
     expect(recap).toContain("Salary yang sudah diproses akan tampil di sini.");
     expect(recap).toContain("Masuk Rekap");
     for (const route of ["salary-setting", "salary-closing", "salary-recap"]) {

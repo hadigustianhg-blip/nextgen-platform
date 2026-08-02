@@ -5,12 +5,13 @@ import {
   canReadSalaryClosing,
   createSalaryClosing,
   listSalaryClosings,
+  salaryClosingListQuerySchema,
   salaryClosingSchema,
   salaryErrorResponse,
   salaryScope,
 } from "@/modules/salary";
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
   if (!canReadSalaryClosing(session)) {
@@ -18,7 +19,21 @@ export async function GET() {
   }
   const scope = salaryScope(session);
   if (!scope) return NextResponse.json({ error: { code: "OUTLET_REQUIRED" } }, { status: 400 });
-  return NextResponse.json({ data: await listSalaryClosings(scope) });
+  const url = new URL(request.url);
+  const parsed = salaryClosingListQuerySchema.safeParse({
+    statusFilter: url.searchParams.get("statusFilter") || undefined,
+    page: url.searchParams.get("page") || undefined,
+    pageSize: url.searchParams.get("pageSize") || undefined,
+  });
+  if (!parsed.success) {
+    return NextResponse.json({
+      error: {
+        code: "VALIDATION_ERROR",
+        fields: parsed.error.flatten().fieldErrors,
+      },
+    }, { status: 400 });
+  }
+  return NextResponse.json(await listSalaryClosings(scope, parsed.data));
 }
 
 export async function POST(request: Request) {

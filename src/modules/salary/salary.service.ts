@@ -869,22 +869,65 @@ export async function assignSalaryProfile(
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
-export async function listSalaryClosings(scope: SalaryScope) {
-  return prisma.salaryClosing.findMany({
-    where: { tenantId: scope.tenantId, outletId: scope.outletId },
-    include: {
-      createdBy: { select: { name: true } },
-      employees: {
-        select: {
-          systemIncomeTotal: true,
-          manualAdditionTotal: true,
-          manualDeductionTotal: true,
-          netSalary: true,
+export type SalaryClosingStatusFilter =
+  | "ACTIVE" | "ALL" | "REVIEW" | "SUCCESS" | "DRAFT" | "VOID";
+
+export async function listSalaryClosings(
+  scope: SalaryScope,
+  input: {
+    statusFilter?: SalaryClosingStatusFilter;
+    page?: number;
+    pageSize?: number;
+  } = {},
+) {
+  const statusFilter = input.statusFilter ?? "ACTIVE";
+  const page = input.page ?? 1;
+  const pageSize = input.pageSize ?? 25;
+  const status: Prisma.SalaryClosingWhereInput["status"] = statusFilter === "ACTIVE"
+    ? { in: ["DRAFT", "CLOSED", "COMPLETED"] }
+    : statusFilter === "REVIEW"
+      ? "CLOSED" as const
+      : statusFilter === "SUCCESS"
+        ? "COMPLETED" as const
+        : statusFilter === "DRAFT"
+          ? "DRAFT" as const
+          : statusFilter === "VOID"
+            ? "VOID" as const
+            : undefined;
+  const where: Prisma.SalaryClosingWhereInput = {
+    tenantId: scope.tenantId,
+    outletId: scope.outletId,
+    ...(status ? { status } : {}),
+  };
+  const [data, total] = await Promise.all([
+    prisma.salaryClosing.findMany({
+      where,
+      include: {
+        createdBy: { select: { name: true } },
+        employees: {
+          select: {
+            systemIncomeTotal: true,
+            manualAdditionTotal: true,
+            manualDeductionTotal: true,
+            netSalary: true,
+          },
         },
       },
+      orderBy: [{ periodStart: "desc" }, { createdAt: "desc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.salaryClosing.count({ where }),
+  ]);
+  return {
+    data,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
     },
-    orderBy: [{ periodStart: "desc" }, { createdAt: "desc" }],
-  });
+  };
 }
 
 export async function getSalaryClosing(scope: SalaryScope, id: string) {

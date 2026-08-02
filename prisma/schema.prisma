@@ -142,6 +142,7 @@ enum SalaryAssignmentStatus {
 enum SalaryClosingStatus {
   DRAFT
   CLOSED
+  COMPLETED
   PROCESSED
   PAID
   VOID

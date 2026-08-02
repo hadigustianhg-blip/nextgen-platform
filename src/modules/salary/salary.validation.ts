@@ -7,6 +7,21 @@ const division = z.enum([
 const nullableNonNegative = z.number().finite().nonnegative().nullable().optional();
 const nullableThreshold = z.number().int().nonnegative().nullable().optional();
 
+export const salaryClosingStatusFilterSchema = z.enum([
+  "ACTIVE",
+  "ALL",
+  "REVIEW",
+  "SUCCESS",
+  "DRAFT",
+  "VOID",
+]);
+
+export const salaryClosingListQuerySchema = z.object({
+  statusFilter: salaryClosingStatusFilterSchema.default("ACTIVE"),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+});
+
 export const salaryProfileSchema = z.object({
   code: z.string().trim().min(1).max(50).transform((value) => value.toUpperCase()),
   name: z.string().trim().min(1).max(150),
