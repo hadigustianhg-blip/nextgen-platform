@@ -6,6 +6,7 @@ export * from "./salary.kasbon.service";
 export * from "./salary.preview.service";
 export * from "./salary.preview-closing.service";
 export * from "./salary.preview-date";
+export * from "./salary.publication.service";
 export * from "./salary.recap.service";
 export * from "./salary.domain";
 export * from "./salary.service";

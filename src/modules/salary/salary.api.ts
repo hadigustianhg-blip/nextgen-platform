@@ -51,6 +51,12 @@ const messages: Record<string, string> = {
     "Salary Recap tidak dapat dibatalkan pada status saat ini.",
   SALARY_RECAP_PAYMENT_EXISTS:
     "Rekap tidak dapat dibatalkan karena pembayaran Salary sudah diproses.",
+  SALARY_PUBLICATION_NOT_FOUND:
+    "Data team Salary Recap tidak ditemukan.",
+  SALARY_PUBLICATION_NOT_AVAILABLE:
+    "Salary Card hanya tersedia untuk Salary Recap yang sudah diproses.",
+  SALARY_PUBLICATION_INCONSISTENT:
+    "Salary Card tidak dapat dibuat karena nominal final tidak konsisten.",
   SALARY_SAVE_FAILED: "Data salary gagal disimpan.",
 };
 
