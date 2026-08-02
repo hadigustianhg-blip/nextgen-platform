@@ -150,6 +150,7 @@ enum SalaryClosingStatus {
 
 enum SalaryClosingEmployeeStatus {
   DRAFT
+  PENDING_REVIEW
   REVIEWED
   PROCESSED
   PAID

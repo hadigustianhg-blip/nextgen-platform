@@ -841,7 +841,8 @@ describe("Salary domain, permissions, UI and migration contracts", () => {
     expect(closing).toContain("setClosingPage(1)");
     expect(closingDetail).toContain('closing.status === "COMPLETED"');
     expect(closingDetail).toContain("Closing Success sudah final dan tidak dapat dibatalkan dari menu ini.");
-    expect(closingDetail).toContain("Setelah Closing Success, hasil Salary tidak dapat dihitung ulang atau diubah.");
+    expect(closingDetail).not.toContain('setConfirmAction("complete")');
+    expect(closingDetail).toContain("Simpan Adjustment");
     expect(recap).toContain("Salary yang sudah diproses akan tampil di sini.");
     expect(recap).toContain("Masuk Rekap");
     for (const route of ["salary-setting", "salary-closing", "salary-recap"]) {

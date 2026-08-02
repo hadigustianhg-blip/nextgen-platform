@@ -32,6 +32,8 @@ const messages: Record<string, string> = {
   SALARY_CLOSING_INVALID_TOTAL:
     "Salary Closing memiliki nominal yang tidak valid.",
   SALARY_CLOSING_EMPTY: "Salary closing belum memiliki hasil perhitungan team.",
+  SALARY_TEAM_REVIEW_REQUIRED:
+    "Masih ada team yang belum menyelesaikan Adjustment.",
   SALARY_CLOSING_HAS_WARNINGS:
     "Data yang belum terpetakan harus diselesaikan sebelum salary diproses.",
   SALARY_CLOSING_HAS_PROFILE_WARNINGS:

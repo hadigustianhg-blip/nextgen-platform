@@ -1076,6 +1076,10 @@ export async function createSalaryAdjustment(
       },
     } });
     await refreshClosingEmployeeTotals(tx, context, employee.id);
+    await tx.salaryClosingEmployee.update({
+      where: { id: employee.id },
+      data: { status: "PENDING_REVIEW" },
+    });
     return adjustment;
   });
 }
@@ -1125,6 +1129,10 @@ export async function voidSalaryAdjustment(
       context,
       adjustment.salaryClosingEmployeeId,
     );
+    await tx.salaryClosingEmployee.update({
+      where: { id: adjustment.salaryClosingEmployeeId },
+      data: { status: "PENDING_REVIEW" },
+    });
     return updated;
   });
 }

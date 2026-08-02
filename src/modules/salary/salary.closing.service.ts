@@ -431,7 +431,7 @@ export async function generateSalaryClosingInTransaction(
           manualAdditionTotal: zero(),
           manualDeductionTotal: zero(),
           netSalary: calculated.systemIncomeTotal,
-          status: "REVIEWED",
+          status: "PENDING_REVIEW",
           workDayCount: calculated.workDates.length,
           sourcePickupCount: calculated.pickupCount,
           sourceDispatchCount: calculated.dispatchCount,
@@ -446,7 +446,7 @@ export async function generateSalaryClosingInTransaction(
           salaryProfileCodeSnapshot: primaryAssignment.salaryProfile.code,
           salaryProfileVersionSnapshot: primaryAssignment.salaryProfile.version,
           systemIncomeTotal: calculated.systemIncomeTotal,
-          status: "REVIEWED",
+          status: "PENDING_REVIEW",
           workDayCount: calculated.workDates.length,
           sourcePickupCount: calculated.pickupCount,
           sourceDispatchCount: calculated.dispatchCount,
@@ -576,6 +576,7 @@ export async function generateSalaryClosingInTransaction(
           where: { id: stale.id },
           data: {
             systemIncomeTotal: zero(),
+            status: "PENDING_REVIEW",
             workDayCount: 0,
             sourcePickupCount: 0,
             sourceDispatchCount: 0,
@@ -866,6 +867,16 @@ export async function processSalaryClosing(
     if (!closing.employees.length) {
       throw new SalaryError("SALARY_CLOSING_EMPTY", 409);
     }
+    const pendingEmployees = closing.employees.filter(
+      (employee) => employee.status !== "REVIEWED",
+    );
+    if (pendingEmployees.length) {
+      throw new SalaryError("SALARY_TEAM_REVIEW_REQUIRED", 409, {
+        teamNames: pendingEmployees
+          .map((employee) => employee.employeeNameSnapshot)
+          .join(", "),
+      });
+    }
     if (closing.sourceRecords.length) {
       const profileReasons = new Set([
         "PROFILE_NOT_ASSIGNED",
@@ -930,6 +941,79 @@ export async function processSalaryClosing(
       },
     });
     return processed;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function reviewSalaryClosingEmployeeAdjustment(
+  context: SalaryContext,
+  closingId: string,
+  closingEmployeeId: string,
+) {
+  return prisma.$transaction(async (tx) => {
+    const employee = await tx.salaryClosingEmployee.findFirst({
+      where: {
+        id: closingEmployeeId,
+        salaryClosingId: closingId,
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+      },
+      include: { salaryClosing: { select: { status: true } } },
+    });
+    if (!employee) throw new SalaryError("SALARY_SCOPE_MISMATCH", 404);
+    if (employee.salaryClosing.status !== "CLOSED") {
+      throw new SalaryError("SALARY_CLOSING_LOCKED", 409);
+    }
+    if (employee.status === "REVIEWED") {
+      return { ...employee, alreadyReviewed: true };
+    }
+    if (employee.status !== "PENDING_REVIEW") {
+      throw new SalaryError("SALARY_CLOSING_LOCKED", 409);
+    }
+
+    const result = await tx.salaryClosingEmployee.updateMany({
+      where: {
+        id: employee.id,
+        salaryClosingId: closingId,
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        status: "PENDING_REVIEW",
+      },
+      data: { status: "REVIEWED" },
+    });
+    if (!result.count) {
+      const current = await tx.salaryClosingEmployee.findFirst({
+        where: {
+          id: employee.id,
+          salaryClosingId: closingId,
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+        },
+      });
+      if (current?.status === "REVIEWED") {
+        return { ...current, alreadyReviewed: true };
+      }
+      throw new SalaryError("SALARY_CLOSING_LOCKED", 409);
+    }
+
+    const reviewed = await tx.salaryClosingEmployee.findUniqueOrThrow({
+      where: { id: employee.id },
+    });
+    await tx.salaryAudit.create({
+      data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryClosingId: closingId,
+        actorId: context.actorId,
+        action: "UPDATE",
+        entityType: "SALARY_TEAM_ADJUSTMENT_REVIEWED",
+        entityId: employee.id,
+        metadata: {
+          closingId,
+          employeeId: employee.employeeId,
+        },
+      },
+    });
+    return { ...reviewed, alreadyReviewed: false };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 

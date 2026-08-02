@@ -171,6 +171,10 @@ export async function saveSalaryKasbonAllocation(
       },
     });
     await refreshClosingEmployeeTotals(tx, context, employee.id);
+    await tx.salaryClosingEmployee.update({
+      where: { id: employee.id },
+      data: { status: "PENDING_REVIEW" },
+    });
     await tx.salaryAudit.create({
       data: {
         tenantId: context.tenantId,
@@ -228,6 +232,10 @@ export async function voidSalaryKasbonAllocation(
       context,
       allocation.salaryClosingEmployeeId,
     );
+    await tx.salaryClosingEmployee.update({
+      where: { id: allocation.salaryClosingEmployeeId },
+      data: { status: "PENDING_REVIEW" },
+    });
     await tx.salaryAudit.create({
       data: {
         tenantId: context.tenantId,
