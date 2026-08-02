@@ -1,8 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Eye, LoaderCircle, Megaphone, Undo2, X } from "lucide-react";
+import {
+  Download,
+  Eye,
+  FileDown,
+  LoaderCircle,
+  Megaphone,
+  MessageCircle,
+  Undo2,
+  X,
+} from "lucide-react";
 import {
   AppCard,
   MetricCard,
@@ -109,8 +118,150 @@ const rupiah = (value: string | number) => new Intl.NumberFormat("id-ID", {
 }).format(Number(value));
 const formatPeriod = (start: string, end: string) =>
   `${start.slice(0, 10)} — ${end.slice(0, 10)}`;
+const formatDocumentDate = (value: string | Date) => {
+  const date = typeof value === "string"
+    ? new Date(`${value.slice(0, 10)}T00:00:00.000Z`)
+    : value;
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    timeZone: typeof value === "string" ? "UTC" : "Asia/Jakarta",
+  }).format(date);
+};
+const formatPublishTime = (value: Date) => `${new Intl.DateTimeFormat("id-ID", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  timeZone: "Asia/Jakarta",
+}).format(value).replace(".", ":")} WIB`;
+const safeFilename = (value: string) => value
+  .normalize("NFKD")
+  .replace(/[^a-zA-Z0-9]+/g, "-")
+  .replace(/^-|-$/g, "")
+  .toLowerCase();
+
+function copyComputedStyles(source: Element, target: Element) {
+  const computed = window.getComputedStyle(source);
+  const inline = Array.from(computed)
+    .map((property) => `${property}:${computed.getPropertyValue(property)};`)
+    .join("");
+  target.setAttribute("style", inline);
+  Array.from(source.children).forEach((child, index) => {
+    const targetChild = target.children.item(index);
+    if (targetChild) copyComputedStyles(child, targetChild);
+  });
+}
+
+async function renderPublicationCanvas(element: HTMLElement) {
+  await document.fonts.ready;
+  const width = element.scrollWidth;
+  const height = element.scrollHeight;
+  const clone = element.cloneNode(true) as HTMLElement;
+  copyComputedStyles(element, clone);
+  clone.style.margin = "0";
+  clone.style.width = `${width}px`;
+  clone.style.height = `${height}px`;
+  clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+  const serialized = new XMLSerializer().serializeToString(clone);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
+  const objectUrl = URL.createObjectURL(new Blob([svg], {
+    type: "image/svg+xml;charset=utf-8",
+  }));
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const nextImage = new Image();
+      nextImage.onload = () => resolve(nextImage);
+      nextImage.onerror = () => reject(new Error("Render Salary Card gagal."));
+      nextImage.src = objectUrl;
+    });
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Canvas tidak tersedia.");
+    context.scale(scale, scale);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    return canvas;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function canvasBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("File Salary Card gagal dibuat."));
+    }, type, quality);
+  });
+}
+
+function createPdfFromJpeg(jpeg: Uint8Array, width: number, height: number) {
+  const encoder = new TextEncoder();
+  const parts: Uint8Array[] = [];
+  const offsets = [0];
+  let byteLength = 0;
+  const append = (value: string | Uint8Array) => {
+    const bytes = typeof value === "string" ? encoder.encode(value) : value;
+    parts.push(bytes);
+    byteLength += bytes.byteLength;
+  };
+  const object = (id: number, body: string | Uint8Array[]) => {
+    offsets[id] = byteLength;
+    append(`${id} 0 obj\n`);
+    if (typeof body === "string") append(body);
+    else body.forEach(append);
+    append("\nendobj\n");
+  };
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const imageRatio = width / height;
+  const pageRatio = pageWidth / pageHeight;
+  const renderWidth = imageRatio > pageRatio ? pageWidth : pageHeight * imageRatio;
+  const renderHeight = imageRatio > pageRatio ? pageWidth / imageRatio : pageHeight;
+  const offsetX = (pageWidth - renderWidth) / 2;
+  const offsetY = (pageHeight - renderHeight) / 2;
+  const content = `q ${renderWidth.toFixed(2)} 0 0 ${renderHeight.toFixed(2)} ${offsetX.toFixed(2)} ${offsetY.toFixed(2)} cm /Im0 Do Q`;
+
+  append("%PDF-1.4\n");
+  object(1, "<< /Type /Catalog /Pages 2 0 R >>");
+  object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+  object(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`);
+  object(4, [
+    encoder.encode(`<< /Type /XObject /Subtype /Image /Width ${width} /Height ${height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.byteLength} >>\nstream\n`),
+    jpeg,
+    encoder.encode("\nendstream"),
+  ]);
+  object(5, `<< /Length ${encoder.encode(content).byteLength} >>\nstream\n${content}\nendstream`);
+  const xrefOffset = byteLength;
+  append("xref\n0 6\n0000000000 65535 f \n");
+  for (let id = 1; id <= 5; id += 1) {
+    append(`${String(offsets[id]).padStart(10, "0")} 00000 n \n`);
+  }
+  append(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+  return new Blob(parts.map((part) => part.buffer.slice(
+    part.byteOffset,
+    part.byteOffset + part.byteLength,
+  ) as ArrayBuffer), { type: "application/pdf" });
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 
 export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
+  const publicationCardRef = useRef<HTMLElement>(null);
   const [recap, setRecap] = useState<Recap | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -119,6 +270,8 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
   const [publicationLoading, setPublicationLoading] = useState(false);
   const [publicationError, setPublicationError] = useState("");
   const [showRecap, setShowRecap] = useState(false);
+  const [publishedAt, setPublishedAt] = useState<Date | null>(null);
+  const [exporting, setExporting] = useState<"pdf" | "png" | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelLoading, setCancelLoading] = useState(false);
@@ -150,6 +303,7 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
     setPublication(null);
     setPublicationError("");
     setShowRecap(false);
+    setPublishedAt(null);
     setPublicationOpen(true);
     setPublicationLoading(true);
     try {
@@ -162,12 +316,39 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
         result.error?.message || "Salary Card gagal dimuat.",
       );
       setPublication(result.data);
+      setPublishedAt(new Date());
     } catch (cause) {
       setPublicationError(cause instanceof Error
         ? cause.message
         : "Salary Card gagal dimuat.");
     } finally {
       setPublicationLoading(false);
+    }
+  }
+
+  async function downloadPublication(format: "pdf" | "png") {
+    if (!publication || !publicationCardRef.current || exporting) return;
+    setExporting(format);
+    setPublicationError("");
+    try {
+      const canvas = await renderPublicationCanvas(publicationCardRef.current);
+      const basename = `salary-card-${safeFilename(publication.employee.name)}-${safeFilename(publication.closing.closingNumber)}`;
+      if (format === "png") {
+        downloadBlob(await canvasBlob(canvas, "image/png"), `${basename}.png`);
+      } else {
+        const jpegBlob = await canvasBlob(canvas, "image/jpeg", 0.96);
+        const jpeg = new Uint8Array(await jpegBlob.arrayBuffer());
+        downloadBlob(
+          createPdfFromJpeg(jpeg, canvas.width, canvas.height),
+          `${basename}.pdf`,
+        );
+      }
+    } catch (cause) {
+      setPublicationError(cause instanceof Error
+        ? cause.message
+        : "Salary Card gagal diunduh.");
+    } finally {
+      setExporting(null);
     }
   }
 
@@ -314,120 +495,170 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
             className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-800">
             {publicationError}
           </div>}
-          {publication && <div className="space-y-6">
-            <AppCard className="grid gap-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-              <p>Nama<br/><strong>{publication.employee.name}</strong></p>
-              <p>Divisi<br/><strong>{divisionLabel[publication.employee.division] ?? publication.employee.division}</strong></p>
-              <p>Periode Salary<br/><strong>{formatPeriod(publication.closing.periodStart, publication.closing.periodEnd)}</strong></p>
-              <p>Nomor Closing<br/><strong>{publication.closing.closingNumber}</strong></p>
-              <p>Brand<br/><strong>{publication.identity.brandName}</strong></p>
-              <p>Kode Outlet<br/><strong>{publication.identity.outletCode}</strong></p>
-              <p>Hari Kerja<br/><strong>{publication.employee.workDayCount}</strong></p>
-              <p>Pickup / Dispatch<br/><strong>{publication.employee.pickupCount} / {publication.employee.dispatchCount}</strong></p>
-            </AppCard>
-
-            {showRecap && <SectionCard title="Rekapan Salary Final">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <AppCard className="space-y-2 p-4 text-sm">
-                  <h3 className="font-bold">Penghasilan</h3>
-                  <p className="flex justify-between"><span>Penghasilan Sistem</span><strong>{rupiah(publication.totals.systemIncome)}</strong></p>
-                  {publication.components.map((line) => <p key={line.id}
-                    className="flex justify-between gap-3 text-slate-600">
-                    <span>{line.componentName}</span><span>{rupiah(line.amount)}</span>
-                  </p>)}
-                  <p className="flex justify-between"><span>Tambahan</span><strong>{rupiah(publication.totals.addition)}</strong></p>
-                  {publication.additions.map((line) => <p key={line.id}
-                    className="flex justify-between gap-3 text-slate-600">
-                    <span>{line.category} · {line.reason}</span><span>{rupiah(line.amount)}</span>
-                  </p>)}
-                </AppCard>
-                <AppCard className="space-y-2 p-4 text-sm">
-                  <h3 className="font-bold">Potongan</h3>
-                  <p className="flex justify-between"><span>Potongan Manual</span><strong>{rupiah(publication.totals.manualDeduction)}</strong></p>
-                  {publication.deductions.map((line) => <p key={line.id}
-                    className="flex justify-between gap-3 text-slate-600">
-                    <span>{line.category} · {line.reason}</span><span>{rupiah(line.amount)}</span>
-                  </p>)}
-                  <p className="flex justify-between"><span>Potongan Kasbon</span><strong>{rupiah(publication.totals.kasbon)}</strong></p>
-                  {publication.kasbonAllocations.map((line) => <p key={line.id}
-                    className="flex justify-between gap-3 text-slate-600">
-                    <span>{line.kasbonSnapshot?.description || "Kasbon"}</span><span>{rupiah(line.amount)}</span>
-                  </p>)}
-                </AppCard>
-                <AppCard className="space-y-3 p-4 text-sm">
-                  <p className="flex justify-between"><span>Total Penghasilan</span><strong>{rupiah(publication.totals.totalIncome)}</strong></p>
-                  <p className="flex justify-between"><span>Total Potongan</span><strong>{rupiah(publication.totals.totalDeduction)}</strong></p>
-                  <p className="flex justify-between border-t pt-3 text-base"><span>Total Bersih</span><strong>{rupiah(publication.totals.netSalary)}</strong></p>
-                </AppCard>
-              </div>
-            </SectionCard>}
-
-            <section aria-label="Preview Salary Card"
-              className="mx-auto max-w-3xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-xl">
-              <header className="bg-slate-950 px-5 py-6 text-white sm:px-8">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xl font-bold sm:text-2xl">{publication.identity.brandName}</p>
-                    <p className="mt-1 text-sm text-slate-300">
-                      {publication.identity.outletName
-                        ? `${publication.identity.outletName} · ${publication.identity.outletCode}`
-                        : publication.identity.outletCode}
+          {publication && publishedAt && <div className="overflow-x-auto pb-2">
+            <section ref={publicationCardRef} aria-label="Preview Salary Card"
+              className="mx-auto flex min-h-[1123px] w-[794px] min-w-[794px] flex-col overflow-hidden border border-slate-200 bg-white text-slate-900 shadow-xl">
+              <header className="bg-[#102a43] px-12 py-10 text-white">
+                <div className="flex items-start justify-between gap-8">
+                  <div className="max-w-[460px]">
+                    <p className="text-2xl font-bold leading-tight">
+                      {publication.identity.outletName &&
+                        publication.identity.outletName !== publication.identity.brandName
+                        ? `${publication.identity.brandName} / ${publication.identity.outletName}`
+                        : `OUTLET ${publication.identity.outletCode}`}
                     </p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs font-bold tracking-[0.24em] text-sky-300">SLIP GAJI</p>
-                    <p className="mt-1 text-sm">{formatPeriod(publication.closing.periodStart, publication.closing.periodEnd)}</p>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-bold tracking-[0.28em] text-slate-200">
+                      SLIP GAJI
+                    </p>
+                    <p className="mt-3 text-sm font-semibold">
+                      {publication.closing.closingNumber}
+                    </p>
                   </div>
                 </div>
-              </header>
-              <div className="space-y-6 p-5 sm:p-8">
-                <div className="grid gap-3 text-sm sm:grid-cols-3">
-                  <p>Nama<br/><strong className="text-base">{publication.employee.name}</strong></p>
-                  <p>Divisi<br/><strong>{divisionLabel[publication.employee.division] ?? publication.employee.division}</strong></p>
-                  <p>Nomor Closing<br/><strong>{publication.closing.closingNumber}</strong></p>
-                  <p>Hari Kerja<br/><strong>{publication.employee.workDayCount}</strong></p>
-                  <p>Pickup<br/><strong>{publication.employee.pickupCount}</strong></p>
-                  <p>Dispatch<br/><strong>{publication.employee.dispatchCount}</strong></p>
-                </div>
-                <div className="grid gap-5 md:grid-cols-2">
-                  <div className="rounded-2xl bg-emerald-50 p-4 text-sm">
-                    <h3 className="font-bold text-emerald-900">Penghasilan</h3>
-                    <p className="mt-3 flex justify-between"><span>Penghasilan Sistem</span><strong>{rupiah(publication.totals.systemIncome)}</strong></p>
-                    {publication.components.map((line) => <p key={line.id}
-                      className="mt-2 flex justify-between gap-3 text-xs text-emerald-900/75">
-                      <span>{line.componentName}</span><span>{rupiah(line.amount)}</span>
-                    </p>)}
-                    <p className="mt-3 flex justify-between"><span>Tambahan</span><strong>{rupiah(publication.totals.addition)}</strong></p>
-                    <p className="mt-3 flex justify-between border-t border-emerald-200 pt-3"><span>Total Penghasilan</span><strong>{rupiah(publication.totals.totalIncome)}</strong></p>
-                  </div>
-                  <div className="rounded-2xl bg-rose-50 p-4 text-sm">
-                    <h3 className="font-bold text-rose-900">Potongan</h3>
-                    <p className="mt-3 flex justify-between"><span>Potongan Manual</span><strong>{rupiah(publication.totals.manualDeduction)}</strong></p>
-                    <p className="mt-3 flex justify-between"><span>Potongan Kasbon</span><strong>{rupiah(publication.totals.kasbon)}</strong></p>
-                    <p className="mt-3 flex justify-between border-t border-rose-200 pt-3"><span>Total Potongan</span><strong>{rupiah(publication.totals.totalDeduction)}</strong></p>
-                  </div>
-                </div>
-                <div className="rounded-2xl bg-sky-600 p-5 text-center text-white">
-                  <p className="text-xs font-bold tracking-[0.18em]">TOTAL BERSIH DITERIMA</p>
-                  <p className="mt-2 break-words text-3xl font-black sm:text-4xl">
-                    {rupiah(publication.totals.netSalary)}
+                <div className="mt-8 grid grid-cols-2 gap-6 border-t border-white/20 pt-5 text-sm">
+                  <p><span className="block text-xs uppercase tracking-wider text-slate-300">Periode</span>
+                    <strong>{formatDocumentDate(publication.closing.periodStart)} - {formatDocumentDate(publication.closing.periodEnd)}</strong>
+                  </p>
+                  <p className="text-right"><span className="block text-xs uppercase tracking-wider text-slate-300">Tanggal Publish</span>
+                    <strong>{formatDocumentDate(publishedAt)}</strong>
                   </p>
                 </div>
+              </header>
+
+              <div className="flex-1 space-y-9 px-12 py-10">
+                <section>
+                  <h3 className="border-b border-slate-300 pb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Identitas Team
+                  </h3>
+                  <dl className="mt-5 grid grid-cols-2 gap-x-12 gap-y-5 text-sm">
+                    <div><dt className="text-slate-500">Nama</dt>
+                      <dd className="mt-1 text-base font-bold">{publication.employee.name}</dd></div>
+                    <div><dt className="text-slate-500">Divisi</dt>
+                      <dd className="mt-1 font-semibold">{divisionLabel[publication.employee.division] ?? publication.employee.division}</dd></div>
+                    <div><dt className="text-slate-500">Hari Kerja</dt>
+                      <dd className="mt-1 font-semibold">{publication.employee.workDayCount}</dd></div>
+                    <div><dt className="text-slate-500">Status</dt>
+                      <dd className="mt-1 font-semibold">Siap Dipublikasikan</dd></div>
+                    <div className="col-span-2"><dt className="text-slate-500">Tanggal Publish</dt>
+                      <dd className="mt-1 font-semibold">{formatDocumentDate(publishedAt)}, {formatPublishTime(publishedAt)}</dd></div>
+                  </dl>
+                </section>
+
+                <section>
+                  <h3 className="border-b border-slate-300 pb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Rincian Penghasilan
+                  </h3>
+                  <table className="mt-3 w-full border-collapse text-sm">
+                    <tbody className="divide-y divide-slate-200">
+                      <tr><td className="py-3">Penghasilan Sistem</td>
+                        <td className="py-3 text-right font-semibold">{rupiah(publication.totals.systemIncome)}</td></tr>
+                      {showRecap && publication.components.map((line) => <tr key={line.id}
+                        className="text-xs text-slate-500">
+                        <td className="py-2 pl-4">{line.componentName}</td>
+                        <td className="py-2 text-right">{rupiah(line.amount)}</td>
+                      </tr>)}
+                      <tr><td className="py-3">Tambahan</td>
+                        <td className="py-3 text-right font-semibold">{rupiah(publication.totals.addition)}</td></tr>
+                      {showRecap && publication.additions.map((line) => <tr key={line.id}
+                        className="text-xs text-slate-500">
+                        <td className="py-2 pl-4">{line.category} - {line.reason}</td>
+                        <td className="py-2 text-right">{rupiah(line.amount)}</td>
+                      </tr>)}
+                      <tr className="border-t-2 border-slate-400 font-bold">
+                        <td className="py-4">TOTAL PENGHASILAN</td>
+                        <td className="py-4 text-right">{rupiah(publication.totals.totalIncome)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </section>
+
+                <section>
+                  <h3 className="border-b border-slate-300 pb-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Rincian Potongan
+                  </h3>
+                  <table className="mt-3 w-full border-collapse text-sm">
+                    <tbody className="divide-y divide-slate-200">
+                      <tr><td className="py-3">Potongan Kasbon</td>
+                        <td className={`py-3 text-right font-semibold ${Number(publication.totals.kasbon) > 0 ? "text-rose-700" : ""}`}>
+                          {rupiah(publication.totals.kasbon)}
+                        </td></tr>
+                      {showRecap && publication.kasbonAllocations.map((line) => <tr key={line.id}
+                        className="text-xs text-slate-500">
+                        <td className="py-2 pl-4">{line.kasbonSnapshot?.description || "Kasbon"}</td>
+                        <td className="py-2 text-right">{rupiah(line.amount)}</td>
+                      </tr>)}
+                      <tr><td className="py-3">Potongan Manual</td>
+                        <td className={`py-3 text-right font-semibold ${Number(publication.totals.manualDeduction) > 0 ? "text-rose-700" : ""}`}>
+                          {rupiah(publication.totals.manualDeduction)}
+                        </td></tr>
+                      {showRecap && publication.deductions.map((line) => <tr key={line.id}
+                        className="text-xs text-slate-500">
+                        <td className="py-2 pl-4">{line.category} - {line.reason}</td>
+                        <td className="py-2 text-right">{rupiah(line.amount)}</td>
+                      </tr>)}
+                      <tr className="border-t-2 border-slate-400 font-bold">
+                        <td className="py-4">TOTAL POTONGAN</td>
+                        <td className={`py-4 text-right ${Number(publication.totals.totalDeduction) > 0 ? "text-rose-700" : ""}`}>
+                          {rupiah(publication.totals.totalDeduction)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </section>
+
+                <section className="border-y-2 border-emerald-700 bg-emerald-50 px-8 py-7 text-center text-emerald-900">
+                  <p className="text-xs font-bold tracking-[0.22em]">TOTAL DITERIMA</p>
+                  <span className="sr-only">TOTAL BERSIH DITERIMA</span>
+                  <p className="mt-3 break-words text-5xl font-black tracking-tight">
+                    {rupiah(publication.totals.netSalary)}
+                  </p>
+                </section>
               </div>
-              <footer className="flex flex-wrap justify-between gap-2 border-t bg-slate-50 px-5 py-3 text-[10px] text-slate-500 sm:px-8">
-                <span>Diproses: {publication.closing.processedAt?.slice(0, 10) || "—"} · Siap Dipublikasikan</span>
-                <span>Created by NEXTGEN System</span>
+
+              <footer className="flex items-end justify-between gap-6 border-t border-slate-200 bg-slate-50 px-12 py-6 text-xs text-slate-500">
+                <div>
+                  <p>Dipublikasikan:</p>
+                  <p className="mt-1 font-semibold text-slate-700">{formatDocumentDate(publishedAt)}</p>
+                  <p>{formatPublishTime(publishedAt)}</p>
+                </div>
+                <p className="text-right text-[10px]">Created by NEXTGEN System</p>
               </footer>
             </section>
           </div>}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t bg-white p-4">
           {publication && <button type="button"
+            disabled={exporting != null}
             onClick={() => setShowRecap((current) => !current)}
             className={nextgenNeutralButtonClass}>
             <Eye size={16}/>{showRecap ? "Sembunyikan Rekap" : "Lihat Rekap"}
           </button>}
-          <button type="button" disabled={publicationLoading}
+          {publication && <button type="button"
+            disabled={exporting != null}
+            onClick={() => void downloadPublication("pdf")}
+            className={nextgenNeutralButtonClass}>
+            {exporting === "pdf"
+              ? <LoaderCircle className="animate-spin" size={16}/>
+              : <FileDown size={16}/>}
+            {exporting === "pdf" ? "Menyiapkan PDF..." : "Download PDF"}
+          </button>}
+          {publication && <button type="button"
+            disabled={exporting != null}
+            onClick={() => void downloadPublication("png")}
+            className={nextgenNeutralButtonClass}>
+            {exporting === "png"
+              ? <LoaderCircle className="animate-spin" size={16}/>
+              : <Download size={16}/>}
+            {exporting === "png" ? "Menyiapkan PNG..." : "Download PNG"}
+          </button>}
+          {publication && <button type="button" disabled
+            title="Coming Soon"
+            className={`${nextgenNeutralButtonClass} cursor-not-allowed opacity-50`}>
+            <MessageCircle size={16}/>Kirim WhatsApp - Coming Soon
+          </button>}
+          <button type="button" disabled={publicationLoading || exporting != null}
             onClick={() => setPublicationOpen(false)}
             className={nextgenNeutralButtonClass}>Tutup</button>
         </div>
