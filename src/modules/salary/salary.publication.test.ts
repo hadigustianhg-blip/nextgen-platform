@@ -3,12 +3,21 @@ import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const mocks = vi.hoisted(() => ({ findEmployee: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  findEmployee: vi.fn(),
+  findEmployeeSnapshot: vi.fn(),
+}));
 vi.mock("@/lib/db/prisma", () => ({
-  prisma: { salaryClosingEmployee: { findFirst: mocks.findEmployee } },
+  prisma: {
+    salaryClosingEmployee: { findFirst: mocks.findEmployee },
+    salaryEmployeeSnapshot: { findFirst: mocks.findEmployeeSnapshot },
+  },
 }));
 
-import { getSalaryRecapEmployeePublication } from "./salary.publication.service";
+import {
+  getSalaryRecapEmployeePublication,
+  normalizeSalaryWhatsappNumber,
+} from "./salary.publication.service";
 
 const decimal = (value: number | string) => new Prisma.Decimal(value);
 const scope = { tenantId: "tenant-1", outletId: "outlet-1" };
@@ -16,6 +25,9 @@ const finalEmployee = (overrides: Record<string, unknown> = {}) => ({
   id: "closing-employee-ena",
   employeeNameSnapshot: "ENA SURYANA",
   divisionSnapshot: "ADMIN",
+  whatsappSnapshot: "0812-0000-0000",
+  employeeId: "salary-employee-ena",
+  employee: { whatsapp: "0812-9999-9999" },
   workDayCount: 2,
   sourcePickupCount: 4,
   sourceDispatchCount: 5,
@@ -77,6 +89,7 @@ const finalEmployee = (overrides: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.findEmployee.mockResolvedValue(finalEmployee());
+  mocks.findEmployeeSnapshot.mockResolvedValue({ whatsapp: "0812-3456-7890" });
 });
 
 describe("per-team Salary Recap publication", () => {
@@ -97,6 +110,17 @@ describe("per-team Salary Recap publication", () => {
     expect(result.employee).toMatchObject({
       id: "closing-employee-ena",
       name: "ENA SURYANA",
+      whatsappRaw: "0812-3456-7890",
+      whatsappNormalized: "6281234567890",
+    });
+    expect(mocks.findEmployeeSnapshot).toHaveBeenCalledWith({
+      where: {
+        salaryClosingId: "closing-1",
+        salaryEmployeeId: "salary-employee-ena",
+        tenantId: "tenant-1",
+        outletId: "outlet-1",
+      },
+      select: { whatsapp: true },
     });
     expect(JSON.stringify(result)).not.toContain("employee-lain");
   });
@@ -194,6 +218,44 @@ describe("per-team Salary Recap publication", () => {
       code: "SALARY_PUBLICATION_INCONSISTENT",
       status: 409,
     });
+  });
+
+  it("keeps each employee's WhatsApp isolated and falls back safely", async () => {
+    mocks.findEmployeeSnapshot.mockResolvedValueOnce({
+      whatsapp: "+62 (812) 3456-7890",
+    });
+    const ena = await getSalaryRecapEmployeePublication(
+      scope,
+      "closing-1",
+      "closing-employee-ena",
+    );
+    expect(ena.employee.whatsappRaw).toBe("+62 (812) 3456-7890");
+    expect(ena.employee.whatsappNormalized).toBe("6281234567890");
+    expect(JSON.stringify(ena.employee)).not.toContain("081299999999");
+
+    mocks.findEmployeeSnapshot.mockResolvedValueOnce(null);
+    mocks.findEmployee.mockResolvedValueOnce(finalEmployee({
+      whatsappSnapshot: null,
+      employee: { whatsapp: null },
+    }));
+    const empty = await getSalaryRecapEmployeePublication(
+      scope,
+      "closing-1",
+      "closing-employee-ena",
+    );
+    expect(empty.employee.whatsappRaw).toBeNull();
+    expect(empty.employee.whatsappNormalized).toBeNull();
+  });
+
+  it("normalizes Indonesian WhatsApp numbers without double-prefixing", () => {
+    expect(normalizeSalaryWhatsappNumber("0812-3456-7890"))
+      .toBe("6281234567890");
+    expect(normalizeSalaryWhatsappNumber("+62 812-3456-7890"))
+      .toBe("6281234567890");
+    expect(normalizeSalaryWhatsappNumber("6281234567890"))
+      .toBe("6281234567890");
+    expect(normalizeSalaryWhatsappNumber(null)).toBeNull();
+    expect(normalizeSalaryWhatsappNumber("  ")).toBeNull();
   });
 
   it("keeps the publication UI read-only, dynamic and per team", async () => {

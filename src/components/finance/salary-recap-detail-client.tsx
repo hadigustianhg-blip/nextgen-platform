@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Download,
@@ -80,6 +80,8 @@ type Publication = {
     workDayCount: number;
     pickupCount: number;
     dispatchCount: number;
+    whatsappRaw: string | null;
+    whatsappNormalized: string | null;
   };
   components: PublicationLine[];
   additions: PublicationLine[];
@@ -137,61 +139,292 @@ const formatPublishTime = (value: Date) => `${new Intl.DateTimeFormat("id-ID", {
 }).format(value).replace(".", ":")} WIB`;
 const safeFilename = (value: string) => value
   .normalize("NFKD")
+  .replace(/[\u0300-\u036f]/g, "")
   .replace(/[^a-zA-Z0-9]+/g, "-")
   .replace(/^-|-$/g, "")
   .toLowerCase();
 
-function copyComputedStyles(source: Element, target: Element) {
-  const computed = window.getComputedStyle(source);
-  const inline = Array.from(computed)
-    .map((property) => `${property}:${computed.getPropertyValue(property)};`)
-    .join("");
-  target.setAttribute("style", inline);
-  Array.from(source.children).forEach((child, index) => {
-    const targetChild = target.children.item(index);
-    if (targetChild) copyComputedStyles(child, targetChild);
-  });
-}
+const publicationBrand = (publication: Publication) =>
+  publication.identity.outletName &&
+  publication.identity.outletName !== publication.identity.brandName
+    ? `${publication.identity.brandName} / ${publication.identity.outletName}`
+    : `OUTLET ${publication.identity.outletCode}`;
 
-async function renderPublicationCanvas(element: HTMLElement) {
-  await document.fonts.ready;
-  const width = element.scrollWidth;
-  const height = element.scrollHeight;
-  const clone = element.cloneNode(true) as HTMLElement;
-  copyComputedStyles(element, clone);
-  clone.style.margin = "0";
-  clone.style.width = `${width}px`;
-  clone.style.height = `${height}px`;
-  clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
-  const serialized = new XMLSerializer().serializeToString(clone);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
-  const objectUrl = URL.createObjectURL(new Blob([svg], {
-    type: "image/svg+xml;charset=utf-8",
-  }));
-  try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const nextImage = new Image();
-      nextImage.onload = () => resolve(nextImage);
-      nextImage.onerror = () => reject(new Error("Render Salary Card gagal."));
-      nextImage.src = objectUrl;
-    });
-    const scale = 2;
-    const canvas = document.createElement("canvas");
-    canvas.width = width * scale;
-    canvas.height = height * scale;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Canvas tidak tersedia.");
-    context.scale(scale, scale);
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, width, height);
-    context.drawImage(image, 0, 0, width, height);
-    return canvas;
-  } finally {
-    URL.revokeObjectURL(objectUrl);
+const fitCanvasText = (
+  context: CanvasRenderingContext2D,
+  value: string,
+  maxWidth: number,
+) => {
+  if (context.measureText(value).width <= maxWidth) return value;
+  let text = value;
+  while (text.length && context.measureText(`${text}...`).width > maxWidth) {
+    text = text.slice(0, -1);
   }
+  return `${text}...`;
+};
+
+export function salaryCardFilename(
+  employeeName: string,
+  periodStart: string,
+  periodEnd: string,
+  extension: "png" | "pdf",
+) {
+  const period = periodStart.slice(0, 10) === periodEnd.slice(0, 10)
+    ? periodStart.slice(0, 10)
+    : `${periodStart.slice(0, 10)}-${periodEnd.slice(0, 10)}`;
+  return `slip-gaji-${safeFilename(employeeName)}-${period}.${extension}`;
 }
 
-function canvasBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
+export function renderSalaryCardCanvas(
+  publication: Publication,
+  publishedAt: Date,
+  showDetails: boolean,
+  createCanvas: () => HTMLCanvasElement = () => document.createElement("canvas"),
+) {
+  const canvas = createCanvas();
+  canvas.width = 1240;
+  canvas.height = 1754;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas tidak tersedia.");
+  const left = 80;
+  const right = 1160;
+  const width = right - left;
+  const systemFont = "Arial, Helvetica, sans-serif";
+  const text = (
+    value: string,
+    x: number,
+    y: number,
+    options: {
+      color?: string;
+      font?: string;
+      align?: CanvasTextAlign;
+      maxWidth?: number;
+    } = {},
+  ) => {
+    context.fillStyle = options.color || "#172033";
+    context.font = options.font || `24px ${systemFont}`;
+    context.textAlign = options.align || "left";
+    context.textBaseline = "alphabetic";
+    context.fillText(
+      options.maxWidth ? fitCanvasText(context, value, options.maxWidth) : value,
+      x,
+      y,
+    );
+  };
+  const line = (y: number, color = "#d8dee8", size = 1) => {
+    context.beginPath();
+    context.strokeStyle = color;
+    context.lineWidth = size;
+    context.moveTo(left, y);
+    context.lineTo(right, y);
+    context.stroke();
+  };
+  const moneyRow = (
+    label: string,
+    amount: string,
+    y: number,
+    options: { detail?: boolean; total?: boolean; deduction?: boolean } = {},
+  ) => {
+    const font = options.total
+      ? `bold 25px ${systemFont}`
+      : options.detail
+        ? `20px ${systemFont}`
+        : `23px ${systemFont}`;
+    const color = options.detail
+      ? "#64748b"
+      : options.deduction && Number(amount) > 0
+        ? "#be123c"
+        : "#172033";
+    text(label, left + (options.detail ? 24 : 0), y, {
+      color,
+      font,
+      maxWidth: 720,
+    });
+    text(rupiah(amount), right, y, { color, font, align: "right" });
+  };
+
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#102a43";
+  context.fillRect(0, 0, canvas.width, 270);
+  text(publicationBrand(publication), left, 82, {
+    color: "#ffffff",
+    font: `bold 36px ${systemFont}`,
+    maxWidth: 690,
+  });
+  text("SLIP GAJI", right, 70, {
+    color: "#d8e4f0",
+    font: `bold 22px ${systemFont}`,
+    align: "right",
+  });
+  text(publication.closing.closingNumber, right, 112, {
+    color: "#ffffff",
+    font: `bold 21px ${systemFont}`,
+    align: "right",
+    maxWidth: 430,
+  });
+  context.strokeStyle = "rgba(255,255,255,0.25)";
+  context.beginPath();
+  context.moveTo(left, 155);
+  context.lineTo(right, 155);
+  context.stroke();
+  text("PERIODE", left, 195, {
+    color: "#cbd5e1",
+    font: `18px ${systemFont}`,
+  });
+  text(`${formatDocumentDate(publication.closing.periodStart)} - ${formatDocumentDate(publication.closing.periodEnd)}`, left, 230, {
+    color: "#ffffff",
+    font: `bold 21px ${systemFont}`,
+  });
+  text("TANGGAL PUBLISH", right, 195, {
+    color: "#cbd5e1",
+    font: `18px ${systemFont}`,
+    align: "right",
+  });
+  text(formatDocumentDate(publishedAt), right, 230, {
+    color: "#ffffff",
+    font: `bold 21px ${systemFont}`,
+    align: "right",
+  });
+
+  text("IDENTITAS TEAM", left, 330, {
+    color: "#64748b",
+    font: `bold 18px ${systemFont}`,
+  });
+  line(348);
+  const identity = [
+    ["Nama", publication.employee.name],
+    ["Divisi", divisionLabel[publication.employee.division] ?? publication.employee.division],
+    ["Hari Kerja", String(publication.employee.workDayCount)],
+    ["Status", "Siap Dipublikasikan"],
+    ["Tanggal Publish", `${formatDocumentDate(publishedAt)}, ${formatPublishTime(publishedAt)}`],
+  ];
+  identity.forEach(([label, value], index) => {
+    const column = index % 2;
+    const row = Math.floor(index / 2);
+    const x = left + column * 550;
+    const y = 395 + row * 62;
+    text(label, x, y, { color: "#64748b", font: `18px ${systemFont}` });
+    text(value, x, y + 28, {
+      font: `bold 22px ${systemFont}`,
+      maxWidth: column === 0 ? 500 : 520,
+    });
+  });
+
+  type ExportRow = {
+    label: string;
+    amount: string;
+    detail?: boolean;
+    deduction?: boolean;
+  };
+  const incomeRows: ExportRow[] = [
+    { label: "Penghasilan Sistem", amount: publication.totals.systemIncome },
+    ...(showDetails ? publication.components.map((row) => ({
+      label: row.componentName || "Komponen Penghasilan",
+      amount: row.amount,
+      detail: true,
+    })) : []),
+    { label: "Tambahan", amount: publication.totals.addition },
+    ...(showDetails ? publication.additions.map((row) => ({
+      label: `${row.category || "Tambahan"} - ${row.reason || ""}`,
+      amount: row.amount,
+      detail: true,
+    })) : []),
+  ];
+  const deductionRows: ExportRow[] = [
+    { label: "Potongan Kasbon", amount: publication.totals.kasbon, deduction: true },
+    ...(showDetails ? publication.kasbonAllocations.map((row) => ({
+      label: row.kasbonSnapshot?.description || "Kasbon",
+      amount: row.amount,
+      detail: true,
+      deduction: true,
+    })) : []),
+    { label: "Potongan Manual", amount: publication.totals.manualDeduction, deduction: true },
+    ...(showDetails ? publication.deductions.map((row) => ({
+      label: `${row.category || "Potongan"} - ${row.reason || ""}`,
+      amount: row.amount,
+      detail: true,
+      deduction: true,
+    })) : []),
+  ];
+  const rowCount = incomeRows.length + deductionRows.length + 4;
+  const rowHeight = Math.min(50, Math.max(22, Math.floor(700 / rowCount)));
+  let y = 605;
+  text("RINCIAN PENGHASILAN", left, y, {
+    color: "#64748b",
+    font: `bold 18px ${systemFont}`,
+  });
+  line(y + 18);
+  y += 62;
+  incomeRows.forEach((row) => {
+    moneyRow(row.label, row.amount, y, { detail: row.detail });
+    y += rowHeight;
+    line(y - 17);
+  });
+  line(y - 14, "#64748b", 2);
+  moneyRow("TOTAL PENGHASILAN", publication.totals.totalIncome, y + 22, { total: true });
+  y += rowHeight + 65;
+
+  text("RINCIAN POTONGAN", left, y, {
+    color: "#64748b",
+    font: `bold 18px ${systemFont}`,
+  });
+  line(y + 18);
+  y += 62;
+  deductionRows.forEach((row) => {
+    moneyRow(row.label, row.amount, y, {
+      detail: row.detail,
+      deduction: row.deduction,
+    });
+    y += rowHeight;
+    line(y - 17);
+  });
+  line(y - 14, "#64748b", 2);
+  moneyRow("TOTAL POTONGAN", publication.totals.totalDeduction, y + 22, {
+    total: true,
+    deduction: true,
+  });
+
+  context.fillStyle = "#ecfdf5";
+  context.fillRect(left, 1430, width, 165);
+  context.strokeStyle = "#047857";
+  context.lineWidth = 3;
+  context.strokeRect(left, 1430, width, 165);
+  text("TOTAL DITERIMA", canvas.width / 2, 1483, {
+    color: "#065f46",
+    font: `bold 19px ${systemFont}`,
+    align: "center",
+  });
+  text(rupiah(publication.totals.netSalary), canvas.width / 2, 1558, {
+    color: "#065f46",
+    font: `bold 56px ${systemFont}`,
+    align: "center",
+    maxWidth: 960,
+  });
+
+  context.fillStyle = "#f8fafc";
+  context.fillRect(0, 1635, canvas.width, 119);
+  line(1635);
+  text("Dipublikasikan:", left, 1670, {
+    color: "#64748b",
+    font: `16px ${systemFont}`,
+  });
+  text(formatDocumentDate(publishedAt), left, 1698, {
+    font: `bold 17px ${systemFont}`,
+  });
+  text(formatPublishTime(publishedAt), left, 1723, {
+    color: "#64748b",
+    font: `16px ${systemFont}`,
+  });
+  text("Created by NEXTGEN System", right, 1710, {
+    color: "#64748b",
+    font: `14px ${systemFont}`,
+    align: "right",
+  });
+  return canvas;
+}
+
+export function canvasBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (blob) resolve(blob);
@@ -200,7 +433,7 @@ function canvasBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
   });
 }
 
-function createPdfFromJpeg(jpeg: Uint8Array, width: number, height: number) {
+export function createPdfFromJpeg(jpeg: Uint8Array, width: number, height: number) {
   const encoder = new TextEncoder();
   const parts: Uint8Array[] = [];
   const offsets = [0];
@@ -261,7 +494,6 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
-  const publicationCardRef = useRef<HTMLElement>(null);
   const [recap, setRecap] = useState<Recap | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -327,20 +559,32 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
   }
 
   async function downloadPublication(format: "pdf" | "png") {
-    if (!publication || !publicationCardRef.current || exporting) return;
+    if (!publication || !publishedAt || exporting) return;
     setExporting(format);
     setPublicationError("");
     try {
-      const canvas = await renderPublicationCanvas(publicationCardRef.current);
-      const basename = `salary-card-${safeFilename(publication.employee.name)}-${safeFilename(publication.closing.closingNumber)}`;
+      await document.fonts.ready;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const canvas = renderSalaryCardCanvas(publication, publishedAt, showRecap);
       if (format === "png") {
-        downloadBlob(await canvasBlob(canvas, "image/png"), `${basename}.png`);
+        const png = await canvasBlob(canvas, "image/png");
+        downloadBlob(png, salaryCardFilename(
+          publication.employee.name,
+          publication.closing.periodStart,
+          publication.closing.periodEnd,
+          "png",
+        ));
       } else {
         const jpegBlob = await canvasBlob(canvas, "image/jpeg", 0.96);
         const jpeg = new Uint8Array(await jpegBlob.arrayBuffer());
         downloadBlob(
           createPdfFromJpeg(jpeg, canvas.width, canvas.height),
-          `${basename}.pdf`,
+          salaryCardFilename(
+            publication.employee.name,
+            publication.closing.periodStart,
+            publication.closing.periodEnd,
+            "pdf",
+          ),
         );
       }
     } catch (cause) {
@@ -408,6 +652,9 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
     deduction: sum.deduction + Number(employee.manualDeductionTotal),
     net: sum.net + Number(employee.netSalary),
   }), { system: 0, addition: 0, deduction: 0, net: 0 });
+  const whatsappReady = publication?.employee.whatsappNormalized
+    ? /^\d{8,15}$/.test(publication.employee.whatsappNormalized)
+    : false;
 
   return <div className="space-y-6">
     <PageHeader eyebrow="Finance & HR" title={recap.closingNumber}
@@ -496,16 +743,13 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
             {publicationError}
           </div>}
           {publication && publishedAt && <div className="overflow-x-auto pb-2">
-            <section ref={publicationCardRef} aria-label="Preview Salary Card"
+            <section aria-label="Preview Salary Card"
               className="mx-auto flex min-h-[1123px] w-[794px] min-w-[794px] flex-col overflow-hidden border border-slate-200 bg-white text-slate-900 shadow-xl">
               <header className="bg-[#102a43] px-12 py-10 text-white">
                 <div className="flex items-start justify-between gap-8">
                   <div className="max-w-[460px]">
                     <p className="text-2xl font-bold leading-tight">
-                      {publication.identity.outletName &&
-                        publication.identity.outletName !== publication.identity.brandName
-                        ? `${publication.identity.brandName} / ${publication.identity.outletName}`
-                        : `OUTLET ${publication.identity.outletCode}`}
+                      {publicationBrand(publication)}
                     </p>
                   </div>
                   <div className="shrink-0 text-right">
@@ -654,7 +898,9 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
             {exporting === "png" ? "Menyiapkan PNG..." : "Download PNG"}
           </button>}
           {publication && <button type="button" disabled
-            title="Coming Soon"
+            title={whatsappReady
+              ? "Nomor WhatsApp tersedia. Fitur pengiriman Coming Soon."
+              : "Nomor WhatsApp belum tersedia atau tidak valid."}
             className={`${nextgenNeutralButtonClass} cursor-not-allowed opacity-50`}>
             <MessageCircle size={16}/>Kirim WhatsApp - Coming Soon
           </button>}

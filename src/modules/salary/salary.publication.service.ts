@@ -8,6 +8,15 @@ const zero = () => new Prisma.Decimal(0);
 const sumAmounts = (rows: Array<{ amount: Prisma.Decimal }>) =>
   rows.reduce((sum, row) => sum.plus(row.amount), zero());
 
+export function normalizeSalaryWhatsappNumber(value: string | null | undefined) {
+  if (!value?.trim()) return null;
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("08")) return `62${digits.slice(1)}`;
+  if (digits.startsWith("628")) return digits;
+  return digits;
+}
+
 export async function getSalaryRecapEmployeePublication(
   scope: SalaryScope,
   closingId: string,
@@ -75,12 +84,22 @@ export async function getSalaryRecapEmployeePublication(
           netSalary: true,
         },
       },
+      employee: { select: { whatsapp: true } },
     },
   });
   if (!employee) throw new SalaryError("SALARY_PUBLICATION_NOT_FOUND", 404);
   if (!["PROCESSED", "PAID"].includes(employee.salaryClosing.status)) {
     throw new SalaryError("SALARY_PUBLICATION_NOT_AVAILABLE", 409);
   }
+  const employeeSnapshot = await prisma.salaryEmployeeSnapshot.findFirst({
+    where: {
+      salaryClosingId: closingId,
+      salaryEmployeeId: employee.employeeId,
+      tenantId: scope.tenantId,
+      outletId: scope.outletId,
+    },
+    select: { whatsapp: true },
+  });
 
   const additions = employee.adjustments.filter((row) => row.type === "ADDITION");
   const deductions = employee.adjustments.filter((row) => row.type === "DEDUCTION");
@@ -106,6 +125,10 @@ export async function getSalaryRecapEmployeePublication(
   const outletName = employee.salaryClosing.outlet.name.trim();
   const outletCode = employee.salaryClosing.outlet.code;
   const brandName = tenantName || outletName || `J&T CARGO ${outletCode}`;
+  const whatsappRaw = employeeSnapshot?.whatsapp ??
+    employee.whatsappSnapshot ??
+    employee.employee.whatsapp ??
+    null;
 
   return {
     closing: {
@@ -128,6 +151,8 @@ export async function getSalaryRecapEmployeePublication(
       workDayCount: employee.workDayCount,
       pickupCount: employee.sourcePickupCount,
       dispatchCount: employee.sourceDispatchCount,
+      whatsappRaw,
+      whatsappNormalized: normalizeSalaryWhatsappNumber(whatsappRaw),
     },
     components: employee.components,
     additions,
