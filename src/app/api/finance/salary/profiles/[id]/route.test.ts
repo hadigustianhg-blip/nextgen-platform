@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   update: vi.fn(),
+  remove: vi.fn(),
   canManage: vi.fn(() => true),
 }));
 vi.mock("@/lib/auth/session", () => ({ getSession: mocks.getSession }));
@@ -16,10 +17,11 @@ vi.mock("@/modules/salary", async () => {
     canManageSalarySetting: mocks.canManage,
     salaryScope: () => ({ tenantId: "tenant-1", outletId: "outlet-1" }),
     updateSalaryProfile: mocks.update,
+    removeSalaryProfile: mocks.remove,
   };
 });
 
-import { PATCH } from "./route";
+import { DELETE, PATCH } from "./route";
 
 const session = {
   tenantId: "tenant-1",
@@ -72,5 +74,32 @@ describe("PATCH /api/finance/salary/profiles/:id", () => {
       actorId: "user-1",
       outletCode: "OUT001",
     }, "profile-1", expect.objectContaining(valid));
+  });
+});
+
+describe("DELETE /api/finance/salary/profiles/:id", () => {
+  it("rejects users without Owner/Admin permission", async () => {
+    mocks.canManage.mockReturnValueOnce(false);
+    const response = await DELETE(new Request("http://localhost", {
+      method: "DELETE",
+    }), context);
+    expect(response.status).toBe(403);
+    expect(mocks.remove).not.toHaveBeenCalled();
+  });
+
+  it("uses the tenant and outlet from the active session", async () => {
+    mocks.remove.mockResolvedValueOnce({
+      id: "profile-1", action: "DELETED", message: "Salary profile berhasil dihapus.",
+    });
+    const response = await DELETE(new Request("http://localhost", {
+      method: "DELETE",
+    }), context);
+    expect(response.status).toBe(200);
+    expect(mocks.remove).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      outletId: "outlet-1",
+      actorId: "user-1",
+      outletCode: "OUT001",
+    }, "profile-1");
   });
 });

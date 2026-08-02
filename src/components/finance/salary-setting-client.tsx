@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
-import { Check, LoaderCircle, Plus, Search, X } from "lucide-react";
+import { Check, LoaderCircle, Plus, Search, Trash2, X } from "lucide-react";
 import {
   AppCard,
   FilterCard,
@@ -55,6 +55,12 @@ type Employee = {
     effectiveTo: string | null;
     salaryProfile: Profile;
   }>;
+};
+
+type DeleteTarget = {
+  kind: "team" | "profile";
+  id: string;
+  name: string;
 };
 
 const numericFields = [
@@ -154,6 +160,8 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
   const [assignmentProfileId, setAssignmentProfileId] = useState("");
   const [assignmentDate, setAssignmentDate] = useState(jakartaOperationalDate());
   const [assignmentSaving, setAssignmentSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [deleteSaving, setDeleteSaving] = useState(false);
 
   async function loadData() {
     setLoading(true);
@@ -375,9 +383,39 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
     }
   }
 
+  async function removeSettingData() {
+    if (!deleteTarget || deleteSaving) return;
+    setDeleteSaving(true);
+    setError("");
+    try {
+      const endpoint = deleteTarget.kind === "team"
+        ? `/api/finance/salary/team/${deleteTarget.id}`
+        : `/api/finance/salary/profiles/${deleteTarget.id}`;
+      const response = await fetch(endpoint, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error?.message || "Data Salary Setting gagal dihapus.");
+      }
+      setDeleteTarget(null);
+      setNotice(result.data?.message || "Data Salary Setting berhasil dihapus.");
+      await loadData();
+    } catch (cause) {
+      setError(cause instanceof Error
+        ? cause.message
+        : "Data Salary Setting gagal dihapus.");
+    } finally {
+      setDeleteSaving(false);
+    }
+  }
+
   return <div className="space-y-6">
     <PageHeader eyebrow="Finance & HR" title="Salary Setting"
       description="Kelola informasi team, salary profile, dan komponen salary manual."/>
+    <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+      Perubahan team atau Salary Profile hanya berlaku untuk Salary Closing baru.
+      Closing yang sudah di-generate tetap menggunakan snapshot lama. Untuk menerapkan
+      perubahan, Void closing lama lalu buat dan Generate closing baru.
+    </div>
     {notice && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
     {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>}
 
@@ -453,6 +491,12 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
                     setAssignmentEmployee(employee);
                     setAssignmentProfileId("");
                   }} className={nextgenNeutralButtonClass}>Assign Profile</button>
+                  <button type="button" disabled={deleteSaving}
+                    onClick={() => setDeleteTarget({
+                      kind: "team", id: employee.id, name: employee.name,
+                    })} className={nextgenNeutralButtonClass}>
+                    <Trash2 size={16}/>Hapus
+                  </button>
                 </div>}</td>
               </tr>;
             })}</tbody>
@@ -487,6 +531,12 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
                 {profile.status === "DRAFT" && <button type="button"
                   onClick={() => setActivationTarget(profile)}
                   className={nextgenNeutralButtonClass}><Check size={16}/>Aktifkan</button>}
+                <button type="button" disabled={deleteSaving}
+                  onClick={() => setDeleteTarget({
+                    kind: "profile", id: profile.id, name: profile.name,
+                  })} className={nextgenNeutralButtonClass}>
+                  <Trash2 size={16}/>Hapus
+                </button>
               </div>}</td>
           </tr>)}</tbody>
         </table>
@@ -751,6 +801,31 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
             onClick={() => void saveAssignment()} className={nextgenButtonClass}>
             {assignmentSaving && <LoaderCircle className="animate-spin" size={17}/>}
             {assignmentSaving ? "Menyimpan..." : "Simpan Assignment"}
+          </button>
+        </div>
+      </ModalCard>
+    </div>}
+
+    {deleteTarget && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4">
+      <ModalCard className="max-w-lg">
+        <div className="border-b p-5">
+          <h2 className="text-xl font-bold">
+            Hapus {deleteTarget.kind === "team" ? "Team" : "Salary Profile"}
+          </h2>
+          <p className="mt-2 text-sm text-slate-600">
+            Hapus <strong>{deleteTarget.name}</strong>? Data yang sudah memiliki histori
+            Salary akan dipertahankan dan hanya dinonaktifkan.
+          </p>
+        </div>
+        <div className="flex justify-end gap-3 p-4">
+          <button type="button" disabled={deleteSaving}
+            onClick={() => setDeleteTarget(null)} className={nextgenNeutralButtonClass}>
+            Batal
+          </button>
+          <button type="button" disabled={deleteSaving}
+            onClick={() => void removeSettingData()} className={nextgenButtonClass}>
+            {deleteSaving && <LoaderCircle className="animate-spin" size={17}/>}
+            {deleteSaving ? "Memproses..." : "Hapus"}
           </button>
         </div>
       </ModalCard>

@@ -517,6 +517,225 @@ export async function updateSalaryEmployee(
   });
 }
 
+export type SalarySettingRemovalResult = {
+  id: string;
+  action: "DELETED" | "DEACTIVATED";
+  message: string;
+};
+
+export async function removeSalaryEmployee(
+  context: SalaryContext,
+  employeeId: string,
+): Promise<SalarySettingRemovalResult> {
+  return prisma.$transaction(async (tx) => {
+    const employee = await tx.salaryEmployee.findFirst({
+      where: {
+        id: employeeId,
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+      },
+    });
+    if (!employee) throw new SalaryError("SALARY_EMPLOYEE_NOT_FOUND", 404);
+
+    const [assignment, employeeSnapshot, closingEmployee, sourceRecord] =
+      await Promise.all([
+        tx.employeeSalaryAssignment.findFirst({
+          where: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            employeeId: employee.id,
+          },
+          select: { id: true },
+        }),
+        tx.salaryEmployeeSnapshot.findFirst({
+          where: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            salaryEmployeeId: employee.id,
+          },
+          select: { id: true },
+        }),
+        tx.salaryClosingEmployee.findFirst({
+          where: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            employeeId: employee.id,
+          },
+          select: { id: true },
+        }),
+        tx.salaryClosingSourceRecord.findFirst({
+          where: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            matchedSalaryEmployeeId: employee.id,
+          },
+          select: { id: true },
+        }),
+      ]);
+    const hasHistory = Boolean(
+      assignment || employeeSnapshot || closingEmployee || sourceRecord,
+    );
+
+    if (hasHistory) {
+      await tx.salaryEmployee.update({
+        where: { id: employee.id },
+        data: { status: "INACTIVE" },
+      });
+      await tx.salaryEmployeeAlias.updateMany({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          salaryEmployeeId: employee.id,
+          isActive: true,
+        },
+        data: { isActive: false },
+      });
+      await tx.employeeSalaryAssignment.updateMany({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          employeeId: employee.id,
+          status: "ACTIVE",
+        },
+        data: { status: "INACTIVE" },
+      });
+      await tx.salaryAudit.create({
+        data: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          actorId: context.actorId,
+          action: "TEAM_DEACTIVATED",
+          entityType: "SALARY_EMPLOYEE",
+          entityId: employee.id,
+          metadata: { previousStatus: employee.status },
+        },
+      });
+      return {
+        id: employee.id,
+        action: "DEACTIVATED",
+        message: "Data dipertahankan karena sudah memiliki histori.",
+      };
+    }
+
+    await tx.salaryEmployeeAlias.deleteMany({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryEmployeeId: employee.id,
+      },
+    });
+    await tx.salaryEmployee.delete({ where: { id: employee.id } });
+    await tx.salaryAudit.create({
+      data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        actorId: context.actorId,
+        action: "TEAM_DELETED",
+        entityType: "SALARY_EMPLOYEE",
+        entityId: employee.id,
+        metadata: { name: employee.name },
+      },
+    });
+    return {
+      id: employee.id,
+      action: "DELETED",
+      message: "Team berhasil dihapus.",
+    };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function removeSalaryProfile(
+  context: SalaryContext,
+  profileId: string,
+): Promise<SalarySettingRemovalResult> {
+  return prisma.$transaction(async (tx) => {
+    const profile = await tx.salaryProfile.findFirst({
+      where: {
+        id: profileId,
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+      },
+    });
+    if (!profile) throw new SalaryError("SALARY_PROFILE_NOT_FOUND", 404);
+
+    const [assignment, profileSnapshot, closingEmployee] = await Promise.all([
+      tx.employeeSalaryAssignment.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          salaryProfileId: profile.id,
+        },
+        select: { id: true },
+      }),
+      tx.salaryClosingProfileSnapshot.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          salaryProfileId: profile.id,
+        },
+        select: { id: true },
+      }),
+      tx.salaryClosingEmployee.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          salaryProfileId: profile.id,
+        },
+        select: { id: true },
+      }),
+    ]);
+    const hasHistory = Boolean(assignment || profileSnapshot || closingEmployee);
+
+    if (hasHistory) {
+      await tx.salaryProfile.update({
+        where: { id: profile.id },
+        data: { status: "INACTIVE" },
+      });
+      await tx.salaryAudit.create({
+        data: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          actorId: context.actorId,
+          action: "PROFILE_DEACTIVATED",
+          entityType: "SALARY_PROFILE",
+          entityId: profile.id,
+          metadata: { previousStatus: profile.status },
+        },
+      });
+      return {
+        id: profile.id,
+        action: "DEACTIVATED",
+        message: "Data dipertahankan karena sudah memiliki histori.",
+      };
+    }
+
+    await tx.salaryProfileSetting.deleteMany({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryProfileId: profile.id,
+      },
+    });
+    await tx.salaryProfile.delete({ where: { id: profile.id } });
+    await tx.salaryAudit.create({
+      data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        actorId: context.actorId,
+        action: "PROFILE_DELETED",
+        entityType: "SALARY_PROFILE",
+        entityId: profile.id,
+        metadata: { code: profile.code, version: profile.version },
+      },
+    });
+    return {
+      id: profile.id,
+      action: "DELETED",
+      message: "Salary profile berhasil dihapus.",
+    };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
 function previousDay(value: string) {
   const result = calendarDate(value);
   result.setUTCDate(result.getUTCDate() - 1);

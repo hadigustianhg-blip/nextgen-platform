@@ -12,13 +12,19 @@ const db = vi.hoisted(() => ({
 const tx = vi.hoisted(() => ({
   salaryProfile: {
     create: vi.fn(), findFirst: vi.fn(), findUniqueOrThrow: vi.fn(),
-    update: vi.fn(),
+    update: vi.fn(), delete: vi.fn(),
   },
-  salaryProfileSetting: { create: vi.fn(), upsert: vi.fn() },
+  salaryProfileSetting: { create: vi.fn(), upsert: vi.fn(), deleteMany: vi.fn() },
   salaryClosingProfileSnapshot: { findFirst: vi.fn() },
-  salaryEmployee: { create: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
+  salaryEmployee: {
+    create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), delete: vi.fn(),
+  },
+  salaryEmployeeAlias: { updateMany: vi.fn(), deleteMany: vi.fn() },
+  salaryEmployeeSnapshot: { findFirst: vi.fn() },
+  salaryClosingEmployee: { findFirst: vi.fn() },
+  salaryClosingSourceRecord: { findFirst: vi.fn() },
   employeeSalaryAssignment: {
-    create: vi.fn(), findFirst: vi.fn(), update: vi.fn(),
+    create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn(),
   },
   salaryClosing: { create: vi.fn(), findFirst: vi.fn() },
   salaryClosingSequence: { upsert: vi.fn() },
@@ -41,6 +47,8 @@ import {
   isSalarySettlement,
   listSalaryClosings,
   listSalaryProfiles,
+  removeSalaryEmployee,
+  removeSalaryProfile,
   salaryAssignmentSchema,
   salaryAdjustmentSchema,
   salaryClosingSchema,
@@ -104,6 +112,10 @@ beforeEach(() => {
   });
   tx.salaryProfileSetting.create.mockResolvedValue({ id: "setting-1" });
   tx.salaryClosingProfileSnapshot.findFirst.mockResolvedValue(null);
+  tx.salaryEmployeeSnapshot.findFirst.mockResolvedValue(null);
+  tx.salaryClosingEmployee.findFirst.mockResolvedValue(null);
+  tx.salaryClosingSourceRecord.findFirst.mockResolvedValue(null);
+  tx.employeeSalaryAssignment.findFirst.mockResolvedValue(null);
   tx.salaryAudit.create.mockResolvedValue({ id: "audit-1" });
 });
 
@@ -248,6 +260,63 @@ describe("Salary profile validation and persistence", () => {
 });
 
 describe("Salary team and assignment", () => {
+  it("hard deletes an unused scoped team and records TEAM_DELETED", async () => {
+    tx.salaryEmployee.findFirst.mockResolvedValueOnce({
+      id: "employee-1", name: "Team Baru", status: "ACTIVE",
+    });
+    tx.salaryEmployee.delete.mockResolvedValueOnce({ id: "employee-1" });
+
+    await expect(removeSalaryEmployee(context, "employee-1")).resolves.toEqual({
+      id: "employee-1",
+      action: "DELETED",
+      message: "Team berhasil dihapus.",
+    });
+    expect(tx.salaryEmployee.delete).toHaveBeenCalledWith({
+      where: { id: "employee-1" },
+    });
+    expect(tx.salaryAudit.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ action: "TEAM_DELETED" }),
+    });
+  });
+
+  it("deactivates a team with history without mutating closing snapshots", async () => {
+    tx.salaryEmployee.findFirst.mockResolvedValueOnce({
+      id: "employee-1", name: "Team Lama", status: "ACTIVE",
+    });
+    tx.salaryEmployeeSnapshot.findFirst.mockResolvedValueOnce({ id: "snapshot-1" });
+    tx.salaryEmployee.update.mockResolvedValueOnce({ id: "employee-1" });
+
+    await expect(removeSalaryEmployee(context, "employee-1")).resolves.toEqual({
+      id: "employee-1",
+      action: "DEACTIVATED",
+      message: "Data dipertahankan karena sudah memiliki histori.",
+    });
+    expect(tx.salaryEmployee.update).toHaveBeenCalledWith({
+      where: { id: "employee-1" }, data: { status: "INACTIVE" },
+    });
+    expect(tx.employeeSalaryAssignment.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ employeeId: "employee-1", status: "ACTIVE" }),
+      data: { status: "INACTIVE" },
+    });
+    expect(tx.salaryEmployee.delete).not.toHaveBeenCalled();
+    expect(tx.salaryEmployeeSnapshot).not.toHaveProperty("update");
+    expect(tx.salaryAudit.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ action: "TEAM_DEACTIVATED" }),
+    });
+  });
+
+  it("rejects deletion of a team outside the session scope", async () => {
+    tx.salaryEmployee.findFirst.mockResolvedValueOnce(null);
+    await expect(removeSalaryEmployee(context, "other-team"))
+      .rejects.toMatchObject({ code: "SALARY_EMPLOYEE_NOT_FOUND", status: 404 });
+    expect(tx.salaryEmployee.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "other-team", tenantId: scope.tenantId, outletId: scope.outletId,
+      },
+    });
+    expect(tx.salaryEmployee.delete).not.toHaveBeenCalled();
+  });
+
   it("stores WhatsApp as a string and preserves its leading zero", async () => {
     tx.salaryEmployee.create.mockImplementation(async ({ data }) => ({
       id: "employee-1", ...data,
@@ -467,6 +536,57 @@ describe("Salary team and assignment", () => {
   });
 });
 
+describe("Salary profile removal", () => {
+  it("hard deletes an unused profile and its setting in one transaction", async () => {
+    tx.salaryProfile.findFirst.mockResolvedValueOnce({
+      id: "profile-1", code: "NEW", version: 1, status: "DRAFT",
+    });
+    tx.salaryProfile.delete.mockResolvedValueOnce({ id: "profile-1" });
+
+    await expect(removeSalaryProfile(context, "profile-1")).resolves.toEqual({
+      id: "profile-1",
+      action: "DELETED",
+      message: "Salary profile berhasil dihapus.",
+    });
+    expect(tx.salaryProfileSetting.deleteMany).toHaveBeenCalledWith({
+      where: {
+        tenantId: scope.tenantId,
+        outletId: scope.outletId,
+        salaryProfileId: "profile-1",
+      },
+    });
+    expect(tx.salaryProfile.delete).toHaveBeenCalledWith({
+      where: { id: "profile-1" },
+    });
+    expect(tx.salaryAudit.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ action: "PROFILE_DELETED" }),
+    });
+  });
+
+  it("deactivates a used profile and keeps historical assignments and snapshots", async () => {
+    tx.salaryProfile.findFirst.mockResolvedValueOnce({
+      id: "profile-1", code: "USED", version: 1, status: "ACTIVE",
+    });
+    tx.employeeSalaryAssignment.findFirst.mockResolvedValueOnce({ id: "assignment-1" });
+    tx.salaryProfile.update.mockResolvedValueOnce({ id: "profile-1" });
+
+    await expect(removeSalaryProfile(context, "profile-1")).resolves.toEqual({
+      id: "profile-1",
+      action: "DEACTIVATED",
+      message: "Data dipertahankan karena sudah memiliki histori.",
+    });
+    expect(tx.salaryProfile.update).toHaveBeenCalledWith({
+      where: { id: "profile-1" }, data: { status: "INACTIVE" },
+    });
+    expect(tx.salaryProfile.delete).not.toHaveBeenCalled();
+    expect(tx.employeeSalaryAssignment.updateMany).not.toHaveBeenCalled();
+    expect(tx.salaryClosingProfileSnapshot).not.toHaveProperty("update");
+    expect(tx.salaryAudit.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ action: "PROFILE_DEACTIVATED" }),
+    });
+  });
+});
+
 describe("Salary closing foundation", () => {
   it("creates a DRAFT closing with an outlet-derived sequence number", async () => {
     tx.salaryClosing.findFirst.mockResolvedValueOnce(null);
@@ -615,6 +735,10 @@ describe("Salary domain, permissions, UI and migration contracts", () => {
     expect(setting).toContain("Edit Salary Profile");
     expect(setting).toContain("Edit Team");
     expect(setting).toContain("Salary profile berhasil diperbarui.");
+    expect(setting).toContain("Void closing lama lalu buat dan Generate closing baru.");
+    expect(setting).toContain("Data yang sudah memiliki histori");
+    expect(setting).toContain('method: "DELETE"');
+    expect(setting).toContain("deleteSaving");
     expect(setting).not.toContain("Periode Berlaku");
     expect(setting).not.toContain("RAW_PICKUP");
     expect(setting).not.toContain("RAW_DISPATCH");
