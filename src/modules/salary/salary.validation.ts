@@ -164,6 +164,10 @@ export const salaryClosingVoidSchema = z.object({
   reason: z.string().trim().min(5).max(500),
 });
 
+export const salaryRecapCancelSchema = z.object({
+  reason: z.string().trim().min(5).max(500),
+});
+
 export const salaryKasbonAllocationSchema = z.object({
   operationalExpenseId: z.string().uuid(),
   amount: z.number().finite().positive(),

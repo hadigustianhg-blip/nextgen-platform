@@ -47,6 +47,10 @@ const messages: Record<string, string> = {
     "Potongan Kasbon melebihi sisa yang tersedia.",
   SALARY_KASBON_REVIEW_REQUIRED:
     "Masih ada Kasbon yang belum direview.",
+  SALARY_RECAP_CANCEL_NOT_ALLOWED:
+    "Salary Recap tidak dapat dibatalkan pada status saat ini.",
+  SALARY_RECAP_PAYMENT_EXISTS:
+    "Rekap tidak dapat dibatalkan karena pembayaran Salary sudah diproses.",
   SALARY_SAVE_FAILED: "Data salary gagal disimpan.",
 };
 

@@ -132,6 +132,8 @@ type Closing = {
   employees: Employee[];
   sourceRecords: WarningSource[];
   availableProfiles: AvailableProfile[];
+  canCancelRecap?: boolean;
+  cancelBlockReason?: string | null;
 };
 
 const rupiah = (value: string | number) =>
@@ -221,6 +223,9 @@ export function SalaryClosingDetailClient({
     id: string;
   } | null>(null);
   const [voidItemReason, setVoidItemReason] = useState("");
+  const [recapCancelOpen, setRecapCancelOpen] = useState(false);
+  const [recapCancelReason, setRecapCancelReason] = useState("");
+  const [recapCancelled, setRecapCancelled] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
@@ -493,12 +498,55 @@ export function SalaryClosingDetailClient({
     }
   }
 
+  async function cancelRecap() {
+    if (actionLoading || recapCancelReason.trim().length < 5) {
+      if (recapCancelReason.trim().length < 5) {
+        setError("Alasan pembatalan minimal 5 karakter.");
+      }
+      return;
+    }
+    setActionLoading(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/finance/salary/recaps/${closingId}/cancel`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reason: recapCancelReason }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok) throw new Error(
+        result.error?.message || "Salary Recap gagal dibatalkan.",
+      );
+      setRecapCancelOpen(false);
+      setRecapCancelled(true);
+    } catch (cause) {
+      setError(cause instanceof Error
+        ? cause.message
+        : "Salary Recap gagal dibatalkan.");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   if (loading && !closing) {
     return <div className="grid min-h-64 place-items-center">
       <LoaderCircle className="animate-spin text-blue-600"/>
     </div>;
   }
   if (!closing) return <p>Salary Closing tidak ditemukan.</p>;
+  if (recapCancelled) {
+    return <div className="space-y-4">
+      <div role="status"
+        className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-emerald-900">
+        Salary Recap berhasil dibatalkan dan dikembalikan ke Dalam Review.
+      </div>
+      <Link href={`/dashboard/finance/salary-closing/${closingId}`}
+        className={nextgenButtonClass}>Buka Salary Closing</Link>
+    </div>;
+  }
   const finalReadOnly = readOnly || closing.status === "COMPLETED";
   const reviewedTeamCount = closing.employees.filter(
     (employee) => isAdjustmentReviewed(employee.status),
@@ -555,6 +603,15 @@ export function SalaryClosingDetailClient({
       actions={<>
         <Link href="/dashboard/finance/salary-closing"
           className={nextgenNeutralButtonClass}>Kembali</Link>
+        {closing.canCancelRecap && <button type="button"
+          disabled={actionLoading}
+          onClick={() => {
+            setRecapCancelReason("");
+            setRecapCancelOpen(true);
+          }}
+          className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 font-semibold text-white hover:bg-rose-700 disabled:opacity-50">
+          Batalkan Rekap
+        </button>}
         {!finalReadOnly && canManage && closing.status === "DRAFT" &&
           <button type="button" disabled={actionLoading}
             onClick={() => setConfirmAction("generate")}
@@ -588,6 +645,10 @@ export function SalaryClosingDetailClient({
       {closing.status === "COMPLETED"
         ? "Closing Success sudah final dan tidak dapat dibatalkan dari menu ini."
         : "Salary sudah diproses dan dikunci."}
+    </div>}
+    {closing.cancelBlockReason && <div
+      className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+      {closing.cancelBlockReason}
     </div>}
     <AppCard className="grid gap-3 p-5 text-sm md:grid-cols-3">
       <p><span className="text-slate-500">Status</span><br/><strong>{statusLabel[closing.status] ?? closing.status}</strong></p>
@@ -1039,6 +1100,47 @@ export function SalaryClosingDetailClient({
             onClick={() => void runClosingAction()} className={nextgenButtonClass}>
             {actionLoading && <LoaderCircle className="animate-spin" size={16}/>}
             {actionLoading ? "Memproses..." : "Lanjutkan"}
+          </button>
+        </div>
+      </ModalCard>
+    </div>}
+
+    {recapCancelOpen && <div className="fixed inset-0 z-[75] grid place-items-center bg-slate-950/55 p-4">
+      <ModalCard className="max-w-xl">
+        <div className="flex items-center justify-between border-b p-5">
+          <div>
+            <p className="text-sm font-semibold text-rose-700">Konfirmasi Pembatalan</p>
+            <h2 className="text-xl font-bold">Batalkan Rekap</h2>
+          </div>
+          <button type="button" disabled={actionLoading}
+            aria-label="Tutup modal Batalkan Rekap"
+            onClick={() => setRecapCancelOpen(false)}><X/></button>
+        </div>
+        <div className="space-y-4 p-5">
+          <AppCard className="grid gap-3 p-4 text-sm sm:grid-cols-2">
+            <p>Nomor Closing<br/><strong>{closing.closingNumber}</strong></p>
+            <p>Periode<br/><strong>{closing.periodStart.slice(0, 10)} — {closing.periodEnd.slice(0, 10)}</strong></p>
+            <p>Jumlah Team<br/><strong>{closing.employees.length}</strong></p>
+            <p>Total Bersih<br/><strong>{rupiah(totals.net)}</strong></p>
+          </AppCard>
+          <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            Data akan kembali ke tahap review dan seluruh team wajib menyimpan Adjustment kembali.
+          </p>
+          <label className="block text-sm font-semibold">Alasan Pembatalan
+            <textarea value={recapCancelReason} disabled={actionLoading}
+              onChange={(event) => setRecapCancelReason(event.target.value)}
+              className={`${nextgenControlClass} mt-1 h-24 w-full`}/>
+          </label>
+        </div>
+        <div className="flex justify-end gap-2 border-t p-4">
+          <button type="button" disabled={actionLoading}
+            onClick={() => setRecapCancelOpen(false)}
+            className={nextgenNeutralButtonClass}>Kembali</button>
+          <button type="button" disabled={actionLoading}
+            onClick={() => void cancelRecap()}
+            className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 font-semibold text-white hover:bg-rose-700 disabled:opacity-50">
+            {actionLoading && <LoaderCircle className="animate-spin" size={16}/>}
+            {actionLoading ? "Membatalkan..." : "Batalkan Rekap"}
           </button>
         </div>
       </ModalCard>

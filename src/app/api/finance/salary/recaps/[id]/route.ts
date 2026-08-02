@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import {
+  canManageSalaryClosing,
   canReadSalaryRecap,
   getSalaryRecapDetail,
   salaryScope,
@@ -18,6 +19,13 @@ export async function GET(_: Request, context: Context) {
   if (!scope) return NextResponse.json({ error: { code: "OUTLET_REQUIRED" } }, { status: 400 });
   const data = await getSalaryRecapDetail(scope, (await context.params).id);
   return data
-    ? NextResponse.json({ data })
+    ? NextResponse.json({ data: {
+        ...data,
+        canCancelRecap: canManageSalaryClosing(session) &&
+          data.status === "PROCESSED",
+        cancelBlockReason: data.status === "PAID"
+          ? "Rekap tidak dapat dibatalkan karena pembayaran Salary sudah diproses."
+          : null,
+      } })
     : NextResponse.json({ error: { code: "SALARY_CLOSING_NOT_FOUND" } }, { status: 404 });
 }

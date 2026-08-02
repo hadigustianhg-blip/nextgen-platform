@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import {
+  canManageSalaryClosing,
   canReadSalaryRecap,
   listSalaryRecaps,
   salaryScope,
@@ -14,5 +15,15 @@ export async function GET() {
   }
   const scope = salaryScope(session);
   if (!scope) return NextResponse.json({ error: { code: "OUTLET_REQUIRED" } }, { status: 400 });
-  return NextResponse.json({ data: await listSalaryRecaps(scope) });
+  const data = await listSalaryRecaps(scope);
+  const canCancel = canManageSalaryClosing(session);
+  return NextResponse.json({
+    data: data.map((recap) => ({
+      ...recap,
+      canCancelRecap: canCancel && recap.status === "PROCESSED",
+      cancelBlockReason: recap.status === "PAID"
+        ? "Rekap tidak dapat dibatalkan karena pembayaran Salary sudah diproses."
+        : null,
+    })),
+  });
 }
