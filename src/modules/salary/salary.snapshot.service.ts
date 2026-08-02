@@ -6,6 +6,11 @@ import {
   SalaryEmployeeStatus,
   SalaryProfileStatus,
 } from "@prisma/client";
+import {
+  canonicalDispatchText,
+  getActiveDispatchRecords,
+} from "@/modules/delivery-settlement/active-dispatch-dataset";
+import { SALARY_DISPATCH_STATUS } from "./salary.domain";
 import type { SalaryContext } from "./salary.service";
 
 type Transaction = Prisma.TransactionClient;
@@ -165,7 +170,7 @@ export async function captureSalaryClosingSnapshots(
     return loadSalarySnapshotEmployees(tx, context, closing.id);
   }
 
-  const [employees, pickups, kasbons] = await Promise.all([
+  const [employees, pickups, dispatches, kasbons] = await Promise.all([
     tx.salaryEmployee.findMany({
       where: {
         tenantId: context.tenantId,
@@ -194,6 +199,14 @@ export async function captureSalaryClosingSnapshots(
         rawPickup: { select: { settlementRaw: true } },
       },
       orderBy: [{ operationalDate: "asc" }, { id: "asc" }],
+    }),
+    getActiveDispatchRecords({
+      tenantId: context.tenantId,
+      outletId: context.outletId,
+      periodStart: closing.periodStart,
+      periodEnd: closing.periodEnd,
+      status: SALARY_DISPATCH_STATUS,
+      client: tx,
     }),
     tx.operationalExpense.findMany({
       where: {
@@ -259,6 +272,24 @@ export async function captureSalaryClosingSnapshots(
       })),
     });
   }
+  if (dispatches.length) {
+    await tx.salaryRawDispatch.createMany({
+      data: dispatches.map((dispatch) => ({
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryClosingId: closing.id,
+        sourceMasterDispatchId: dispatch.id,
+        operationalDate: dispatch.operationalDate,
+        waybillNo: canonicalDispatchText(dispatch.waybillNo),
+        courierName: dispatch.courierNameRaw,
+        deliveryStatus: SALARY_DISPATCH_STATUS,
+        chargeWeight: dispatch.chargeWeight,
+        sourceSyncStatus: dispatch.syncStatus,
+        normalizationVersion: 1,
+        sourceSyncedAt: dispatch.sourceFetchedAt,
+      })),
+    });
+  }
   if (kasbons.length) {
     await tx.salaryKasbonSnapshot.createMany({
       data: kasbons.map((kasbon) => ({
@@ -292,7 +323,7 @@ export async function captureSalaryClosingSnapshots(
       metadata: {
         employeeCount: employees.length,
         pickupCount: pickups.length,
-        dispatchCount: 0,
+        dispatchCount: dispatches.length,
         kasbonCount: kasbons.length,
         snapshotVersion: 1,
       },
