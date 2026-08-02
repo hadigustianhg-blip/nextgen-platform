@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Eye, LoaderCircle, Plus, RefreshCw, X } from "lucide-react";
 import {
   AppCard,
@@ -188,6 +189,7 @@ export function SalaryClosingDetailClient({
   readOnly?: boolean;
   detailEndpoint?: string;
 }) {
+  const searchParams = useSearchParams();
   const [closing, setClosing] = useState<Closing | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -536,6 +538,11 @@ export function SalaryClosingDetailClient({
             onClick={() => setConfirmAction("void")}
             className={nextgenNeutralButtonClass}>Void Closing</button>}
       </>}/>
+    {searchParams.get("fromPreview") === "1" && <div role="status"
+      className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+      Data Salary telah diambil ulang dan dikunci pada waktu closing dibuat.
+      Hasil closing ini menjadi source of truth jika berbeda dari preview sebelumnya.
+    </div>}
     {notice && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
     {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>}
     {readOnly && <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">

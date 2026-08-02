@@ -41,6 +41,7 @@ import {
   canManageSalarySetting,
   canReadSalaryRecap,
   createSalaryClosing,
+  createSalaryClosingInTransaction,
   createSalaryEmployee,
   createSalaryProfile,
   isSalaryEligibleDispatchStatus,
@@ -588,6 +589,40 @@ describe("Salary profile removal", () => {
 });
 
 describe("Salary closing foundation", () => {
+  it("checks only active statuses for the preview fast path and reports the overlap number", async () => {
+    tx.salaryClosing.findFirst.mockResolvedValueOnce({
+      id: "existing",
+      closingNumber: "SAL/CLS/OUT001/2026/08/0001",
+    });
+    await expect(createSalaryClosingInTransaction(tx as never, context, {
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+    }, { activeStatusesOnly: true })).rejects.toMatchObject({
+      code: "SALARY_CLOSING_OVERLAP",
+      status: 409,
+      details: { closingNumber: "SAL/CLS/OUT001/2026/08/0001" },
+    });
+    expect(tx.salaryClosing.findFirst).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        status: { in: ["DRAFT", "CLOSED"] },
+      }),
+    });
+  });
+
+  it("allows a replacement when no active overlap remains after a closing is VOID", async () => {
+    tx.salaryClosing.findFirst.mockResolvedValueOnce(null);
+    tx.salaryClosingSequence.upsert.mockResolvedValueOnce({ lastValue: 3 });
+    tx.salaryClosing.create.mockResolvedValueOnce({
+      id: "replacement", status: "DRAFT",
+    });
+    await expect(createSalaryClosingInTransaction(tx as never, context, {
+      periodStart: "2026-08-01",
+      periodEnd: "2026-08-31",
+    }, { activeStatusesOnly: true })).resolves.toMatchObject({
+      id: "replacement",
+    });
+  });
+
   it("creates a DRAFT closing with an outlet-derived sequence number", async () => {
     tx.salaryClosing.findFirst.mockResolvedValueOnce(null);
     tx.salaryClosingSequence.upsert.mockResolvedValueOnce({ lastValue: 1 });
@@ -751,6 +786,10 @@ describe("Salary domain, permissions, UI and migration contracts", () => {
     expect(setting).toContain("if (profileSaving) return");
     expect(closing).toContain("min-w-[1180px]");
     expect(closing).toContain("Hitung, review, dan finalisasi");
+    expect(closing).toContain("Buat Closing dari Periode Ini");
+    expect(closing).toContain("if (!preview || closingSaving || !closingRequestId) return");
+    expect(closing).toContain("Periode bertabrakan dengan closing");
+    expect(closing).toContain("Dalam Review");
     expect(recap).toContain("Salary yang sudah diproses akan tampil di sini.");
     expect(recap).toContain("Masuk Rekap");
     for (const route of ["salary-setting", "salary-closing", "salary-recap"]) {

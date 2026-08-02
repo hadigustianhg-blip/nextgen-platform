@@ -126,6 +126,13 @@ export const salaryPreviewQuerySchema = z.object({
   }
 });
 
+export const salaryPreviewClosingSchema = salaryPreviewQuerySchema.and(
+  z.object({
+    notes: z.string().trim().max(1000).nullable().optional(),
+    requestId: z.string().uuid(),
+  }),
+);
+
 export const salaryAdjustmentSchema = z.object({
   salaryClosingEmployeeId: z.string().uuid(),
   type: z.enum(["ADDITION", "DEDUCTION"]),

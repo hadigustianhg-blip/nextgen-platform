@@ -901,19 +901,37 @@ export async function createSalaryClosing(
   context: SalaryContext,
   input: { periodStart: string; periodEnd: string; notes?: string | null },
 ) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction((tx) => createSalaryClosingInTransaction(
+    tx,
+    context,
+    input,
+  ), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function createSalaryClosingInTransaction(
+  tx: Prisma.TransactionClient,
+  context: SalaryContext,
+  input: { periodStart: string; periodEnd: string; notes?: string | null },
+  options: { activeStatusesOnly?: boolean } = {},
+) {
     const start = calendarDate(input.periodStart);
     const end = calendarDate(input.periodEnd);
     const overlap = await tx.salaryClosing.findFirst({
       where: {
         tenantId: context.tenantId,
         outletId: context.outletId,
-        status: { not: "VOID" },
+        status: options.activeStatusesOnly
+          ? { in: ["DRAFT", "CLOSED"] }
+          : { not: "VOID" },
         periodStart: { lte: end },
         periodEnd: { gte: start },
       },
     });
-    if (overlap) throw new SalaryError("SALARY_CLOSING_OVERLAP", 409);
+    if (overlap) {
+      throw new SalaryError("SALARY_CLOSING_OVERLAP", 409, {
+        closingNumber: overlap.closingNumber,
+      });
+    }
     const year = start.getUTCFullYear();
     const month = start.getUTCMonth() + 1;
     const sequence = await tx.salaryClosingSequence.upsert({
@@ -964,7 +982,6 @@ export async function createSalaryClosing(
       },
     } });
     return closing;
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 export async function createSalaryAdjustment(

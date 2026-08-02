@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 
 export class SalaryError extends Error {
-  constructor(public code: string, public status = 400) {
+  constructor(
+    public code: string,
+    public status = 400,
+    public details?: Record<string, string>,
+  ) {
     super(code);
   }
 }
@@ -44,6 +48,7 @@ export function salaryErrorResponse(error: unknown) {
     error: {
       code: known.code,
       message: messages[known.code] ?? "Proses salary gagal.",
+      ...(known.details ? { details: known.details } : {}),
     },
   }, { status: known.status });
 }

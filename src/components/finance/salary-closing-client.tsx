@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ChevronLeft,
   ChevronRight,
@@ -106,6 +107,7 @@ const rupiah = (value: number) =>
   }).format(value);
 
 export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
+  const router = useRouter();
   const today = jakartaOperationalDate();
   const currentMonth = salaryPreviewMonthRange(today);
   const [periodStart, setPeriodStart] = useState(`${today.slice(0, 7)}-01`);
@@ -122,6 +124,10 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
   const [previewLoading, setPreviewLoading] = useState(true);
   const [previewError, setPreviewError] = useState("");
   const [previewDetail, setPreviewDetail] = useState<PreviewRow | null>(null);
+  const [closingConfirmOpen, setClosingConfirmOpen] = useState(false);
+  const [closingNotes, setClosingNotes] = useState("");
+  const [closingRequestId, setClosingRequestId] = useState("");
+  const [closingSaving, setClosingSaving] = useState(false);
 
   async function loadClosings() {
     setLoading(true);
@@ -180,6 +186,48 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
     setPreviewEnd(range.endDate);
   }
 
+  function openPreviewClosingConfirmation() {
+    setClosingNotes("");
+    setClosingRequestId(crypto.randomUUID());
+    setClosingConfirmOpen(true);
+    setError("");
+  }
+
+  async function createClosingFromPreview() {
+    if (!preview || closingSaving || !closingRequestId) return;
+    setClosingSaving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/finance/salary/preview/closing", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          startDate: previewStart,
+          endDate: previewEnd,
+          notes: closingNotes || null,
+          requestId: closingRequestId,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        const overlap = result.error?.details?.closingNumber;
+        throw new Error(overlap
+          ? `Periode bertabrakan dengan closing ${overlap}.`
+          : result.error?.message || "Salary closing gagal dibuat.");
+      }
+      router.push(
+        `/dashboard/finance/salary-closing/${result.data.id}?fromPreview=1`,
+      );
+    } catch (cause) {
+      setClosingConfirmOpen(false);
+      setError(cause instanceof Error
+        ? cause.message
+        : "Salary closing gagal dibuat.");
+    } finally {
+      setClosingSaving(false);
+    }
+  }
+
   async function createDraft() {
     if (saving) return;
     setSaving(true);
@@ -215,7 +263,12 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
       description="Hitung, review, dan finalisasi penghasilan team berdasarkan periode."/>
     {notice && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div>}
     {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div>}
-    <SectionCard title="Preview Salary Periode">
+    <SectionCard title="Preview Salary Periode" badge={canManage
+      ? <button type="button" disabled={previewLoading || !preview}
+          onClick={openPreviewClosingConfirmation} className={nextgenButtonClass}>
+          <Plus size={17}/>Buat Closing dari Periode Ini
+        </button>
+      : undefined}>
       <div className="grid gap-3 md:grid-cols-5">
         <button type="button" disabled={previewLoading}
           onClick={() => changePreviewMonth(-1)} className={nextgenNeutralButtonClass}>
@@ -375,6 +428,55 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
         <div className="flex justify-end border-t p-4">
           <button type="button" onClick={() => setPreviewDetail(null)}
             className={nextgenNeutralButtonClass}>Tutup</button>
+        </div>
+      </ModalCard>
+    </div>}
+    {closingConfirmOpen && preview && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4">
+      <ModalCard className="max-w-2xl">
+        <div className="flex items-center justify-between border-b p-5">
+          <div>
+            <p className="text-sm text-slate-500">Preview Salary Periode</p>
+            <h2 className="text-xl font-bold">Buat Salary Closing</h2>
+          </div>
+          <button type="button" disabled={closingSaving}
+            aria-label="Tutup konfirmasi closing"
+            onClick={() => setClosingConfirmOpen(false)}><X/></button>
+        </div>
+        <div className="space-y-5 p-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              ["Tanggal awal", previewStart],
+              ["Tanggal akhir", previewEnd],
+              ["Jumlah team", String(preview.summary.teamCount)],
+              ["Pickup terhitung", String(preview.summary.pickupCount)],
+              ["Dispatch terhitung", String(preview.summary.dispatchCount)],
+              ["Estimasi penghasilan sistem", rupiah(Number(preview.summary.systemIncomeTotal))],
+            ].map(([label, value]) => <div key={label}
+              className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+              <p className="mt-1 font-bold text-slate-900">{value}</p>
+            </div>)}
+          </div>
+          <label className="block text-sm font-semibold text-slate-700">Catatan opsional
+            <textarea value={closingNotes} disabled={closingSaving}
+              onChange={(event) => setClosingNotes(event.target.value)}
+              className={`${nextgenControlClass} mt-1 min-h-24`}/>
+          </label>
+          <p className="text-sm text-slate-600">
+            Saat dikonfirmasi, data akan diambil ulang, dikunci dalam snapshot,
+            dihitung, lalu closing langsung masuk status Dalam Review.
+          </p>
+        </div>
+        <div className="flex justify-end gap-3 border-t p-4">
+          <button type="button" disabled={closingSaving}
+            onClick={() => setClosingConfirmOpen(false)}
+            className={nextgenNeutralButtonClass}>Batal</button>
+          <button type="button" disabled={closingSaving}
+            onClick={() => void createClosingFromPreview()}
+            className={nextgenButtonClass}>
+            {closingSaving && <LoaderCircle className="animate-spin" size={17}/>}
+            {closingSaving ? "Membuat Closing..." : "Buat Closing"}
+          </button>
         </div>
       </ModalCard>
     </div>}

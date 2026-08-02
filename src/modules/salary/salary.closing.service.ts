@@ -141,7 +141,21 @@ export async function generateSalaryClosing(
   context: SalaryContext,
   closingId: string,
 ) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(
+    (tx) => generateSalaryClosingInTransaction(tx, context, closingId),
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      maxWait: 10_000,
+      timeout: 120_000,
+    },
+  );
+}
+
+export async function generateSalaryClosingInTransaction(
+  tx: Transaction,
+  context: SalaryContext,
+  closingId: string,
+) {
     const closing = await tx.salaryClosing.findFirst({
       where: {
         id: closingId,
@@ -670,11 +684,6 @@ export async function generateSalaryClosing(
       generatedEmployees,
       warnings: { unmatchedPickup, unmatchedDispatch },
     };
-  }, {
-    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-    maxWait: 10_000,
-    timeout: 120_000,
-  });
 }
 
 export async function getSalaryClosingReview(
