@@ -105,6 +105,8 @@ describe("Salary Card export", () => {
     );
     expect(result.width).toBe(1240);
     expect(result.height).toBe(1754);
+    expect(fake.renderedText).toContain("J&T CARGO / OUT001");
+    expect(fake.renderedText).not.toContain("Tenant Example / Outlet Example");
     expect(fake.renderedText.some((value) =>
       value.replace(/\s/g, "") === "Rp75.000"
     )).toBe(true);

@@ -145,10 +145,7 @@ const safeFilename = (value: string) => value
   .toLowerCase();
 
 const publicationBrand = (publication: Publication) =>
-  publication.identity.outletName &&
-  publication.identity.outletName !== publication.identity.brandName
-    ? `${publication.identity.brandName} / ${publication.identity.outletName}`
-    : `OUTLET ${publication.identity.outletCode}`;
+  `J&T CARGO / ${publication.identity.outletCode}`;
 
 const fitCanvasText = (
   context: CanvasRenderingContext2D,
