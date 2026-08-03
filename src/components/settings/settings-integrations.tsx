@@ -1,0 +1,70 @@
+"use client";
+
+import { useState } from "react";
+import { Cloud, Database, Eye, Globe2, Link2, LockKeyhole, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { buttonClass, inputClass, SettingsCard } from "./settings-shell";
+
+type DatasetStatus = "SUCCESS" | "FAILED" | "RUNNING" | "NEVER_SYNCED" | "STALE" | "UNAVAILABLE";
+type DatasetView = { key: string; label: string; status: DatasetStatus; lastSyncedAt: string | null; resultSummary: string; recordCount: number | null; errorCode: string | null; detailAvailable: boolean };
+type ActivityView = { id: string; occurredAt: string; integration: string; activity: string; status: "SUCCESS" | "FAILED" | "RUNNING" | "INFO"; summary: string };
+export type IntegrationData = {
+  summary?: { jfsConnectionStatus: string; middlewareStatus: "ONLINE" | "OFFLINE" | "NOT_CONFIGURED"; databaseStatus: "CONNECTED" | "DEGRADED"; applicationDomain: string | null };
+  connection?: { available: false; outletCode: string; networkCode: null; status: "COMING_SOON"; lastLoginAt: null; lastTestedAt: null };
+  datasets?: DatasetView[];
+  infrastructure?: { middlewareHostMasked: string | null; middlewareStatus: string; databaseStatus: string; applicationDomain: string | null; salaryCardStatus: string; cron: { key: string; lastRunAt: string | null }[]; lastSuccessfulSync: string | null; lastFailedSync: string | null };
+  activities?: ActivityView[];
+};
+
+const statusLabel: Record<DatasetStatus, string> = { SUCCESS: "Berhasil", FAILED: "Gagal", RUNNING: "Sedang Berjalan", NEVER_SYNCED: "Belum Pernah Sinkron", STALE: "Perlu Diperbarui", UNAVAILABLE: "Belum tersedia" };
+const statusTone: Record<DatasetStatus, string> = { SUCCESS: "bg-emerald-50 text-emerald-700", FAILED: "bg-red-50 text-red-700", RUNNING: "bg-blue-50 text-blue-700", NEVER_SYNCED: "bg-slate-100 text-slate-600", STALE: "bg-amber-50 text-amber-700", UNAVAILABLE: "bg-slate-100 text-slate-500" };
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("id-ID", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Jakarta" }).format(new Date(value));
+}
+
+export function IntegrationStatusCard({ icon, title, value, subtitle, tone = "slate" }: { icon: React.ReactNode; title: string; value: string; subtitle?: string; tone?: "slate" | "green" | "red" | "amber" }) {
+  const colors = { slate: "bg-slate-100 text-slate-600", green: "bg-emerald-50 text-emerald-700", red: "bg-red-50 text-red-700", amber: "bg-amber-50 text-amber-700" };
+  return <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className={`grid size-10 place-items-center rounded-xl ${colors[tone]}`}>{icon}</div><p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-400">{title}</p><p className="mt-1 text-xl font-extrabold text-slate-950">{value}</p>{subtitle && <p className="mt-2 text-sm leading-5 text-slate-500">{subtitle}</p>}</article>;
+}
+
+function ComingSoonButton({ children }: { children: React.ReactNode }) { return <button className={buttonClass} disabled title="Fitur akan aktif setelah session JFS per-outlet tersedia.">{children}</button>; }
+
+export function JfsConnectionCard({ data }: { data: NonNullable<IntegrationData["connection"]> }) {
+  return <SettingsCard title="Koneksi Akun JFS"><div className="mb-5 flex flex-wrap items-start justify-between gap-3"><p className="max-w-2xl text-sm text-slate-600">Hubungkan akun JFS outlet untuk mengaktifkan sinkronisasi otomatis.</p><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600" title="Fitur akan aktif setelah session JFS per-outlet tersedia.">Segera Tersedia</span></div><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><Field label="Account JFS"><input className={inputClass} disabled value="" placeholder="Belum tersedia"/></Field><Field label="Password JFS"><input className={inputClass} disabled type="password" value="" placeholder="Belum tersedia"/></Field><Field label="Outlet NEXTGEN"><input className={inputClass} disabled value={data.outletCode}/></Field><Field label="Network JFS"><input className={inputClass} disabled value="Belum terdeteksi"/></Field><Field label="Status Koneksi"><input className={inputClass} disabled value="Belum tersedia"/></Field><Field label="Login Terakhir / Test Terakhir"><input className={inputClass} disabled value="— / —"/></Field></div><div className="mt-5 flex flex-wrap gap-2"><ComingSoonButton><Link2 size={16}/> Hubungkan JFS</ComingSoonButton><ComingSoonButton><ShieldCheck size={16}/> Test Koneksi</ComingSoonButton><ComingSoonButton><RefreshCw size={16}/> Login Ulang</ComingSoonButton><ComingSoonButton><X size={16}/> Putuskan Koneksi</ComingSoonButton></div></SettingsCard>;
+}
+
+export function DatasetSyncRow({ dataset, onDetail }: { dataset: DatasetView; onDetail: () => void }) {
+  return <div className="grid gap-3 border-b border-slate-100 px-1 py-4 last:border-0 md:grid-cols-[1.2fr_.8fr_1fr_1fr_auto] md:items-center"><div><p className="font-bold text-slate-900">{dataset.label}</p><p className="mt-1 text-xs text-slate-500">{dataset.resultSummary}</p></div><div><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusTone[dataset.status]}`}>{statusLabel[dataset.status]}</span></div><p className="text-sm text-slate-600"><span className="md:hidden">Terakhir: </span>{formatDate(dataset.lastSyncedAt)}</p><p className="text-sm text-slate-600">{dataset.recordCount === null ? "Record —" : `${dataset.recordCount} record`}{dataset.errorCode ? <span className="mt-1 block text-xs text-red-600">{dataset.errorCode}</span> : null}</p><button className={`${buttonClass} bg-slate-100 text-slate-700`} disabled={!dataset.detailAvailable} onClick={onDetail}><Eye size={15}/> Detail</button></div>;
+}
+
+export function InfrastructureCard({ data }: { data: NonNullable<IntegrationData["infrastructure"]> }) {
+  const rows = [
+    ["Middleware Status", data.middlewareStatus], ["Database Status", data.databaseStatus], ["Aplikasi Domain", data.applicationDomain ?? "Belum dikonfigurasi"],
+    ["Salary Card Share", data.salaryCardStatus], ["Cron Cashflow", formatDate(data.cron.find(({ key }) => key === "CASHFLOW")?.lastRunAt)],
+    ["Cron Operasional", formatDate(data.cron.find(({ key }) => key === "OPERATIONAL")?.lastRunAt)], ["Last Successful Sync", formatDate(data.lastSuccessfulSync)], ["Last Failed Sync", formatDate(data.lastFailedSync)],
+  ];
+  return <SettingsCard title="Infrastruktur"><div className="grid gap-x-6 md:grid-cols-2">{rows.map(([label, value]) => <div key={label} className="flex items-center justify-between gap-4 border-b border-slate-100 py-3 text-sm"><span className="text-slate-500">{label}</span><b className="text-right text-slate-800">{value}</b></div>)}</div>{data.middlewareHostMasked && <p className="mt-4 text-xs text-slate-500">Host middleware: {data.middlewareHostMasked}</p>}</SettingsCard>;
+}
+
+export function IntegrationActivityTable({ activities }: { activities: ActivityView[] }) {
+  return <SettingsCard title="Riwayat Aktivitas Integrasi">{activities.length === 0 ? <div className="grid min-h-32 place-items-center rounded-xl bg-slate-50 text-sm text-slate-500">Belum ada aktivitas integrasi.</div> : <div className="overflow-x-auto"><table className="min-w-full text-sm"><thead><tr className="border-b text-left text-slate-500">{["Waktu", "Integrasi/Dataset", "Aktivitas", "Status", "Ringkasan"].map((item) => <th key={item} className="px-3 py-3">{item}</th>)}</tr></thead><tbody>{activities.map((item) => <tr key={item.id} className="border-b border-slate-100 align-top"><td className="whitespace-nowrap px-3 py-3">{formatDate(item.occurredAt)}</td><td className="px-3 py-3 font-semibold text-slate-800">{item.integration}</td><td className="px-3 py-3">{item.activity}</td><td className="px-3 py-3">{item.status === "FAILED" ? "Gagal" : item.status === "RUNNING" ? "Sedang Berjalan" : item.status === "SUCCESS" ? "Berhasil" : "Informasi"}</td><td className="max-w-md px-3 py-3 text-slate-600">{item.summary}</td></tr>)}</tbody></table></div>}</SettingsCard>;
+}
+
+export function SettingsIntegrations({ data }: { data: IntegrationData }) {
+  const [detail, setDetail] = useState<DatasetView | null>(null);
+  const summary = data.summary ?? { jfsConnectionStatus: "NOT_CONFIGURED", middlewareStatus: "NOT_CONFIGURED" as const, databaseStatus: "DEGRADED" as const, applicationDomain: null };
+  const connection = data.connection ?? { available: false as const, outletCode: "—", networkCode: null, status: "COMING_SOON" as const, lastLoginAt: null, lastTestedAt: null };
+  const middlewareLabel = summary.middlewareStatus === "ONLINE" ? "Online" : summary.middlewareStatus === "OFFLINE" ? "Offline" : "Tidak Dikonfigurasi";
+  return <div className="space-y-5">
+    <section><div className="mb-3"><h2 className="text-lg font-bold text-slate-950">Ringkasan Integrasi</h2><p className="text-sm text-slate-500">Status aman layanan yang mendukung operasional outlet.</p></div><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><IntegrationStatusCard icon={<Link2 size={20}/>} title="Status JFS" value="Belum Dikonfigurasi" subtitle="Koneksi per-outlet akan tersedia setelah middleware multi-tenant aktif."/><IntegrationStatusCard icon={<Cloud size={20}/>} title="Middleware" value={middlewareLabel} subtitle={data.infrastructure?.middlewareHostMasked ?? "Host belum tersedia"} tone={summary.middlewareStatus === "ONLINE" ? "green" : summary.middlewareStatus === "OFFLINE" ? "red" : "slate"}/><IntegrationStatusCard icon={<Database size={20}/>} title="Database" value={summary.databaseStatus === "CONNECTED" ? "Terhubung" : "Gangguan"} tone={summary.databaseStatus === "CONNECTED" ? "green" : "red"}/><IntegrationStatusCard icon={<Globe2 size={20}/>} title="Domain Aplikasi" value={summary.applicationDomain ?? "Belum dikonfigurasi"}/></div></section>
+    <JfsConnectionCard data={connection}/>
+    <SettingsCard title="Status Sinkronisasi"><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-600">Status hanya berasal dari run canonical yang tersedia.</p><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">Segera Tersedia</span></div><div>{(data.datasets ?? []).map((dataset) => <DatasetSyncRow key={dataset.key} dataset={dataset} onDetail={() => setDetail(dataset)}/>)}</div><div className="mt-4"><ComingSoonButton><RefreshCw size={16}/> Sinkronkan Sekarang</ComingSoonButton></div></SettingsCard>
+    {data.infrastructure && <InfrastructureCard data={data.infrastructure}/>}<IntegrationActivityTable activities={data.activities ?? []}/>
+    <p className="flex items-center gap-2 text-xs text-slate-500"><LockKeyhole size={14}/> Credential, token, environment secret, dan response mentah tidak ditampilkan.</p>
+    {detail && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" role="dialog" aria-modal="true"><section className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl"><div className="flex items-center justify-between"><h3 className="text-lg font-bold text-slate-950">Detail {detail.label}</h3><button aria-label="Tutup" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" onClick={() => setDetail(null)}><X size={18}/></button></div><dl className="mt-5 grid gap-4 sm:grid-cols-2"><Info label="Status" value={statusLabel[detail.status]}/><Info label="Sinkronisasi terakhir" value={formatDate(detail.lastSyncedAt)}/><Info label="Jumlah record" value={detail.recordCount === null ? "—" : String(detail.recordCount)}/><Info label="Kode error aman" value={detail.errorCode ?? "—"}/></dl><p className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">{detail.resultSummary}</p><div className="mt-5 flex justify-end"><button className={`${buttonClass} bg-slate-100 text-slate-700`} onClick={() => setDetail(null)}>Tutup</button></div></section></div>}
+  </div>;
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="text-sm font-semibold text-slate-700"><span className="mb-1 block">{label}</span>{children}</label>; }
+function Info({ label, value }: { label: string; value: string }) { return <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</dt><dd className="mt-1 text-sm text-slate-700">{value}</dd></div>; }

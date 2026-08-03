@@ -3,6 +3,63 @@ import type { SessionContext } from "@/lib/auth/session";
 export type SettingsScope = { tenantId: string; outletId: string };
 export type SettingsActor = SettingsScope & { userId: string };
 
+export type JfsConnectionStatus = "NOT_CONFIGURED" | "CONNECTED" | "RELOGIN_REQUIRED" | "DEGRADED";
+export type IntegrationDatasetStatus = "SUCCESS" | "FAILED" | "RUNNING" | "NEVER_SYNCED" | "STALE" | "UNAVAILABLE";
+export type IntegrationDatasetKey = "PICKUP" | "DISPATCH" | "COD" | "CASHFLOW" | "SLA" | "OMS" | "AGING_SIGN" | "INVENTORY";
+
+export type IntegrationSummary = {
+  jfsConnectionStatus: JfsConnectionStatus;
+  middlewareStatus: "ONLINE" | "OFFLINE" | "NOT_CONFIGURED";
+  databaseStatus: "CONNECTED" | "DEGRADED";
+  applicationDomain: string | null;
+};
+
+export type IntegrationConnectionView = {
+  available: false;
+  outletCode: string;
+  networkCode: null;
+  status: "COMING_SOON";
+  lastLoginAt: null;
+  lastTestedAt: null;
+};
+
+export type IntegrationDatasetView = {
+  key: IntegrationDatasetKey;
+  label: string;
+  status: IntegrationDatasetStatus;
+  lastSyncedAt: Date | null;
+  resultSummary: string;
+  recordCount: number | null;
+  errorCode: string | null;
+  detailAvailable: boolean;
+};
+
+export type IntegrationActivityView = {
+  id: string;
+  occurredAt: Date;
+  integration: string;
+  activity: string;
+  status: "SUCCESS" | "FAILED" | "RUNNING" | "INFO";
+  summary: string;
+};
+
+export type IntegrationControlCenter = {
+  summary: IntegrationSummary;
+  connection: IntegrationConnectionView;
+  datasets: IntegrationDatasetView[];
+  infrastructure: {
+    middlewareHostMasked: string | null;
+    middlewareStatus: IntegrationSummary["middlewareStatus"];
+    databaseStatus: IntegrationSummary["databaseStatus"];
+    applicationDomain: string | null;
+    salaryCardStatus: "ACTIVE" | "READY";
+    cron: Array<{ key: "CASHFLOW" | "OPERATIONAL"; lastRunAt: Date | null }>;
+    lastSuccessfulSync: Date | null;
+    lastFailedSync: Date | null;
+  };
+  activities: IntegrationActivityView[];
+};
+
 export function buildTenantOutletWhere(scope: SettingsScope): SettingsScope {
   return { tenantId: scope.tenantId, outletId: scope.outletId };
 }

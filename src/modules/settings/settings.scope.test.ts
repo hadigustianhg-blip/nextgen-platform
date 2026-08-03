@@ -5,10 +5,11 @@ const db = vi.hoisted(() => ({
   outlet: { findFirst: vi.fn(), count: vi.fn() },
   outletBankAccount: { findMany: vi.fn() },
   financialCategory: { findMany: vi.fn() },
-  syncRun: { findFirst: vi.fn(), aggregate: vi.fn() },
-  jfsCashflowSyncRun: { findFirst: vi.fn() },
+  syncRun: { findMany: vi.fn() },
+  jfsCashflowSyncRun: { findMany: vi.fn() },
   salaryPublicationShare: { count: vi.fn() },
   salaryEmployee: { findMany: vi.fn() },
+  auditLog: { findMany: vi.fn() },
 }));
 
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
@@ -34,10 +35,13 @@ describe("Settings explicit Prisma scope", () => {
     vi.clearAllMocks();
     db.outletBankAccount.findMany.mockResolvedValue([]);
     db.financialCategory.findMany.mockResolvedValue([]);
-    db.syncRun.findFirst.mockResolvedValue(null);
-    db.jfsCashflowSyncRun.findFirst.mockResolvedValue(null);
+    db.outlet.findFirst.mockResolvedValue({ id: "outlet-1", code: "OUT001" });
+    db.syncRun.findMany.mockResolvedValue([]);
+    db.jfsCashflowSyncRun.findMany.mockResolvedValue([]);
     db.salaryPublicationShare.count.mockResolvedValue(0);
     db.salaryEmployee.findMany.mockResolvedValue([]);
+    db.auditLog.findMany.mockResolvedValue([]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 200 }));
   });
 
   it("strips userId and extra properties from Finance queries", async () => {
@@ -49,10 +53,12 @@ describe("Settings explicit Prisma scope", () => {
 
   it("strips userId from every Integration query", async () => {
     await getIntegrationStatus(unsafeScope);
-    for (const [input] of db.syncRun.findFirst.mock.calls) expect(input.where).not.toHaveProperty("userId");
-    for (const [input] of db.jfsCashflowSyncRun.findFirst.mock.calls) expect(input.where).not.toHaveProperty("userId");
+    for (const [input] of db.syncRun.findMany.mock.calls) expect(input.where).toEqual(cleanScope);
+    for (const [input] of db.jfsCashflowSyncRun.findMany.mock.calls) expect(input.where).toEqual(cleanScope);
     expect(db.salaryPublicationShare.count.mock.calls[0][0].where).toMatchObject(cleanScope);
     expect(db.salaryPublicationShare.count.mock.calls[0][0].where).not.toHaveProperty("extraProperty");
+    expect(db.auditLog.findMany.mock.calls[0][0].where.tenantId).toBe("tenant-1");
+    expect(db.auditLog.findMany.mock.calls[0][0].where.AND[0]).toEqual({ OR: [{ outletId: "outlet-1" }, { outletId: null }] });
   });
 
   it("uses Outlet.id with tenant scope", async () => {

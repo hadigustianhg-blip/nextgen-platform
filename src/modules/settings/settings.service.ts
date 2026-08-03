@@ -1,7 +1,7 @@
 import argon2 from "argon2";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { buildOutletWhere, buildTenantOutletWhere, type SettingsActor, type SettingsScope } from "./settings.types";
+import { buildOutletWhere, buildTenantOutletWhere, type IntegrationActivityView, type IntegrationControlCenter, type IntegrationDatasetStatus, type IntegrationDatasetView, type SettingsActor, type SettingsScope } from "./settings.types";
 import type { z } from "zod";
 import type { auditLogQuerySchema, bankAccountSchema, businessProfileSchema, financialCategorySchema, userCreateSchema, userUpdateSchema } from "./settings.validation";
 
@@ -192,20 +192,189 @@ export const listFinancialCategories = (scope: SettingsScope) => prisma.financia
 export async function createFinancialCategory(actor: SettingsActor, input: CategoryInput) { return prisma.$transaction(async (tx) => { const name = normalizeFinancialCategory(input.name); const item = await tx.financialCategory.create({ data: { ...input, name, canonicalName: canonicalizeFinancialCategory(name), tenantId: actor.tenantId, outletId: actor.outletId } }); await audit(tx, actor, "CREATE", "SETTINGS_FINANCIAL_CATEGORY", item.id, Object.keys(input)); return item; }); }
 export async function updateFinancialCategory(actor: SettingsActor, id: string, input: CategoryInput) { return prisma.$transaction(async (tx) => { const found = await tx.financialCategory.findFirst({ where: { id, tenantId: actor.tenantId, outletId: actor.outletId } }); if (!found) throw new SettingsError("FINANCIAL_CATEGORY_NOT_FOUND", 404); const name = normalizeFinancialCategory(input.name); const item = await tx.financialCategory.update({ where: { id }, data: { ...input, name, canonicalName: canonicalizeFinancialCategory(name) } }); await audit(tx, actor, "UPDATE", "SETTINGS_FINANCIAL_CATEGORY", id, Object.keys(input)); return item; }); }
 
-function maskHost(value?: string) { if (!value) return null; try { const url = new URL(value); return `${url.protocol}//***.${url.hostname.split(".").slice(-2).join(".")}`; } catch { return "configured"; } }
-export async function getIntegrationStatus(scope: SettingsScope) {
-  const where = buildTenantOutletWhere(scope);
-  const [latestSuccess, latestFailure, cashflowSuccess, cashflowFailure, shares] = await Promise.all([
-    prisma.syncRun.findFirst({ where: { ...where, status: "SUCCESS" }, orderBy: { completedAt: "desc" }, select: { completedAt: true, runType: true } }),
-    prisma.syncRun.findFirst({ where: { ...where, status: "FAILED" }, orderBy: { completedAt: "desc" }, select: { completedAt: true, runType: true } }),
-    prisma.jfsCashflowSyncRun.findFirst({ where: { ...where, status: "SUCCESS" }, orderBy: { completedAt: "desc" }, select: { completedAt: true } }),
-    prisma.jfsCashflowSyncRun.findFirst({ where: { ...where, status: "FAILED" }, orderBy: { completedAt: "desc" }, select: { completedAt: true } }),
-    prisma.salaryPublicationShare.count({ where: { ...where, revokedAt: null, expiresAt: { gt: new Date() } } }),
-  ]);
-  const middlewareUrl = process.env.JFS_MIDDLEWARE_BASE_URL ?? process.env.JFS_MIDDLEWARE_URL;
-  return { middleware: { status: middlewareUrl ? "CONFIGURED" : "NOT_CONFIGURED", host: maskHost(middlewareUrl) }, database: { status: "CONNECTED" }, application: { domain: maskHost(process.env.SALARY_PUBLIC_BASE_URL ?? process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL) }, salaryWhatsapp: { status: shares > 0 ? "ACTIVE" : "READY", activeShares: shares }, sync: { lastSuccessful: latestSuccess ?? cashflowSuccess, lastFailed: latestFailure ?? cashflowFailure }, cron: { jfsCashflow: cashflowSuccess?.completedAt ?? cashflowFailure?.completedAt ?? null, operational: latestSuccess?.completedAt ?? latestFailure?.completedAt ?? null } };
+function middlewareHostMasked(value?: string) {
+  if (!value) return null;
+  try {
+    const hostname = new URL(value).hostname;
+    const labels = hostname.split(".");
+    if (labels.length < 2) return "configured-host";
+    const prefix = labels[0].split("-")[0].slice(0, 12) || "host";
+    return `${prefix}-***.${labels.slice(1).join(".")}`;
+  } catch { return "configured-host"; }
 }
-export async function testSettingsConnections(scope: SettingsScope) { const database = await prisma.outlet.count({ where: { id: scope.outletId, tenantId: scope.tenantId } }); let middleware: "NOT_CONFIGURED" | "REACHABLE" | "UNREACHABLE" = "NOT_CONFIGURED"; const base = process.env.JFS_MIDDLEWARE_BASE_URL ?? process.env.JFS_MIDDLEWARE_URL; if (base) { try { const response = await fetch(new URL("/", base), { method: "GET", signal: AbortSignal.timeout(5000), cache: "no-store" }); middleware = response.status < 500 ? "REACHABLE" : "UNREACHABLE"; } catch { middleware = "UNREACHABLE"; } } return { database: database === 1 ? "CONNECTED" : "SCOPED_OUTLET_NOT_FOUND", middleware }; }
+
+function applicationDomain(value?: string) {
+  if (!value) return null;
+  try { return new URL(value).hostname; } catch { return null; }
+}
+
+async function middlewareHealth(base?: string): Promise<"ONLINE" | "OFFLINE" | "NOT_CONFIGURED"> {
+  if (!base) return "NOT_CONFIGURED";
+  try {
+    const response = await fetch(new URL("/", base), { method: "GET", signal: AbortSignal.timeout(5000), cache: "no-store" });
+    return response.status < 500 ? "ONLINE" : "OFFLINE";
+  } catch { return "OFFLINE"; }
+}
+
+type OperationalSyncView = {
+  id: string;
+  runType: "FULL" | "PICKUP" | "DISPATCH" | "COD";
+  status: "RUNNING" | "SUCCESS" | "PARTIAL_SUCCESS" | "FAILED";
+  startedAt: Date;
+  completedAt: Date | null;
+  pickupFetchedCount: number;
+  dispatchFetchedCount: number;
+  codFetchedCount: number;
+  anomalyCount: number;
+};
+
+function canonicalDatasetStatus(status?: OperationalSyncView["status"]): IntegrationDatasetStatus {
+  if (!status) return "NEVER_SYNCED";
+  if (status === "PARTIAL_SUCCESS") return "STALE";
+  return status;
+}
+
+function operationalDataset(
+  rows: OperationalSyncView[],
+  key: "PICKUP" | "DISPATCH" | "COD",
+  label: string,
+  countField: "pickupFetchedCount" | "dispatchFetchedCount" | "codFetchedCount",
+): IntegrationDatasetView {
+  const run = rows.find((item) => item.runType === key || item.runType === "FULL");
+  const status = canonicalDatasetStatus(run?.status);
+  return {
+    key, label, status,
+    lastSyncedAt: run?.completedAt ?? run?.startedAt ?? null,
+    resultSummary: !run ? "Belum pernah memiliki SyncRun." : run.status === "PARTIAL_SUCCESS" ? `Selesai dengan ${run.anomalyCount} anomali.` : run.status === "FAILED" ? "Sinkronisasi terakhir gagal." : run.status === "RUNNING" ? "Sinkronisasi sedang berjalan." : "Sinkronisasi selesai.",
+    recordCount: run?.[countField] ?? null,
+    errorCode: run?.status === "FAILED" ? "SYNC_FAILED" : run?.status === "PARTIAL_SUCCESS" ? "PARTIAL_SUCCESS" : null,
+    detailAvailable: Boolean(run),
+  };
+}
+
+function unavailableDataset(key: "SLA" | "OMS" | "AGING_SIGN" | "INVENTORY", label: string): IntegrationDatasetView {
+  return { key, label, status: "UNAVAILABLE", lastSyncedAt: null, resultSummary: "Belum tersedia karena belum ada SyncRun canonical.", recordCount: null, errorCode: null, detailAvailable: false };
+}
+
+function safeActivityStatus(status: OperationalSyncView["status"]): IntegrationActivityView["status"] {
+  if (status === "RUNNING") return "RUNNING";
+  if (status === "FAILED") return "FAILED";
+  return "SUCCESS";
+}
+
+function latestDate(values: Array<Date | null | undefined>) {
+  const timestamps = values.filter((value): value is Date => value instanceof Date).map((value) => value.getTime());
+  return timestamps.length ? new Date(Math.max(...timestamps)) : null;
+}
+
+function safeIntegrationErrorCode(value: string | null | undefined) {
+  return value && /^[A-Z0-9_:-]{1,80}$/.test(value) ? value : "SYNC_FAILED";
+}
+
+export async function getIntegrationStatus(scope: SettingsScope): Promise<IntegrationControlCenter & Record<string, unknown>> {
+  const where = buildTenantOutletWhere(scope);
+  const now = new Date();
+  const middlewareUrl = process.env.JFS_MIDDLEWARE_BASE_URL ?? process.env.JFS_MIDDLEWARE_URL;
+  const appDomain = applicationDomain(process.env.SALARY_PUBLIC_BASE_URL ?? process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL);
+  const [outlet, operationalRuns, cashflowRuns, activeShares, integrationAudits, middlewareStatus] = await Promise.all([
+    prisma.outlet.findFirst({ where: buildOutletWhere(scope), select: { id: true, code: true } }),
+    prisma.syncRun.findMany({
+      where,
+      orderBy: { startedAt: "desc" },
+      take: 20,
+      select: { id: true, runType: true, status: true, startedAt: true, completedAt: true, pickupFetchedCount: true, dispatchFetchedCount: true, codFetchedCount: true, anomalyCount: true },
+    }),
+    prisma.jfsCashflowSyncRun.findMany({
+      where,
+      orderBy: { startedAt: "desc" },
+      take: 10,
+      select: { id: true, status: true, startedAt: true, completedAt: true, fetchedCount: true, anomalyCount: true, errorCode: true },
+    }),
+    prisma.salaryPublicationShare.count({ where: { ...where, revokedAt: null, expiresAt: { gt: now } } }),
+    prisma.auditLog.findMany({
+      where: {
+        tenantId: scope.tenantId,
+        AND: [
+          { OR: [{ outletId: scope.outletId }, { outletId: null }] },
+          { OR: [
+            { entityType: { contains: "INTEGRATION", mode: "insensitive" } },
+            { entityType: { contains: "CONNECTION", mode: "insensitive" } },
+            { entityType: { contains: "CREDENTIAL", mode: "insensitive" } },
+          ] },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+      select: { id: true, createdAt: true, entityType: true, action: true },
+    }),
+    middlewareHealth(middlewareUrl),
+  ]);
+  if (!outlet) throw new SettingsError("SETTINGS_SCOPE_NOT_FOUND", 404);
+
+  const pickup = operationalDataset(operationalRuns, "PICKUP", "Pickup", "pickupFetchedCount");
+  const dispatch = operationalDataset(operationalRuns, "DISPATCH", "Dispatch", "dispatchFetchedCount");
+  const cod = operationalDataset(operationalRuns, "COD", "COD", "codFetchedCount");
+  const cashflowRun = cashflowRuns[0] ?? null;
+  const cashflow: IntegrationDatasetView = {
+    key: "CASHFLOW", label: "Cashflow", status: canonicalDatasetStatus(cashflowRun?.status),
+    lastSyncedAt: cashflowRun?.completedAt ?? cashflowRun?.startedAt ?? null,
+    resultSummary: !cashflowRun ? "Belum pernah memiliki JfsCashflowSyncRun." : cashflowRun.status === "PARTIAL_SUCCESS" ? `Selesai dengan ${cashflowRun.anomalyCount} anomali.` : cashflowRun.status === "FAILED" ? "Sinkronisasi terakhir gagal." : cashflowRun.status === "RUNNING" ? "Sinkronisasi sedang berjalan." : "Sinkronisasi selesai.",
+    recordCount: cashflowRun?.fetchedCount ?? null,
+    errorCode: cashflowRun?.status === "FAILED" ? safeIntegrationErrorCode(cashflowRun.errorCode) : cashflowRun?.status === "PARTIAL_SUCCESS" ? "PARTIAL_SUCCESS" : null,
+    detailAvailable: Boolean(cashflowRun),
+  };
+  const datasets = [pickup, dispatch, cod, cashflow,
+    unavailableDataset("SLA", "SLA"),
+    unavailableDataset("OMS", "OMS / Pickup Scheduling"),
+    unavailableDataset("AGING_SIGN", "Aging Sign"),
+    unavailableDataset("INVENTORY", "Inventory / Waybill Stuck")];
+
+  const runActivities: IntegrationActivityView[] = operationalRuns.map((run) => ({
+    id: `sync-${run.id}`, occurredAt: run.completedAt ?? run.startedAt, integration: run.runType === "FULL" ? "Operasional" : run.runType,
+    activity: "Sinkronisasi", status: safeActivityStatus(run.status),
+    summary: run.status === "FAILED" ? "Sinkronisasi gagal dengan kode aman SYNC_FAILED." : run.status === "RUNNING" ? "Sinkronisasi sedang berjalan." : `Sinkronisasi selesai; ${run.pickupFetchedCount + run.dispatchFetchedCount + run.codFetchedCount} record diambil.`,
+  }));
+  const cashflowActivities: IntegrationActivityView[] = cashflowRuns.map((run) => ({
+    id: `cashflow-${run.id}`, occurredAt: run.completedAt ?? run.startedAt, integration: "Cashflow", activity: "Sinkronisasi", status: safeActivityStatus(run.status),
+    summary: run.status === "FAILED" ? `Sinkronisasi gagal dengan kode aman ${safeIntegrationErrorCode(run.errorCode)}.` : run.status === "RUNNING" ? "Sinkronisasi sedang berjalan." : `Sinkronisasi selesai; ${run.fetchedCount} record diambil.`,
+  }));
+  const auditActivities: IntegrationActivityView[] = integrationAudits.map((row) => ({
+    id: `audit-${row.id.toString()}`, occurredAt: row.createdAt, integration: row.entityType.replaceAll("_", " "), activity: row.action,
+    status: "INFO", summary: "Aktivitas integrasi tercatat. Metadata sensitif tidak ditampilkan.",
+  }));
+  const activities = [...runActivities, ...cashflowActivities, ...auditActivities].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime()).slice(0, 10);
+  const successfulDates = [...operationalRuns, ...cashflowRuns].filter(({ status }) => status === "SUCCESS" || status === "PARTIAL_SUCCESS").map((run) => run.completedAt);
+  const failedDates = [...operationalRuns, ...cashflowRuns].filter(({ status }) => status === "FAILED").map((run) => run.completedAt);
+  const operationalLast = operationalRuns[0]?.completedAt ?? operationalRuns[0]?.startedAt ?? null;
+  const cashflowLast = cashflowRuns[0]?.completedAt ?? cashflowRuns[0]?.startedAt ?? null;
+  const databaseStatus = "CONNECTED" as const;
+  const salaryCardStatus = activeShares > 0 ? "ACTIVE" as const : "READY" as const;
+
+  return {
+    summary: { jfsConnectionStatus: "NOT_CONFIGURED", middlewareStatus, databaseStatus, applicationDomain: appDomain },
+    connection: { available: false, outletCode: outlet.code, networkCode: null, status: "COMING_SOON", lastLoginAt: null, lastTestedAt: null },
+    datasets,
+    infrastructure: {
+      middlewareHostMasked: middlewareHostMasked(middlewareUrl), middlewareStatus, databaseStatus, applicationDomain: appDomain, salaryCardStatus,
+      cron: [{ key: "CASHFLOW", lastRunAt: cashflowLast }, { key: "OPERATIONAL", lastRunAt: operationalLast }],
+      lastSuccessfulSync: latestDate(successfulDates), lastFailedSync: latestDate(failedDates),
+    },
+    activities,
+    // Legacy read-only keys are retained while existing consumers move to the canonical contract.
+    middleware: { status: middlewareStatus, host: middlewareHostMasked(middlewareUrl) },
+    database: { status: databaseStatus },
+    application: { domain: appDomain },
+    salaryWhatsapp: { status: salaryCardStatus, activeShares },
+    sync: { lastSuccessful: latestDate(successfulDates), lastFailed: latestDate(failedDates) },
+    cron: { jfsCashflow: cashflowLast, operational: operationalLast },
+  };
+}
+
+export async function testSettingsConnections(scope: SettingsScope) {
+  const database = await prisma.outlet.count({ where: { id: scope.outletId, tenantId: scope.tenantId } });
+  const middleware = await middlewareHealth(process.env.JFS_MIDDLEWARE_BASE_URL ?? process.env.JFS_MIDDLEWARE_URL);
+  return { database: database === 1 ? "CONNECTED" : "SCOPED_OUTLET_NOT_FOUND", middleware: middleware === "ONLINE" ? "REACHABLE" : middleware === "OFFLINE" ? "UNREACHABLE" : "NOT_CONFIGURED" };
+}
 
 const sensitiveKey = /password|token|credential|secret|authorization|cookie|hash|database.?url|payload/i;
 export function sanitizeAuditMetadata(value: unknown, depth = 0): unknown { if (depth > 4) return "[TRUNCATED]"; if (Array.isArray(value)) return value.slice(0, 50).map((item) => sanitizeAuditMetadata(item, depth + 1)); if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([key]) => !sensitiveKey.test(key)).map(([key, item]) => [key, sanitizeAuditMetadata(item, depth + 1)])); if (typeof value === "string") return value.length > 500 ? `${value.slice(0, 500)}…` : value; return value; }
