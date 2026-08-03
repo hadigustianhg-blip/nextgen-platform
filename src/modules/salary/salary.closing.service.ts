@@ -1287,6 +1287,15 @@ export async function getSalaryRecapDetail(
             where: { status: "FINALIZED" },
             include: { kasbonSnapshot: true },
           },
+          publicationShares: {
+            where: { publishedAt: { not: null } },
+            select: {
+              publishedAt: true,
+              publishedBy: { select: { name: true } },
+            },
+            orderBy: { publishedAt: "asc" },
+            take: 1,
+          },
         },
       },
       sourceRecords: {
@@ -1296,12 +1305,21 @@ export async function getSalaryRecapDetail(
   });
   return closing ? {
     ...closing,
-    employees: closing.employees.map((employee) => ({
-      ...employee,
-      kasbonAllocations: employee.kasbonAllocations.map(
-        exposeKasbonSnapshot,
-      ),
-    })),
+    employees: closing.employees.map((employee) => {
+      const { publicationShares, ...employeeData } = employee;
+      const publication = publicationShares[0] ?? null;
+      return {
+        ...employeeData,
+        publicationStatus: publication
+          ? "PUBLISHED" as const
+          : "READY" as const,
+        publishedAt: publication?.publishedAt ?? null,
+        publishedBy: publication?.publishedBy?.name ?? null,
+        kasbonAllocations: employeeData.kasbonAllocations.map(
+          exposeKasbonSnapshot,
+        ),
+      };
+    }),
   } : null;
 }
 

@@ -366,6 +366,7 @@ model User {
   salaryKasbonAllocationsVoided       SalaryKasbonAllocation[]    @relation("SalaryKasbonAllocationVoidedBy")
   salaryClosingsVoided                SalaryClosing[]             @relation("SalaryClosingVoidedBy")
   salaryPublicationSharesCreated      SalaryPublicationShare[]    @relation("SalaryPublicationShareCreatedBy")
+  salaryPublicationSharesPublished    SalaryPublicationShare[]    @relation("SalaryPublicationSharePublishedBy")
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -1447,6 +1448,8 @@ model SalaryPublicationShare {
   expiresAt               DateTime              @db.Timestamptz(3)
   revokedAt               DateTime?             @db.Timestamptz(3)
   lastAccessAt            DateTime?             @db.Timestamptz(3)
+  publishedAt             DateTime?             @db.Timestamptz(3)
+  publishedByUserId       String?               @db.Uuid
   createdByUserId         String                @db.Uuid
   createdAt               DateTime              @default(now()) @db.Timestamptz(3)
   tenant                  Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1454,9 +1457,11 @@ model SalaryPublicationShare {
   salaryClosing           SalaryClosing         @relation(fields: [salaryClosingId], references: [id], onDelete: Restrict)
   salaryClosingEmployee   SalaryClosingEmployee @relation(fields: [salaryClosingEmployeeId], references: [id], onDelete: Restrict)
   createdBy               User                  @relation("SalaryPublicationShareCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  publishedBy             User?                 @relation("SalaryPublicationSharePublishedBy", fields: [publishedByUserId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, outletId, salaryClosingEmployeeId, expiresAt])
   @@index([shareCode, revokedAt, expiresAt])
+  @@index([salaryClosingEmployeeId, publishedAt])
 }
 
 model SalaryClosingComponent {

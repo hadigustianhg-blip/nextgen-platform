@@ -57,6 +57,10 @@ const messages: Record<string, string> = {
     "Salary Card hanya tersedia untuk Salary Recap yang sudah diproses.",
   SALARY_PUBLICATION_INCONSISTENT:
     "Salary Card tidak dapat dibuat karena nominal final tidak konsisten.",
+  SALARY_SHARE_NOT_FOUND:
+    "Tautan Salary Card aktif tidak ditemukan.",
+  SALARY_SHARE_PUBLISH_FAILED:
+    "Status publikasi Salary Card gagal disimpan.",
   SALARY_SAVE_FAILED: "Data salary gagal disimpan.",
 };
 

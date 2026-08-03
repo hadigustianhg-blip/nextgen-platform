@@ -24,7 +24,7 @@ import {
   nextgenNeutralButtonClass,
 } from "@/components/ui";
 
-type RecapEmployee = {
+export type RecapEmployee = {
   id: string;
   employeeNameSnapshot: string;
   divisionSnapshot: string;
@@ -35,9 +35,12 @@ type RecapEmployee = {
   manualAdditionTotal: string;
   manualDeductionTotal: string;
   netSalary: string;
+  publicationStatus: "READY" | "PUBLISHED";
+  publishedAt: string | null;
+  publishedBy: string | null;
 };
 
-type Recap = {
+export type Recap = {
   id: string;
   closingNumber: string;
   periodStart: string;
@@ -48,6 +51,24 @@ type Recap = {
   cancelBlockReason: string | null;
   employees: RecapEmployee[];
 };
+
+type PublicationStatusUpdate = Pick<
+  RecapEmployee,
+  "publicationStatus" | "publishedAt"
+>;
+
+export function applyPublicationStatus(
+  recap: Recap,
+  employeeId: string,
+  status: PublicationStatusUpdate,
+) {
+  return {
+    ...recap,
+    employees: recap.employees.map((employee) => employee.id === employeeId
+      ? { ...employee, ...status }
+      : employee),
+  };
+}
 
 type PublicationLine = {
   id: string;
@@ -168,6 +189,10 @@ const formatPublishTime = (value: Date) => `${new Intl.DateTimeFormat("id-ID", {
   hourCycle: "h23",
   timeZone: "Asia/Jakarta",
 }).format(value).replace(".", ":")} WIB`;
+const publicationTimestamp = (value: string) => {
+  const date = new Date(value);
+  return `${formatDocumentDate(date)}\n${formatPublishTime(date)}`;
+};
 const safeFilename = (value: string) => value
   .normalize("NFKD")
   .replace(/[\u0300-\u036f]/g, "")
@@ -637,6 +662,7 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
     setPublicationError("");
     const popup = window.open("about:blank", "_blank");
     if (popup) popup.opener = null;
+    let whatsappOpened = false;
     try {
       const response = await fetch(
         `/api/finance/salary/recaps/${closingId}/employees/${publication.employee.id}/publication/share`,
@@ -653,17 +679,38 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
       if (whatsappUrl.toString().includes("�")) {
         throw new Error("Pesan WhatsApp tidak dapat dibentuk dengan aman.");
       }
-      if (popup) popup.location.href = whatsappUrl.toString();
-      else {
+      if (popup) {
+        popup.location.href = whatsappUrl.toString();
+        whatsappOpened = true;
+      } else {
         const opened = window.open(
           whatsappUrl.toString(),
           "_blank",
           "noopener,noreferrer",
         );
         if (!opened) throw new Error("Popup WhatsApp diblokir browser.");
+        whatsappOpened = true;
       }
+      const publishResponse = await fetch(
+        `/api/finance/salary/recaps/${closingId}/employees/${publication.employee.id}/publication/publish`,
+        { method: "PATCH", cache: "no-store" },
+      );
+      const publishResult = await publishResponse.json();
+      if (!publishResponse.ok ||
+        publishResult.data?.publicationStatus !== "PUBLISHED" ||
+        !publishResult.data?.publishedAt) {
+        throw new Error(
+          publishResult.error?.message || "Status publikasi gagal disimpan.",
+        );
+      }
+      setRecap((current) => current
+        ? applyPublicationStatus(current, publication.employee.id, {
+            publicationStatus: "PUBLISHED",
+            publishedAt: publishResult.data.publishedAt,
+          })
+        : current);
     } catch (cause) {
-      popup?.close();
+      if (!whatsappOpened) popup?.close();
       setPublicationError(cause instanceof Error
         ? cause.message
         : "Tautan Salary Card gagal dibuat.");
@@ -782,8 +829,22 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
               <td className="px-3 py-3">{rupiah(employee.manualAdditionTotal)}</td>
               <td className="px-3 py-3">{rupiah(employee.manualDeductionTotal)}</td>
               <td className="px-3 py-3 font-bold">{rupiah(employee.netSalary)}</td>
-              <td className="px-3 py-3 font-semibold text-emerald-700">
-                Siap Dipublikasikan
+              <td className="px-3 py-3">
+                {employee.publicationStatus === "PUBLISHED"
+                  ? <div title={employee.publishedAt
+                    ? publicationTimestamp(employee.publishedAt)
+                    : "Sudah Dipublikasikan"}>
+                    <p className="font-semibold text-emerald-700">
+                      ✅ Sudah Dipublikasikan
+                    </p>
+                    {employee.publishedAt && <p
+                      className="mt-1 whitespace-pre-line text-xs text-slate-500">
+                      {publicationTimestamp(employee.publishedAt)}
+                    </p>}
+                  </div>
+                  : <p className="font-semibold text-emerald-700">
+                    🟢 Siap Dipublikasikan
+                  </p>}
               </td>
               <td className="px-3 py-3"><button type="button"
                 disabled={publicationLoading}

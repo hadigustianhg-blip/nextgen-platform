@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import {
+  applyPublicationStatus,
   canvasBlob,
   createPdfFromJpeg,
   renderSalaryCardCanvas,
@@ -95,6 +96,42 @@ function fakeCanvas() {
 }
 
 describe("Salary Card export", () => {
+  it("updates only the published team row without reloading the recap", () => {
+    const recap = {
+      id: "closing-1",
+      closingNumber: "SAL/CLS/OUT001/2026/08/0001",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T00:00:00.000Z",
+      status: "PROCESSED" as const,
+      processedAt: "2026-09-01T00:00:00.000Z",
+      canCancelRecap: true,
+      cancelBlockReason: null,
+      employees: ["employee-1", "employee-2"].map((id) => ({
+        id,
+        employeeNameSnapshot: id,
+        divisionSnapshot: "DRIVER",
+        workDayCount: 1,
+        sourcePickupCount: 0,
+        sourceDispatchCount: 0,
+        systemIncomeTotal: "0",
+        manualAdditionTotal: "0",
+        manualDeductionTotal: "0",
+        netSalary: "0",
+        publicationStatus: "READY" as const,
+        publishedAt: null,
+        publishedBy: null,
+      })),
+    };
+    const result = applyPublicationStatus(recap, "employee-1", {
+      publicationStatus: "PUBLISHED",
+      publishedAt: "2026-08-03T03:18:00.000Z",
+    });
+    expect(result.employees[0].publicationStatus).toBe("PUBLISHED");
+    expect(result.employees[0].publishedAt)
+      .toBe("2026-08-03T03:18:00.000Z");
+    expect(result.employees[1]).toBe(recap.employees[1]);
+  });
+
   it("renders a self-contained A4 canvas without image resources", () => {
     const fake = fakeCanvas();
     const result = renderSalaryCardCanvas(
@@ -180,6 +217,14 @@ describe("Salary Card export", () => {
     expect(source).toContain("Kirim WhatsApp");
     expect(source).toContain("Menyiapkan tautan...");
     expect(source).toContain("https://wa.me/");
+    expect(source).toContain("/publication/publish");
+    expect(source).toContain("✅ Sudah Dipublikasikan");
+    const whatsappFlow = source.slice(
+      source.indexOf("async function sharePublicationToWhatsapp"),
+      source.indexOf("async function cancelRecap"),
+    );
+    expect(whatsappFlow.indexOf("popup.location.href"))
+      .toBeLessThan(whatsappFlow.indexOf("/publication/publish"));
     expect(source).not.toContain("Coming Soon");
     expect(publicCard).toContain("Download PDF");
     expect(publicCard).toContain("Download PNG");

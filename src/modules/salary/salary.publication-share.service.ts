@@ -326,6 +326,50 @@ export async function createSalaryPublicationShare(input: {
   };
 }
 
+export async function markSalaryPublicationPublished(input: {
+  scope: SalaryScope;
+  closingId: string;
+  closingEmployeeId: string;
+  publishedByUserId: string;
+  now?: Date;
+}) {
+  const now = input.now ?? new Date();
+  return prisma.$transaction(async (tx) => {
+    const share = await tx.salaryPublicationShare.findFirst({
+      where: {
+        tenantId: input.scope.tenantId,
+        outletId: input.scope.outletId,
+        salaryClosingId: input.closingId,
+        salaryClosingEmployeeId: input.closingEmployeeId,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      select: { id: true, publishedAt: true, publishedByUserId: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!share) throw new SalaryError("SALARY_SHARE_NOT_FOUND", 404);
+
+    if (!share.publishedAt) {
+      await tx.salaryPublicationShare.updateMany({
+        where: { id: share.id, publishedAt: null },
+        data: { publishedAt: now, publishedByUserId: input.publishedByUserId },
+      });
+    }
+    const published = await tx.salaryPublicationShare.findUnique({
+      where: { id: share.id },
+      select: { publishedAt: true, publishedByUserId: true },
+    });
+    if (!published?.publishedAt || !published.publishedByUserId) {
+      throw new SalaryError("SALARY_SHARE_PUBLISH_FAILED", 500);
+    }
+    return {
+      publicationStatus: "PUBLISHED" as const,
+      publishedAt: published.publishedAt,
+      publishedByUserId: published.publishedByUserId,
+    };
+  });
+}
+
 const decimalString = (value: { toString(): string }) => value.toString();
 
 function publicSalaryCard(

@@ -33,6 +33,7 @@ import {
   generateSalaryPublicationShareCode,
   getPublicSalaryCardByToken,
   getPublicSalaryCardByShareCode,
+  markSalaryPublicationPublished,
   resolveSalaryPublicBaseUrl,
   verifySalaryPublicationShareToken,
 } from "./salary.publication-share.service";
@@ -99,6 +100,7 @@ beforeEach(() => {
   mocks.transaction.mockImplementation(async (callback) => callback({
     salaryPublicationShare: {
       findFirst: mocks.shareFindFirst,
+      findUnique: mocks.shareFindUnique,
       updateMany: mocks.shareUpdateMany,
       create: mocks.shareCreate,
     },
@@ -249,6 +251,70 @@ describe("Salary publication secure share", () => {
     expect(result.publicUrl).toBe("https://app.example.test/s/SLP-8M3KQ2");
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.shareCreate).not.toHaveBeenCalled();
+  });
+
+  it("marks one active share published once and preserves its first actor", async () => {
+    const publishedAt = new Date("2026-08-03T03:18:00.000Z");
+    mocks.shareFindFirst
+      .mockResolvedValueOnce({
+        id: "share-1",
+        publishedAt: null,
+        publishedByUserId: null,
+      })
+      .mockResolvedValueOnce({
+        id: "share-1",
+        publishedAt,
+        publishedByUserId: "user-1",
+      });
+    mocks.shareFindUnique.mockResolvedValue({
+      publishedAt,
+      publishedByUserId: "user-1",
+    });
+
+    const first = await markSalaryPublicationPublished({
+      scope: { tenantId: "tenant-1", outletId: "outlet-1" },
+      closingId: "closing-yudi",
+      closingEmployeeId: "closing-employee-yudi",
+      publishedByUserId: "user-1",
+      now: publishedAt,
+    });
+    const second = await markSalaryPublicationPublished({
+      scope: { tenantId: "tenant-1", outletId: "outlet-1" },
+      closingId: "closing-yudi",
+      closingEmployeeId: "closing-employee-yudi",
+      publishedByUserId: "user-2",
+      now: new Date("2026-08-03T04:00:00.000Z"),
+    });
+
+    expect(first).toEqual({
+      publicationStatus: "PUBLISHED",
+      publishedAt,
+      publishedByUserId: "user-1",
+    });
+    expect(second).toEqual(first);
+    expect(mocks.shareUpdateMany).toHaveBeenCalledTimes(1);
+    expect(mocks.shareUpdateMany).toHaveBeenCalledWith({
+      where: { id: "share-1", publishedAt: null },
+      data: { publishedAt, publishedByUserId: "user-1" },
+    });
+  });
+
+  it("rejects publishing when no active scoped share exists", async () => {
+    await expect(markSalaryPublicationPublished({
+      scope: { tenantId: "tenant-1", outletId: "outlet-1" },
+      closingId: "closing-yudi",
+      closingEmployeeId: "closing-employee-yudi",
+      publishedByUserId: "user-1",
+    })).rejects.toMatchObject({ code: "SALARY_SHARE_NOT_FOUND" });
+    expect(mocks.shareFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        tenantId: "tenant-1",
+        outletId: "outlet-1",
+        salaryClosingId: "closing-yudi",
+        salaryClosingEmployeeId: "closing-employee-yudi",
+      }),
+    }));
+    expect(mocks.shareUpdateMany).not.toHaveBeenCalled();
   });
 
   it("opens a valid short share and rejects invalid, expired, or revoked shares", async () => {
