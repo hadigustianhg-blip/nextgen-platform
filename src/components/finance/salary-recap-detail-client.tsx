@@ -104,6 +104,37 @@ type Publication = {
   publicationStatus: "READY";
 };
 
+export type SalaryCardData = {
+  closing: {
+    closingNumber: string;
+    periodStart: string;
+    periodEnd: string;
+    processedAt: string | null;
+  };
+  identity: { outletCode: string };
+  employee: {
+    name: string;
+    division: string;
+    workDayCount: number;
+  };
+  components: Array<{ componentName?: string; amount: string }>;
+  additions: Array<{
+    category?: string;
+    reason?: string;
+    amount: string;
+  }>;
+  deductions: Array<{
+    category?: string;
+    reason?: string;
+    amount: string;
+  }>;
+  kasbonAllocations: Array<{
+    amount: string;
+    kasbonSnapshot?: { description: string | null } | null;
+  }>;
+  totals: Publication["totals"];
+};
+
 const divisionLabel: Record<string, string> = {
   ADMIN: "Admin",
   ADMIN_OPS: "Admin Ops",
@@ -144,7 +175,7 @@ const safeFilename = (value: string) => value
   .replace(/^-|-$/g, "")
   .toLowerCase();
 
-const publicationBrand = (publication: Publication) =>
+const publicationBrand = (publication: SalaryCardData) =>
   `J&T CARGO / ${publication.identity.outletCode}`;
 
 const fitCanvasText = (
@@ -173,7 +204,7 @@ export function salaryCardFilename(
 }
 
 export function renderSalaryCardCanvas(
-  publication: Publication,
+  publication: SalaryCardData,
   publishedAt: Date,
   showDetails: boolean,
   createCanvas: () => HTMLCanvasElement = () => document.createElement("canvas"),
@@ -479,7 +510,7 @@ export function createPdfFromJpeg(jpeg: Uint8Array, width: number, height: numbe
   ) as ArrayBuffer), { type: "application/pdf" });
 }
 
-function downloadBlob(blob: Blob, filename: string) {
+export function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -501,6 +532,7 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
   const [showRecap, setShowRecap] = useState(false);
   const [publishedAt, setPublishedAt] = useState<Date | null>(null);
   const [exporting, setExporting] = useState<"pdf" | "png" | null>(null);
+  const [sharingWhatsapp, setSharingWhatsapp] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelLoading, setCancelLoading] = useState(false);
@@ -533,6 +565,7 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
     setPublicationError("");
     setShowRecap(false);
     setPublishedAt(null);
+    setSharingWhatsapp(false);
     setPublicationOpen(true);
     setPublicationLoading(true);
     try {
@@ -590,6 +623,52 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
         : "Salary Card gagal diunduh.");
     } finally {
       setExporting(null);
+    }
+  }
+
+  async function sharePublicationToWhatsapp() {
+    const number = publication?.employee.whatsappNormalized;
+    if (!publication || !number || !/^\d{8,15}$/.test(number)) {
+      setPublicationError("Nomor WhatsApp team belum tersedia atau tidak valid.");
+      return;
+    }
+    if (sharingWhatsapp) return;
+    setSharingWhatsapp(true);
+    setPublicationError("");
+    const popup = window.open("about:blank", "_blank");
+    if (popup) popup.opener = null;
+    try {
+      const response = await fetch(
+        `/api/finance/salary/recaps/${closingId}/employees/${publication.employee.id}/publication/share`,
+        { method: "POST", cache: "no-store" },
+      );
+      const result = await response.json();
+      if (!response.ok || !result.data?.publicUrl || !result.data?.message) {
+        throw new Error(
+          result.error?.message || "Tautan Salary Card gagal dibuat.",
+        );
+      }
+      const whatsappUrl = new URL(`https://wa.me/${number}`);
+      whatsappUrl.searchParams.set("text", result.data.message);
+      if (whatsappUrl.toString().includes("�")) {
+        throw new Error("Pesan WhatsApp tidak dapat dibentuk dengan aman.");
+      }
+      if (popup) popup.location.href = whatsappUrl.toString();
+      else {
+        const opened = window.open(
+          whatsappUrl.toString(),
+          "_blank",
+          "noopener,noreferrer",
+        );
+        if (!opened) throw new Error("Popup WhatsApp diblokir browser.");
+      }
+    } catch (cause) {
+      popup?.close();
+      setPublicationError(cause instanceof Error
+        ? cause.message
+        : "Tautan Salary Card gagal dibuat.");
+    } finally {
+      setSharingWhatsapp(false);
     }
   }
 
@@ -894,17 +973,26 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
               : <Download size={16}/>}
             {exporting === "png" ? "Menyiapkan PNG..." : "Download PNG"}
           </button>}
-          {publication && <button type="button" disabled
+          {publication && <button type="button"
+            disabled={!whatsappReady || sharingWhatsapp || exporting != null}
             title={whatsappReady
-              ? "Nomor WhatsApp tersedia. Fitur pengiriman Coming Soon."
-              : "Nomor WhatsApp belum tersedia atau tidak valid."}
-            className={`${nextgenNeutralButtonClass} cursor-not-allowed opacity-50`}>
-            <MessageCircle size={16}/>Kirim WhatsApp - Coming Soon
+              ? "Buat tautan Salary Card dan buka WhatsApp."
+              : "Nomor WhatsApp team belum tersedia atau tidak valid."}
+            onClick={() => void sharePublicationToWhatsapp()}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+            {sharingWhatsapp
+              ? <LoaderCircle className="animate-spin" size={16}/>
+              : <MessageCircle size={16}/>}
+            {sharingWhatsapp ? "Menyiapkan tautan..." : "Kirim WhatsApp"}
           </button>}
           <button type="button" disabled={publicationLoading || exporting != null}
             onClick={() => setPublicationOpen(false)}
             className={nextgenNeutralButtonClass}>Tutup</button>
         </div>
+        {publication && !whatsappReady && <p
+          className="border-t bg-amber-50 px-4 py-2 text-right text-xs text-amber-800">
+          Nomor WhatsApp team belum tersedia atau tidak valid. Perbarui melalui Salary Setting.
+        </p>}
       </ModalCard>
     </div>}
 

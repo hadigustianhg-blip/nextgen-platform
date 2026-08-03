@@ -162,10 +162,14 @@ describe("Salary Card export", () => {
   });
 
   it("contains no foreignObject, external URL, image, or DOM screenshot path", async () => {
-    const source = await readFile(new URL(
-      "./salary-recap-detail-client.tsx",
-      import.meta.url,
-    ), "utf8");
+    const [source, publicCard, publicPage] = await Promise.all([
+      readFile(new URL("./salary-recap-detail-client.tsx", import.meta.url), "utf8"),
+      readFile(new URL("./salary-recap-public-card.tsx", import.meta.url), "utf8"),
+      readFile(new URL(
+        "../../app/salary-card/share/[token]/page.tsx",
+        import.meta.url,
+      ), "utf8"),
+    ]);
     const renderer = source.slice(
       source.indexOf("export function renderSalaryCardCanvas"),
       source.indexOf("export function canvasBlob"),
@@ -173,7 +177,17 @@ describe("Salary Card export", () => {
     expect(renderer).not.toMatch(
       /foreignObject|drawImage|new Image|background-image|url\(|<img|querySelector|cloneNode/i,
     );
-    expect(source).toContain("Kirim WhatsApp - Coming Soon");
-    expect(source).toContain("disabled");
+    expect(source).toContain("Kirim WhatsApp");
+    expect(source).toContain("Menyiapkan tautan...");
+    expect(source).toContain("https://wa.me/");
+    expect(source).not.toContain("Coming Soon");
+    expect(publicCard).toContain("Download PDF");
+    expect(publicCard).toContain("Download PNG");
+    expect(publicCard).not.toMatch(
+      /whatsapp|tenantId|outletId|pickupCount|dispatchCount|employeeId/i,
+    );
+    expect(publicPage).toContain("index: false");
+    expect(publicPage).toContain("follow: false");
+    expect(publicPage).toContain("noStore()");
   });
 });
