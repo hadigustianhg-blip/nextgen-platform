@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth/session";
+import { getAnySession, isTeamSession } from "@/lib/auth/session";
 
 export default async function Home() {
-  redirect((await getSession()) ? "/dashboard" : "/login");
+  const session = await getAnySession();
+  redirect(session ? isTeamSession(session) ? "/team" : "/dashboard" : "/login");
 }

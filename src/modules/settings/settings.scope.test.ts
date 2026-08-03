@@ -12,6 +12,7 @@ const db = vi.hoisted(() => ({
   salaryClosing: { aggregate: vi.fn() },
   profitLossManualEntry: { aggregate: vi.fn() },
   profitLossAdjustment: { aggregate: vi.fn() },
+  salaryEmployee: { findMany: vi.fn() },
 }));
 
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
@@ -22,6 +23,7 @@ import {
   getMaintenancePreview,
   listBankAccounts,
   listFinancialCategories,
+  listAvailableSalaryEmployees,
 } from "./settings.service";
 
 const unsafeScope = {
@@ -45,6 +47,7 @@ describe("Settings explicit Prisma scope", () => {
     db.profitLossManualEntry.aggregate.mockResolvedValue(aggregateResult);
     db.profitLossAdjustment.aggregate.mockResolvedValue(aggregateResult);
     db.syncRun.aggregate.mockResolvedValue(aggregateResult);
+    db.salaryEmployee.findMany.mockResolvedValue([]);
   });
 
   it("strips userId and extra properties from Finance queries", async () => {
@@ -77,5 +80,17 @@ describe("Settings explicit Prisma scope", () => {
     db.outlet.findFirst.mockResolvedValue({ id: "outlet-1" });
     await getBusinessProfile(unsafeScope);
     expect(db.outlet.findFirst.mock.calls[0][0].where).toEqual({ tenantId: "tenant-1", id: "outlet-1" });
+  });
+
+  it("lists only active unassigned SalaryEmployee records in the scoped outlet", async () => {
+    await listAvailableSalaryEmployees(unsafeScope);
+    expect(db.salaryEmployee.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        tenantId: "tenant-1",
+        outletId: "outlet-1",
+        status: "ACTIVE",
+        teamMemberships: { none: { status: "ACTIVE" } },
+      },
+    }));
   });
 });

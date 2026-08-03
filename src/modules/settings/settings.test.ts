@@ -6,12 +6,14 @@ import { canonicalizeFinancialCategory, normalizeFinancialCategory, sanitizeAudi
 const source = readFileSync(new URL("./settings.service.ts", import.meta.url), "utf8");
 const schema = readFileSync(new URL("../../../prisma/schema.prisma", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../../../prisma/migrations/20260803000400_add_settings_foundation/migration.sql", import.meta.url), "utf8");
+const teamMigration = readFileSync(new URL("../../../prisma/migrations/20260803000500_add_team_membership/migration.sql", import.meta.url), "utf8");
+const usersUi = readFileSync(new URL("../../components/settings/settings-users.tsx", import.meta.url), "utf8");
 
 describe("Settings foundation", () => {
   it("allows only OWNER or ADMIN", () => {
     expect(canAccessSettings({ roles: ["OWNER"] })).toBe(true);
     expect(canAccessSettings({ roles: ["ADMIN"] })).toBe(true);
-    for (const role of ["FINANCE", "HR", "QC", "OPERATIONAL", "VIEWER", "SUPER_ADMIN"]) expect(canAccessSettings({ roles: [role] })).toBe(false);
+    for (const role of ["FINANCE", "HR", "QC", "OPERATIONAL", "VIEWER", "SUPER_ADMIN", "TEAM"]) expect(canAccessSettings({ roles: [role] })).toBe(false);
   });
 
   it("normalizes canonical financial category safely", () => {
@@ -66,5 +68,22 @@ describe("Settings foundation", () => {
     expect(migration).toContain("CREATE TABLE \"FinancialCategory\"");
     expect(migration).not.toMatch(/DROP\s+(TABLE|COLUMN|TYPE)/i);
     expect(migration).not.toMatch(/TRUNCATE|DELETE FROM/i);
+  });
+
+  it("adds an isolated TeamMembership identity bridge and TEAM role additively", () => {
+    expect(schema).toContain("model TeamMembership");
+    expect(schema).toContain("salaryEmployeeId String");
+    expect(teamMigration).toContain('CREATE TABLE "TeamMembership"');
+    expect(teamMigration).toContain('TeamMembership_one_active_per_user_key');
+    expect(teamMigration).toContain('TeamMembership_one_active_per_employee_key');
+    expect(teamMigration).toContain("'TEAM'");
+    expect(teamMigration).not.toMatch(/UPDATE\s+"SalaryEmployee"|DELETE FROM|DROP\s+(TABLE|COLUMN|TYPE)/i);
+  });
+
+  it("provides custom user management UI without native confirmation dialogs", () => {
+    for (const label of ["Tambah User", "Cari user", "Semua Tipe", "Semua Role", "Semua Status", "Team / Kurir PWA", "Reset Password"]) expect(usersUi).toContain(label);
+    expect(usersUi).toContain('role="dialog"');
+    expect(usersUi).not.toMatch(/window\.(alert|confirm|prompt)|\bconfirm\(/);
+    expect(usersUi).not.toContain("passwordHash");
   });
 });

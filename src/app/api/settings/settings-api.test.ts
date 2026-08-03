@@ -5,6 +5,8 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 const routes = [
   "./business-profile/route.ts", "./users/route.ts", "./users/[id]/route.ts",
   "./users/[id]/reset-password/route.ts", "./finance/banks/route.ts",
+  "./users/[id]/activate/route.ts", "./users/[id]/deactivate/route.ts",
+  "./users/available-employees/route.ts",
   "./finance/banks/[id]/route.ts", "./finance/categories/route.ts",
   "./finance/categories/[id]/route.ts", "./integrations/route.ts",
   "./integrations/test/route.ts", "./maintenance/preview/route.ts",

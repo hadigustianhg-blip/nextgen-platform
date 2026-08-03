@@ -7,6 +7,7 @@ export const ROLE_CODES = [
   "QC",
   "OPERATIONAL",
   "VIEWER",
+  "TEAM",
 ] as const;
 
 export type RoleCode = (typeof ROLE_CODES)[number];

@@ -53,7 +53,7 @@ export async function createUserSession(input: {
   });
 }
 
-export async function getSession(): Promise<SessionContext | null> {
+async function resolveSession(): Promise<SessionContext | null> {
   const token = (await cookies()).get(getSessionCookieName())?.value;
   if (!token) return null;
 
@@ -95,9 +95,23 @@ export async function getSession(): Promise<SessionContext | null> {
   };
 }
 
+export function isTeamSession(session: Pick<SessionContext, "roles">) {
+  return session.roles.includes("TEAM");
+}
+
+export async function getAnySession() {
+  return resolveSession();
+}
+
+export async function getSession(): Promise<SessionContext | null> {
+  const session = await resolveSession();
+  return session && !isTeamSession(session) ? session : null;
+}
+
 export async function requireSession() {
-  const session = await getSession();
+  const session = await getAnySession();
   if (!session) redirect("/login");
+  if (isTeamSession(session)) redirect("/team");
   return session;
 }
 

@@ -142,6 +142,11 @@ enum SalaryEmployeeStatus {
   INACTIVE
 }
 
+enum TeamMembershipStatus {
+  ACTIVE
+  INACTIVE
+}
+
 enum SalaryProfileStatus {
   DRAFT
   ACTIVE
@@ -280,6 +285,7 @@ model Tenant {
   profitLossManualEntries    ProfitLossManualEntry[]
   profitLossAdjustments      ProfitLossAdjustment[]
   financialCategories        FinancialCategory[]
+  teamMemberships            TeamMembership[]
 }
 
 model Outlet {
@@ -340,6 +346,7 @@ model Outlet {
   profitLossManualEntries    ProfitLossManualEntry[]
   profitLossAdjustments      ProfitLossAdjustment[]
   financialCategories        FinancialCategory[]
+  teamMemberships            TeamMembership[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -398,6 +405,7 @@ model User {
   profitLossManualEntriesVoided       ProfitLossManualEntry[]     @relation("ProfitLossManualVoidedBy")
   profitLossAdjustmentsCreated        ProfitLossAdjustment[]      @relation("ProfitLossAdjustmentCreatedBy")
   profitLossAdjustmentsVoided         ProfitLossAdjustment[]      @relation("ProfitLossAdjustmentVoidedBy")
+  teamMemberships                     TeamMembership[]
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -1338,24 +1346,46 @@ model FinancialCategory {
 }
 
 model SalaryEmployee {
-  id            String                      @id @default(uuid()) @db.Uuid
-  tenantId      String                      @db.Uuid
-  outletId      String                      @db.Uuid
-  name          String
-  division      SalaryDivision
-  whatsapp      String?
-  status        SalaryEmployeeStatus        @default(ACTIVE)
-  createdAt     DateTime                    @default(now()) @db.Timestamptz(3)
-  updatedAt     DateTime                    @updatedAt @db.Timestamptz(3)
-  tenant        Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  outlet        Outlet                      @relation(fields: [outletId], references: [id], onDelete: Restrict)
-  assignments   EmployeeSalaryAssignment[]
-  closings      SalaryClosingEmployee[]
-  aliases       SalaryEmployeeAlias[]
-  sourceRecords SalaryClosingSourceRecord[]
+  id              String                      @id @default(uuid()) @db.Uuid
+  tenantId        String                      @db.Uuid
+  outletId        String                      @db.Uuid
+  name            String
+  division        SalaryDivision
+  whatsapp        String?
+  status          SalaryEmployeeStatus        @default(ACTIVE)
+  createdAt       DateTime                    @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime                    @updatedAt @db.Timestamptz(3)
+  tenant          Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet          Outlet                      @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  assignments     EmployeeSalaryAssignment[]
+  closings        SalaryClosingEmployee[]
+  aliases         SalaryEmployeeAlias[]
+  sourceRecords   SalaryClosingSourceRecord[]
+  teamMemberships TeamMembership[]
 
   @@unique([tenantId, outletId, name])
   @@index([tenantId, outletId, division, status])
+}
+
+model TeamMembership {
+  id               String               @id @default(uuid()) @db.Uuid
+  tenantId         String               @db.Uuid
+  outletId         String               @db.Uuid
+  userId           String               @db.Uuid
+  salaryEmployeeId String               @db.Uuid
+  status           TeamMembershipStatus @default(ACTIVE)
+  effectiveFrom    DateTime             @default(now()) @db.Timestamptz(3)
+  effectiveUntil   DateTime?            @db.Timestamptz(3)
+  createdAt        DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime             @updatedAt @db.Timestamptz(3)
+  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet           Outlet               @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  user             User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  salaryEmployee   SalaryEmployee       @relation(fields: [salaryEmployeeId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, outletId, status])
+  @@index([userId, status])
+  @@index([salaryEmployeeId, status])
 }
 
 model SalaryProfile {

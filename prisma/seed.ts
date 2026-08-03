@@ -12,6 +12,7 @@ const roleCodes = [
   "QC",
   "OPERATIONAL",
   "VIEWER",
+  "TEAM",
 ] as const;
 
 async function main() {

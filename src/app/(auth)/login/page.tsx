@@ -1,12 +1,13 @@
 import { redirect } from "next/navigation";
 import { Boxes, CheckCircle2, ShieldCheck } from "lucide-react";
 import { LoginForm } from "@/components/forms/login-form";
-import { getSession } from "@/lib/auth/session";
+import { getAnySession, isTeamSession } from "@/lib/auth/session";
 
 export const metadata = { title: "Login" };
 
 export default async function LoginPage() {
-  if (await getSession()) redirect("/dashboard");
+  const session = await getAnySession();
+  if (session) redirect(isTeamSession(session) ? "/team" : "/dashboard");
 
   return (
     <main className="grid min-h-screen bg-white lg:grid-cols-[1.05fr_0.95fr]">

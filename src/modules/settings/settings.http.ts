@@ -15,8 +15,11 @@ export async function requireSettingsApi() {
 export function settingsApiError(error: unknown, route = "settings") {
   const errorName = error instanceof Error ? error.name : "UnknownError";
   const prismaCode = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : null;
-  console.error("[SETTINGS_API]", { route, errorName, prismaCode });
+  const prismaTarget = (error as { meta?: { target?: unknown } })?.meta?.target;
+  const constraint = Array.isArray(prismaTarget) ? prismaTarget.join(",") : typeof prismaTarget === "string" ? prismaTarget : null;
+  console.error("[SETTINGS_API]", { route, errorName, prismaCode, constraint });
   if (error instanceof SettingsError) return NextResponse.json({ success: false, error: { code: error.code } }, { status: error.status });
-  const code = prismaCode === "P2002" ? "DUPLICATE_VALUE" : "SETTINGS_REQUEST_FAILED";
-  return NextResponse.json({ success: false, error: { code } }, { status: code === "DUPLICATE_VALUE" ? 409 : 500 });
+  const membershipConflict = prismaCode === "P2002" && Boolean(constraint?.includes("TeamMembership"));
+  const code = membershipConflict ? "EMPLOYEE_ALREADY_LINKED" : prismaCode === "P2002" ? "DUPLICATE_VALUE" : prismaCode === "P2034" ? "CONCURRENT_UPDATE" : "SETTINGS_REQUEST_FAILED";
+  return NextResponse.json({ success: false, error: { code } }, { status: code === "SETTINGS_REQUEST_FAILED" ? 500 : 409 });
 }

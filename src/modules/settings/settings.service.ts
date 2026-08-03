@@ -3,9 +3,10 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { buildOutletWhere, buildTenantOutletWhere, type SettingsActor, type SettingsScope } from "./settings.types";
 import type { z } from "zod";
-import type { auditLogQuerySchema, bankAccountSchema, businessProfileSchema, financialCategorySchema, userUpdateSchema } from "./settings.validation";
+import type { auditLogQuerySchema, bankAccountSchema, businessProfileSchema, financialCategorySchema, userCreateSchema, userUpdateSchema } from "./settings.validation";
 
 type BusinessInput = z.infer<typeof businessProfileSchema>;
+type UserCreateInput = z.infer<typeof userCreateSchema>;
 type UserInput = z.infer<typeof userUpdateSchema>;
 type BankInput = z.infer<typeof bankAccountSchema>;
 type CategoryInput = z.infer<typeof financialCategorySchema>;
@@ -38,25 +39,137 @@ export async function updateBusinessProfile(actor: SettingsActor, input: Busines
   });
 }
 
-export const listSettingsUsers = (scope: SettingsScope) => prisma.user.findMany({ where: { tenantId: scope.tenantId, outletId: scope.outletId }, orderBy: { name: "asc" }, select: { id: true, name: true, email: true, status: true, lastLoginAt: true, outlet: { select: { id: true, code: true, name: true } }, roles: { select: { role: { select: { code: true, name: true } } } } } });
+export const ADMIN_WEB_ROLE_CODES = ["OWNER", "ADMIN", "FINANCE", "HR", "QC", "OPERATIONAL", "VIEWER"] as const;
+const settingsUserSelect = {
+  id: true,
+  name: true,
+  email: true,
+  status: true,
+  lastLoginAt: true,
+  outlet: { select: { id: true, code: true, name: true } },
+  roles: { select: { role: { select: { code: true, name: true } } } },
+  teamMemberships: {
+    where: { status: "ACTIVE" as const },
+    select: { id: true, salaryEmployeeId: true, effectiveFrom: true, salaryEmployee: { select: { id: true, name: true, division: true, whatsapp: true, status: true } } },
+  },
+} satisfies Prisma.UserSelect;
+
+export const listSettingsUsers = (scope: SettingsScope) => prisma.user.findMany({
+  where: { tenantId: scope.tenantId, outletId: scope.outletId },
+  orderBy: { name: "asc" },
+  select: settingsUserSelect,
+});
+
+export const listAvailableSalaryEmployees = (scope: SettingsScope) => prisma.salaryEmployee.findMany({
+  where: {
+    tenantId: scope.tenantId,
+    outletId: scope.outletId,
+    status: "ACTIVE",
+    teamMemberships: { none: { status: "ACTIVE" } },
+  },
+  orderBy: { name: "asc" },
+  select: { id: true, name: true, division: true, whatsapp: true, status: true },
+});
+
+function requestedRoleCode(input: Pick<UserInput, "userType" | "roleCode">) {
+  if (input.userType === "TEAM_PWA") return "TEAM";
+  if (!input.roleCode || !ADMIN_WEB_ROLE_CODES.includes(input.roleCode as typeof ADMIN_WEB_ROLE_CODES[number])) throw new SettingsError("ROLE_NOT_ALLOWED", 400);
+  return input.roleCode;
+}
+
+async function scopedActiveEmployee(tx: Prisma.TransactionClient, actor: SettingsActor, salaryEmployeeId: string) {
+  const employee = await tx.salaryEmployee.findFirst({
+    where: { id: salaryEmployeeId, tenantId: actor.tenantId, outletId: actor.outletId, status: "ACTIVE" },
+    select: { id: true },
+  });
+  if (!employee) throw new SettingsError("SALARY_EMPLOYEE_NOT_AVAILABLE", 409);
+  return employee;
+}
+
+async function scopedRole(tx: Prisma.TransactionClient, actor: SettingsActor, code: string) {
+  const role = await tx.role.findFirst({ where: { tenantId: actor.tenantId, code }, select: { id: true, code: true } });
+  if (!role) throw new SettingsError("ROLE_NOT_FOUND", 404);
+  return role;
+}
+
+async function protectLastOwner(tx: Prisma.TransactionClient, actor: SettingsActor, userId: string, nextRole: string, nextStatus: "ACTIVE" | "SUSPENDED") {
+  const currentOwner = await tx.userRole.findFirst({ where: { userId, role: { tenantId: actor.tenantId, code: "OWNER" } }, select: { userId: true } });
+  if (!currentOwner || (nextRole === "OWNER" && nextStatus === "ACTIVE")) return;
+  const activeOwners = await tx.user.count({ where: { tenantId: actor.tenantId, status: "ACTIVE", roles: { some: { role: { code: "OWNER" } } } } });
+  if (activeOwners <= 1) throw new SettingsError("LAST_ACTIVE_OWNER", 409);
+}
+
+export async function createSettingsUser(actor: SettingsActor, input: UserCreateInput) {
+  const passwordHash = await argon2.hash(input.password, { type: argon2.argon2id });
+  return prisma.$transaction(async (tx) => {
+    const roleCode = requestedRoleCode(input);
+    const role = await scopedRole(tx, actor, roleCode);
+    if (input.userType === "TEAM_PWA") await scopedActiveEmployee(tx, actor, input.salaryEmployeeId!);
+    const user = await tx.user.create({
+      data: { tenantId: actor.tenantId, outletId: actor.outletId, name: input.name, email: input.email.toLowerCase(), passwordHash, status: input.status },
+      select: { id: true },
+    });
+    await tx.userRole.create({ data: { userId: user.id, roleId: role.id } });
+    if (input.userType === "TEAM_PWA") {
+      await tx.teamMembership.create({ data: { tenantId: actor.tenantId, outletId: actor.outletId, userId: user.id, salaryEmployeeId: input.salaryEmployeeId! } });
+    }
+    await audit(tx, actor, "CREATE", "SETTINGS_USER", user.id, ["name", "email", "status", "role", ...(input.userType === "TEAM_PWA" ? ["teamMembership"] : [])]);
+    return tx.user.findUniqueOrThrow({ where: { id: user.id }, select: settingsUserSelect });
+  }, { isolationLevel: "Serializable" });
+}
 
 export async function updateSettingsUser(actor: SettingsActor, userId: string, input: UserInput) {
   return prisma.$transaction(async (tx) => {
-    const current = await tx.user.findFirst({ where: { id: userId, tenantId: actor.tenantId, outletId: actor.outletId }, include: { roles: { include: { role: true } } } });
+    const current = await tx.user.findFirst({
+      where: { id: userId, tenantId: actor.tenantId, outletId: actor.outletId },
+      include: { roles: { include: { role: true } }, teamMemberships: { where: { status: "ACTIVE" } } },
+    });
     if (!current) throw new SettingsError("USER_NOT_FOUND", 404);
-    const role = await tx.role.findFirst({ where: { tenantId: actor.tenantId, code: input.roleCode }, select: { id: true, code: true } });
-    if (!role) throw new SettingsError("ROLE_NOT_FOUND", 404);
-    const wasOwner = current.roles.some(({ role }) => role.code === "OWNER");
-    if (wasOwner && (input.status !== "ACTIVE" || role.code !== "OWNER")) {
-      const activeOwners = await tx.user.count({ where: { tenantId: actor.tenantId, status: "ACTIVE", roles: { some: { role: { code: "OWNER" } } } } });
-      if (activeOwners <= 1) throw new SettingsError("LAST_ACTIVE_OWNER", 409);
+    const roleCode = requestedRoleCode(input);
+    const role = await scopedRole(tx, actor, roleCode);
+    await protectLastOwner(tx, actor, current.id, roleCode, input.status);
+
+    let membershipChanged = false;
+    const activeMembership = current.teamMemberships[0] ?? null;
+    if (input.userType === "TEAM_PWA") {
+      await scopedActiveEmployee(tx, actor, input.salaryEmployeeId!);
+      if (activeMembership?.salaryEmployeeId !== input.salaryEmployeeId) {
+        if (activeMembership) await tx.teamMembership.update({ where: { id: activeMembership.id }, data: { status: "INACTIVE", effectiveUntil: new Date() } });
+        await tx.teamMembership.create({ data: { tenantId: actor.tenantId, outletId: actor.outletId, userId: current.id, salaryEmployeeId: input.salaryEmployeeId! } });
+        membershipChanged = true;
+      }
+    } else if (activeMembership) {
+      await tx.teamMembership.update({ where: { id: activeMembership.id }, data: { status: "INACTIVE", effectiveUntil: new Date() } });
+      membershipChanged = true;
     }
-    const user = await tx.user.update({ where: { id: current.id }, data: { name: input.name, email: input.email, status: input.status }, select: { id: true, name: true, email: true, status: true } });
-    await tx.userRole.deleteMany({ where: { userId: current.id, role: { tenantId: actor.tenantId } } });
-    await tx.userRole.create({ data: { userId: current.id, roleId: role.id } });
-    await audit(tx, actor, "UPDATE", "SETTINGS_USER", current.id, ["name", "email", "status", "role"]);
-    return { ...user, role: role.code };
-  });
+
+    const previousRole = current.roles[0]?.role.code ?? null;
+    await tx.user.update({ where: { id: current.id }, data: { name: input.name, email: input.email.toLowerCase(), status: input.status } });
+    if (previousRole !== role.code) {
+      await tx.userRole.deleteMany({ where: { userId: current.id, role: { tenantId: actor.tenantId } } });
+      await tx.userRole.create({ data: { userId: current.id, roleId: role.id } });
+    }
+    if (input.status !== "ACTIVE" || previousRole !== role.code || membershipChanged) await tx.userSession.deleteMany({ where: { userId: current.id } });
+    await audit(tx, actor, "UPDATE", "SETTINGS_USER", current.id, ["name", "email", "status", "role", ...(membershipChanged ? ["teamMembership"] : [])]);
+    return tx.user.findUniqueOrThrow({ where: { id: current.id }, select: settingsUserSelect });
+  }, { isolationLevel: "Serializable" });
+}
+
+export async function setSettingsUserStatus(actor: SettingsActor, userId: string, status: "ACTIVE" | "SUSPENDED") {
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findFirst({
+      where: { id: userId, tenantId: actor.tenantId, outletId: actor.outletId },
+      include: { roles: { include: { role: true } }, teamMemberships: { where: { status: "ACTIVE" }, select: { id: true } } },
+    });
+    if (!user) throw new SettingsError("USER_NOT_FOUND", 404);
+    const roleCode = user.roles[0]?.role.code ?? "";
+    await protectLastOwner(tx, actor, user.id, roleCode, status);
+    if (status === "ACTIVE" && roleCode === "TEAM" && user.teamMemberships.length !== 1) throw new SettingsError("TEAM_MEMBERSHIP_REQUIRED", 409);
+    await tx.user.update({ where: { id: user.id }, data: { status } });
+    if (status !== "ACTIVE") await tx.userSession.deleteMany({ where: { userId: user.id } });
+    await audit(tx, actor, "UPDATE", "SETTINGS_USER", user.id, ["status"]);
+    return { success: true, status };
+  }, { isolationLevel: "Serializable" });
 }
 
 export async function resetSettingsUserPassword(actor: SettingsActor, userId: string, password: string) {
@@ -65,7 +178,8 @@ export async function resetSettingsUserPassword(actor: SettingsActor, userId: st
     const user = await tx.user.findFirst({ where: { id: userId, tenantId: actor.tenantId, outletId: actor.outletId }, select: { id: true } });
     if (!user) throw new SettingsError("USER_NOT_FOUND", 404);
     await tx.user.update({ where: { id: user.id }, data: { passwordHash } });
-    await audit(tx, actor, "UPDATE", "SETTINGS_USER_PASSWORD", user.id, ["password"]);
+    await tx.userSession.deleteMany({ where: { userId: user.id } });
+    await audit(tx, actor, "UPDATE", "SETTINGS_USER_CREDENTIAL", user.id, ["credentials"]);
     return { success: true };
   });
 }
