@@ -4,10 +4,12 @@ import { canAccessSettings } from "./settings.authorization";
 import { canonicalizeFinancialCategory, normalizeFinancialCategory, sanitizeAuditMetadata } from "./settings.service";
 
 const source = readFileSync(new URL("./settings.service.ts", import.meta.url), "utf8");
+const maintenanceSource = readFileSync(new URL("./settings.maintenance.service.ts", import.meta.url), "utf8");
 const schema = readFileSync(new URL("../../../prisma/schema.prisma", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../../../prisma/migrations/20260803000400_add_settings_foundation/migration.sql", import.meta.url), "utf8");
 const teamMigration = readFileSync(new URL("../../../prisma/migrations/20260803000500_add_team_membership/migration.sql", import.meta.url), "utf8");
 const usersUi = readFileSync(new URL("../../components/settings/settings-users.tsx", import.meta.url), "utf8");
+const maintenanceUi = readFileSync(new URL("../../components/settings/settings-maintenance.tsx", import.meta.url), "utf8");
 
 describe("Settings foundation", () => {
   it("allows only OWNER or ADMIN", () => {
@@ -53,14 +55,12 @@ describe("Settings foundation", () => {
     expect(source).not.toContain("process.env.JFS_AUTH");
   });
 
-  it("makes maintenance preview and simulation read-only", () => {
-    const maintenance = source.slice(source.indexOf("export async function getMaintenancePreview"));
-    expect(maintenance).not.toMatch(/\.(delete|deleteMany|update|updateMany|create|createMany)\(/);
-    expect(maintenance).not.toContain("$executeRaw");
-    expect(maintenance).toContain("writesPerformed: 0");
-    expect(maintenance).toContain("Tidak ada cache aplikasi yang dapat dibersihkan");
-    expect(maintenance).toContain("salaryPublicationShareExpired");
-    expect(maintenance).toContain("salaryPublicationShareRevoked");
+  it("keeps Maintenance reset isolated and free of dangerous raw SQL", () => {
+    expect(maintenanceSource).not.toMatch(/\$(executeRaw|queryRaw)/);
+    expect(maintenanceSource).not.toMatch(/TRUNCATE|DROP\s+TABLE|DELETE\s+FROM/i);
+    expect(maintenanceSource).toContain('status: "VOID"');
+    expect(maintenanceSource).toContain('entityType: "MAINTENANCE_RESET_EXECUTED"');
+    expect(maintenanceSource).toContain('isolationLevel: "Serializable"');
   });
 
   it("uses a non-destructive additive migration", () => {
@@ -85,5 +85,18 @@ describe("Settings foundation", () => {
     expect(usersUi).toContain('role="dialog"');
     expect(usersUi).not.toMatch(/window\.(alert|confirm|prompt)|\bconfirm\(/);
     expect(usersUi).not.toContain("passwordHash");
+  });
+
+  it("uses the Admin label while preserving the ADMIN_WEB contract", () => {
+    expect(usersUi).toContain('<option value="ADMIN_WEB">Admin</option>');
+    expect(usersUi).not.toContain('>Admin Web<');
+    expect(usersUi).toContain('"ADMIN_WEB"');
+  });
+
+  it("renders Maintenance cards and custom dialogs without raw JSON output", () => {
+    for (const label of ["Lihat Detail", "Reset Data", "Alasan reset", "Ketik RESET", "Tidak ada data"]) expect(maintenanceUi).toContain(label);
+    expect(maintenanceUi).toContain('role="dialog"');
+    expect(maintenanceUi).not.toContain("<pre");
+    expect(maintenanceUi).not.toMatch(/window\.(alert|confirm|prompt)/);
   });
 });

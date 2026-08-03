@@ -10,7 +10,7 @@ const routes = [
   "./finance/banks/[id]/route.ts", "./finance/categories/route.ts",
   "./finance/categories/[id]/route.ts", "./integrations/route.ts",
   "./integrations/test/route.ts", "./maintenance/preview/route.ts",
-  "./maintenance/simulate/route.ts", "./audit-logs/route.ts",
+  "./maintenance/simulate/route.ts", "./maintenance/reset/route.ts", "./audit-logs/route.ts",
 ];
 
 describe("Settings API contracts", () => {
