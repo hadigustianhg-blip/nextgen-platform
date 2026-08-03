@@ -5,6 +5,8 @@ import {
   createHash,
   randomBytes,
 } from "node:crypto";
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db/prisma";
 import { SalaryError } from "./salary.api";
 import {
   getSalaryRecapEmployeePublication,
@@ -14,6 +16,7 @@ import type { SalaryScope } from "./salary.service";
 const TOKEN_VERSION = "v1";
 const TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const TOKEN_CONTEXT = "nextgen:salary-publication-share:v1";
+const SHARE_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
 type SharePayload = {
   closingId: string;
@@ -131,16 +134,14 @@ function validatedOrigin(value: string, production: boolean) {
 }
 
 export function resolveSalaryPublicBaseUrl(
-  requestUrl: string,
   environment: NodeJS.ProcessEnv = process.env,
 ) {
   const configured = environment.SALARY_PUBLIC_BASE_URL?.trim() ||
-    environment.NEXT_PUBLIC_APP_URL?.trim() ||
     environment.APP_URL?.trim();
-  const railwayDomain = environment.RAILWAY_PUBLIC_DOMAIN?.trim();
-  const candidate = configured ||
-    (railwayDomain ? `https://${railwayDomain}` : new URL(requestUrl).origin);
-  return validatedOrigin(candidate, environment.NODE_ENV === "production");
+  if (!configured) {
+    throw new SalaryError("SALARY_SHARE_BASE_URL_INVALID", 503);
+  }
+  return validatedOrigin(configured, environment.NODE_ENV === "production");
 }
 
 export function formatSalaryWhatsappPeriod(start: string, end: string) {
@@ -184,57 +185,155 @@ export function buildSalaryWhatsappMessage(input: {
   ].join("\n");
 }
 
+export function generateSalaryPublicationShareCode() {
+  const bytes = randomBytes(6);
+  return `SLP-${Array.from(bytes, (byte) =>
+    SHARE_CODE_ALPHABET[byte % SHARE_CODE_ALPHABET.length]
+  ).join("")}`;
+}
+
+type ShareRecord = {
+  id: string;
+  shareCode: string;
+  createdAt: Date;
+  expiresAt: Date;
+};
+
+async function findActiveShare(input: {
+  scope: SalaryScope;
+  closingId: string;
+  closingEmployeeId: string;
+  now: Date;
+}): Promise<ShareRecord | null> {
+  return prisma.salaryPublicationShare.findFirst({
+    where: {
+      tenantId: input.scope.tenantId,
+      outletId: input.scope.outletId,
+      salaryClosingId: input.closingId,
+      salaryClosingEmployeeId: input.closingEmployeeId,
+      revokedAt: null,
+      expiresAt: { gt: input.now },
+    },
+    select: { id: true, shareCode: true, createdAt: true, expiresAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+async function findOrCreateShare(input: {
+  scope: SalaryScope;
+  closingId: string;
+  closingEmployeeId: string;
+  createdByUserId: string;
+  now: Date;
+  expiresAt: Date;
+}) {
+  const existing = await findActiveShare(input);
+  if (existing) return existing;
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const active = await tx.salaryPublicationShare.findFirst({
+          where: {
+            tenantId: input.scope.tenantId,
+            outletId: input.scope.outletId,
+            salaryClosingId: input.closingId,
+            salaryClosingEmployeeId: input.closingEmployeeId,
+            revokedAt: null,
+            expiresAt: { gt: input.now },
+          },
+          select: {
+            id: true,
+            shareCode: true,
+            createdAt: true,
+            expiresAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+        });
+        if (active) return active;
+        await tx.salaryPublicationShare.updateMany({
+          where: {
+            activeKey: input.closingEmployeeId,
+            OR: [
+              { expiresAt: { lte: input.now } },
+              { revokedAt: { not: null } },
+            ],
+          },
+          data: { activeKey: null },
+        });
+        return tx.salaryPublicationShare.create({
+          data: {
+            shareCode: generateSalaryPublicationShareCode(),
+            activeKey: input.closingEmployeeId,
+            tenantId: input.scope.tenantId,
+            outletId: input.scope.outletId,
+            salaryClosingId: input.closingId,
+            salaryClosingEmployeeId: input.closingEmployeeId,
+            expiresAt: input.expiresAt,
+            createdByUserId: input.createdByUserId,
+          },
+          select: {
+            id: true,
+            shareCode: true,
+            createdAt: true,
+            expiresAt: true,
+          },
+        });
+      });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) ||
+        error.code !== "P2002") throw error;
+      const active = await findActiveShare(input);
+      if (active) return active;
+    }
+  }
+  throw new SalaryError("SALARY_SHARE_CREATE_FAILED", 500);
+}
+
 export async function createSalaryPublicationShare(input: {
   scope: SalaryScope;
   closingId: string;
   closingEmployeeId: string;
-  requestUrl: string;
+  createdByUserId: string;
 }, options: ShareOptions & { environment?: NodeJS.ProcessEnv } = {}) {
+  const baseUrl = resolveSalaryPublicBaseUrl(options.environment);
   const publication = await getSalaryRecapEmployeePublication(
     input.scope,
     input.closingId,
     input.closingEmployeeId,
   );
-  const token = createSalaryPublicationShareToken({
-    closingId: input.closingId,
-    closingEmployeeId: input.closingEmployeeId,
-    tenantId: input.scope.tenantId,
-    outletId: input.scope.outletId,
-  }, options);
-  const baseUrl = resolveSalaryPublicBaseUrl(
-    input.requestUrl,
-    options.environment,
-  );
+  const now = options.now ?? new Date();
+  const expiresAt = new Date(now.getTime() +
+    (options.ttlSeconds ?? TOKEN_TTL_SECONDS) * 1000);
+  const share = await findOrCreateShare({
+    ...input,
+    now,
+    expiresAt,
+  });
+  const publicUrl = new URL(`/s/${share.shareCode}`, baseUrl).toString();
   return {
-    publicUrl: new URL(`/salary-card/share/${token}`, baseUrl).toString(),
-    expiresAt: new Date(
-      (Math.floor((options.now ?? new Date()).getTime() / 1000) +
-        (options.ttlSeconds ?? TOKEN_TTL_SECONDS)) * 1000,
-    ),
+    shareCode: share.shareCode,
+    publicUrl,
+    expiresAt: share.expiresAt,
     message: buildSalaryWhatsappMessage({
       employeeName: publication.employee.name,
       period: formatSalaryWhatsappPeriod(
         publication.closing.periodStart.toISOString(),
         publication.closing.periodEnd.toISOString(),
       ),
-      publicUrl: new URL(`/salary-card/share/${token}`, baseUrl).toString(),
+      publicUrl,
     }),
   };
 }
 
 const decimalString = (value: { toString(): string }) => value.toString();
 
-export async function getPublicSalaryCardByToken(
-  token: string,
-  options: Pick<ShareOptions, "now" | "secret"> = {},
+function publicSalaryCard(
+  publication: Awaited<ReturnType<typeof getSalaryRecapEmployeePublication>>,
+  publishedAt: Date,
 ) {
-  const payload = verifySalaryPublicationShareToken(token, options);
-  const publication = await getSalaryRecapEmployeePublication({
-    tenantId: payload.tenantId,
-    outletId: payload.outletId,
-  }, payload.closingId, payload.closingEmployeeId);
   return {
-    publishedAt: new Date(payload.issuedAt * 1000).toISOString(),
+    publishedAt: publishedAt.toISOString(),
     closing: {
       closingNumber: publication.closing.closingNumber,
       periodStart: publication.closing.periodStart.toISOString(),
@@ -277,6 +376,54 @@ export async function getPublicSalaryCardByToken(
       netSalary: decimalString(publication.totals.netSalary),
     },
   };
+}
+
+export async function getPublicSalaryCardByToken(
+  token: string,
+  options: Pick<ShareOptions, "now" | "secret"> = {},
+) {
+  const payload = verifySalaryPublicationShareToken(token, options);
+  const publication = await getSalaryRecapEmployeePublication({
+    tenantId: payload.tenantId,
+    outletId: payload.outletId,
+  }, payload.closingId, payload.closingEmployeeId);
+  return publicSalaryCard(publication, new Date(payload.issuedAt * 1000));
+}
+
+export async function getPublicSalaryCardByShareCode(
+  shareCode: string,
+  now = new Date(),
+) {
+  if (!/^SLP-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/.test(shareCode)) {
+    throw new SalaryError("SALARY_SHARE_INVALID", 404);
+  }
+  const share = await prisma.salaryPublicationShare.findUnique({
+    where: { shareCode },
+    select: {
+      id: true,
+      tenantId: true,
+      outletId: true,
+      salaryClosingId: true,
+      salaryClosingEmployeeId: true,
+      createdAt: true,
+      expiresAt: true,
+      revokedAt: true,
+    },
+  });
+  if (!share) throw new SalaryError("SALARY_SHARE_INVALID", 404);
+  if (share.revokedAt || share.expiresAt <= now) {
+    throw new SalaryError("SALARY_SHARE_EXPIRED", 410);
+  }
+  const publication = await getSalaryRecapEmployeePublication({
+    tenantId: share.tenantId,
+    outletId: share.outletId,
+  }, share.salaryClosingId, share.salaryClosingEmployeeId);
+  await prisma.salaryPublicationShare.update({
+    where: { id: share.id },
+    data: { lastAccessAt: now },
+    select: { id: true },
+  });
+  return publicSalaryCard(publication, share.createdAt);
 }
 
 export const SALARY_PUBLICATION_SHARE_TTL_DAYS = 30;

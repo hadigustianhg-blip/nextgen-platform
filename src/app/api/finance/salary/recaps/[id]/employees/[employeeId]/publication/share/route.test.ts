@@ -38,7 +38,8 @@ beforeEach(() => {
   mocks.getSession.mockResolvedValue(session);
   mocks.canRead.mockReturnValue(true);
   mocks.createShare.mockResolvedValue({
-    publicUrl: "https://app.example.test/salary-card/share/token",
+    shareCode: "SLP-7X4A9K",
+    publicUrl: "https://app.example.test/s/SLP-7X4A9K",
     message: "Halo Bpk/Ibu YUDI MULYADI",
     expiresAt: new Date("2026-09-02T00:00:00.000Z"),
   });
@@ -67,8 +68,12 @@ describe("POST Salary publication share", () => {
       scope: { tenantId: "tenant-1", outletId: "outlet-1" },
       closingId: "closing-1",
       closingEmployeeId: "employee-yudi",
-      requestUrl: "https://app.example.test/api/share",
+      createdByUserId: "user-1",
     });
-    expect(JSON.stringify(await response.json())).not.toContain("tenant-1");
+    const body = await response.json();
+    expect(body.data.publicUrl).toBe(
+      "https://app.example.test/s/SLP-7X4A9K",
+    );
+    expect(JSON.stringify(body)).not.toContain("tenant-1");
   });
 });

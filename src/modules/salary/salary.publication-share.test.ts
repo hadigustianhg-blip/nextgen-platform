@@ -2,9 +2,27 @@ import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-const mocks = vi.hoisted(() => ({ publication: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  publication: vi.fn(),
+  shareFindFirst: vi.fn(),
+  shareFindUnique: vi.fn(),
+  shareCreate: vi.fn(),
+  shareUpdate: vi.fn(),
+  shareUpdateMany: vi.fn(),
+  transaction: vi.fn(),
+}));
 vi.mock("./salary.publication.service", () => ({
   getSalaryRecapEmployeePublication: mocks.publication,
+}));
+vi.mock("@/lib/db/prisma", () => ({
+  prisma: {
+    salaryPublicationShare: {
+      findFirst: mocks.shareFindFirst,
+      findUnique: mocks.shareFindUnique,
+      update: mocks.shareUpdate,
+    },
+    $transaction: mocks.transaction,
+  },
 }));
 
 import {
@@ -12,7 +30,9 @@ import {
   createSalaryPublicationShare,
   createSalaryPublicationShareToken,
   formatSalaryWhatsappPeriod,
+  generateSalaryPublicationShareCode,
   getPublicSalaryCardByToken,
+  getPublicSalaryCardByShareCode,
   resolveSalaryPublicBaseUrl,
   verifySalaryPublicationShareToken,
 } from "./salary.publication-share.service";
@@ -66,6 +86,23 @@ const finalPublication = () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.publication.mockResolvedValue(finalPublication());
+  mocks.shareFindFirst.mockResolvedValue(null);
+  mocks.shareFindUnique.mockResolvedValue(null);
+  mocks.shareUpdate.mockResolvedValue({ id: "share-1" });
+  mocks.shareUpdateMany.mockResolvedValue({ count: 0 });
+  mocks.shareCreate.mockResolvedValue({
+    id: "share-1",
+    shareCode: "SLP-7X4A9K",
+    createdAt: new Date("2026-08-03T00:00:00.000Z"),
+    expiresAt: new Date("2026-09-02T00:00:00.000Z"),
+  });
+  mocks.transaction.mockImplementation(async (callback) => callback({
+    salaryPublicationShare: {
+      findFirst: mocks.shareFindFirst,
+      updateMany: mocks.shareUpdateMany,
+      create: mocks.shareCreate,
+    },
+  }));
 });
 
 describe("Salary publication secure share", () => {
@@ -149,7 +186,7 @@ describe("Salary publication secure share", () => {
     const message = buildSalaryWhatsappMessage({
       employeeName: "YUDI MULYADI",
       period: "Juli 2026",
-      publicUrl: "https://app.example.test/salary-card/share/token",
+      publicUrl: "https://app.example.test/s/SLP-7X4A9K",
     });
     expect(message).toContain("Halo Bpk/Ibu YUDI MULYADI,");
     expect(message).toContain("Slip Gaji periode Juli 2026.");
@@ -164,18 +201,16 @@ describe("Salary publication secure share", () => {
       scope: { tenantId: "tenant-1", outletId: "outlet-1" },
       closingId: "closing-yudi",
       closingEmployeeId: "closing-employee-yudi",
-      requestUrl: "https://ignored.example.test/api/share",
+      createdByUserId: "user-1",
     }, {
-      secret,
       now: new Date("2026-08-03T00:00:00.000Z"),
       environment: {
         NODE_ENV: "production",
         SALARY_PUBLIC_BASE_URL: "https://salary.example.test/dashboard",
       },
     });
-    expect(result.publicUrl).toMatch(
-      /^https:\/\/salary\.example\.test\/salary-card\/share\/v1\./,
-    );
+    expect(result.shareCode).toBe("SLP-7X4A9K");
+    expect(result.publicUrl).toBe("https://salary.example.test/s/SLP-7X4A9K");
     expect(result.expiresAt.toISOString()).toBe("2026-09-02T00:00:00.000Z");
     expect(result.message).toContain("YUDI MULYADI");
     expect(result.message).not.toContain("Rp");
@@ -183,18 +218,94 @@ describe("Salary publication secure share", () => {
       tenantId: "tenant-1",
       outletId: "outlet-1",
     }, "closing-yudi", "closing-employee-yudi");
+    expect(mocks.shareCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        activeKey: "closing-employee-yudi",
+        createdByUserId: "user-1",
+        salaryClosingEmployeeId: "closing-employee-yudi",
+      }),
+    }));
   });
 
-  it("rejects unsafe production origins and never hardcodes a deployment domain", () => {
-    expect(() => resolveSalaryPublicBaseUrl(
-      "http://localhost:3000/api/share",
-      { NODE_ENV: "production" },
-    )).toThrow(expect.objectContaining({
+  it("reuses an active share instead of creating a duplicate", async () => {
+    mocks.shareFindFirst.mockResolvedValueOnce({
+      id: "share-existing",
+      shareCode: "SLP-8M3KQ2",
+      createdAt: new Date("2026-08-03T00:00:00.000Z"),
+      expiresAt: new Date("2026-09-02T00:00:00.000Z"),
+    });
+    const result = await createSalaryPublicationShare({
+      scope: { tenantId: "tenant-1", outletId: "outlet-1" },
+      closingId: "closing-yudi",
+      closingEmployeeId: "closing-employee-yudi",
+      createdByUserId: "user-1",
+    }, {
+      now: new Date("2026-08-04T00:00:00.000Z"),
+      environment: {
+        APP_URL: "https://app.example.test",
+        NODE_ENV: "test",
+      },
+    });
+    expect(result.publicUrl).toBe("https://app.example.test/s/SLP-8M3KQ2");
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.shareCreate).not.toHaveBeenCalled();
+  });
+
+  it("opens a valid short share and rejects invalid, expired, or revoked shares", async () => {
+    const active = {
+      id: "share-1",
+      tenantId: "tenant-1",
+      outletId: "outlet-1",
+      salaryClosingId: "closing-yudi",
+      salaryClosingEmployeeId: "closing-employee-yudi",
+      createdAt: new Date("2026-08-03T00:00:00.000Z"),
+      expiresAt: new Date("2026-09-02T00:00:00.000Z"),
+      revokedAt: null,
+    };
+    mocks.shareFindUnique.mockResolvedValueOnce(active);
+    const card = await getPublicSalaryCardByShareCode(
+      "SLP-7X4A9K",
+      new Date("2026-08-04T00:00:00.000Z"),
+    );
+    expect(card.employee.name).toBe("YUDI MULYADI");
+    expect(mocks.publication).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      outletId: "outlet-1",
+    }, "closing-yudi", "closing-employee-yudi");
+    expect(mocks.shareUpdate).toHaveBeenCalledWith({
+      where: { id: "share-1" },
+      data: { lastAccessAt: new Date("2026-08-04T00:00:00.000Z") },
+      select: { id: true },
+    });
+
+    await expect(getPublicSalaryCardByShareCode("invalid"))
+      .rejects.toMatchObject({ code: "SALARY_SHARE_INVALID" });
+    mocks.shareFindUnique.mockResolvedValueOnce({
+      ...active,
+      expiresAt: new Date("2026-08-03T00:00:00.000Z"),
+    });
+    await expect(getPublicSalaryCardByShareCode(
+      "SLP-7X4A9K",
+      new Date("2026-08-04T00:00:00.000Z"),
+    )).rejects.toMatchObject({ code: "SALARY_SHARE_EXPIRED" });
+    mocks.shareFindUnique.mockResolvedValueOnce({
+      ...active,
+      revokedAt: new Date("2026-08-04T00:00:00.000Z"),
+    });
+    await expect(getPublicSalaryCardByShareCode("SLP-7X4A9K"))
+      .rejects.toMatchObject({ code: "SALARY_SHARE_EXPIRED" });
+  });
+
+  it("creates short codes and requires SALARY_PUBLIC_BASE_URL or APP_URL", () => {
+    expect(generateSalaryPublicationShareCode())
+      .toMatch(/^SLP-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{6}$/);
+    expect(() => resolveSalaryPublicBaseUrl({ NODE_ENV: "production" }))
+      .toThrow(expect.objectContaining({
       code: "SALARY_SHARE_BASE_URL_INVALID",
     }));
-    expect(resolveSalaryPublicBaseUrl(
-      "http://localhost:3000/api/share",
-      { NODE_ENV: "development" },
-    )).toBe("http://localhost:3000");
+    expect(resolveSalaryPublicBaseUrl({
+      NODE_ENV: "production",
+      APP_URL: "https://app.example.test/path",
+    })).toBe("https://app.example.test");
   });
 });

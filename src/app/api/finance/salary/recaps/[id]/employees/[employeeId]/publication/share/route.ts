@@ -15,7 +15,7 @@ type Context = {
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 
-export async function POST(request: Request, context: Context) {
+export async function POST(_request: Request, context: Context) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, {
@@ -43,7 +43,7 @@ export async function POST(request: Request, context: Context) {
         scope,
         closingId: id,
         closingEmployeeId: employeeId,
-        requestUrl: request.url,
+        createdByUserId: session.userId,
       }),
     }, { headers: noStore });
   } catch (error) {
