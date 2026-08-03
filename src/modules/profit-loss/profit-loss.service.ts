@@ -80,7 +80,10 @@ export async function getProfitLoss(scope: Scope, query: ProfitLossQuery) {
         startDate: query.startDate,
         endDate: query.endDate,
       }),
-      prisma.outlet.findFirst({ where: scope, select: { code: true } }),
+      prisma.outlet.findFirst({
+        where: { tenantId: scope.tenantId, id: scope.outletId },
+        select: { code: true },
+      }),
     ]);
 
   const rows: CanonicalRow[] = jfs.map((row) => ({

@@ -33,7 +33,25 @@ export function ProfitLossClient({ canExport, canManage }: { canExport: boolean;
   const query = useMemo(() => new URLSearchParams({ startDate, endDate, search, sort, page: String(page), pageSize: "25", ...(direction ? { direction } : {}), ...(source ? { source } : {}), ...(category ? { category } : {}) }), [startDate, endDate, search, sort, page, direction, source, category]);
   const load = useCallback(async () => {
     setLoading(true); setError("");
-    try { const response = await fetch(`/api/finance/profit-loss?${query}`, { cache: "no-store" }); const body = await response.json(); if (!response.ok) throw new Error(body.error?.code || "Data Profit Loss gagal dimuat."); setResult(body.data); }
+    try {
+      const response = await fetch(`/api/finance/profit-loss?${query}`, { cache: "no-store" });
+      const responseText = await response.text();
+      let body: { data?: Result; error?: { code?: string; message?: string } };
+      try {
+        body = JSON.parse(responseText) as typeof body;
+      } catch {
+        console.error("[PROFIT_LOSS_RESPONSE_INVALID]", {
+          status: response.status,
+          body: responseText,
+        });
+        throw new Error(`Response Profit Loss tidak valid (HTTP ${response.status}).`);
+      }
+      if (!response.ok) {
+        throw new Error(body.error?.message || body.error?.code || "Data Profit Loss gagal dimuat.");
+      }
+      if (!body.data) throw new Error("Response Profit Loss tidak memiliki data.");
+      setResult(body.data);
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Data Profit Loss gagal dimuat."); }
     finally { setLoading(false); }
   }, [query]);

@@ -73,6 +73,10 @@ describe("Profit Loss canonical aggregator", () => {
     expect(result.daily).toHaveLength(2);
     expect(result.daily[1]).toMatchObject({ date: "2026-08-02", grossSalary: "100", kasbon: "10", salaryNet: "90" });
     expect(mocks.salary).toHaveBeenCalledTimes(1);
+    expect(mocks.outlet).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", id: "outlet-1" },
+      select: { code: true },
+    });
   });
 
   it("keeps source rows read-only and exposes only manual/adjustment as editable", async () => {
