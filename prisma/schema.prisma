@@ -28,6 +28,16 @@ enum AuditAction {
   DELETE
 }
 
+enum ProfitLossDirection {
+  INCOME
+  EXPENSE
+}
+
+enum ProfitLossEntryStatus {
+  ACTIVE
+  VOID
+}
+
 enum RawSyncStatus {
   FETCHED
   NORMALIZED
@@ -259,6 +269,8 @@ model Tenant {
   jfsCashflowRecords         JfsCashflowRecord[]
   jfsCashflowSyncRuns        JfsCashflowSyncRun[]
   jfsCashflowSyncLocks       JfsCashflowSyncLock[]
+  profitLossManualEntries    ProfitLossManualEntry[]
+  profitLossAdjustments      ProfitLossAdjustment[]
 }
 
 model Outlet {
@@ -313,6 +325,8 @@ model Outlet {
   jfsCashflowRecords         JfsCashflowRecord[]
   jfsCashflowSyncRuns        JfsCashflowSyncRun[]
   jfsCashflowSyncLocks       JfsCashflowSyncLock[]
+  profitLossManualEntries    ProfitLossManualEntry[]
+  profitLossAdjustments      ProfitLossAdjustment[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -367,6 +381,10 @@ model User {
   salaryClosingsVoided                SalaryClosing[]             @relation("SalaryClosingVoidedBy")
   salaryPublicationSharesCreated      SalaryPublicationShare[]    @relation("SalaryPublicationShareCreatedBy")
   salaryPublicationSharesPublished    SalaryPublicationShare[]    @relation("SalaryPublicationSharePublishedBy")
+  profitLossManualEntriesCreated      ProfitLossManualEntry[]     @relation("ProfitLossManualCreatedBy")
+  profitLossManualEntriesVoided       ProfitLossManualEntry[]     @relation("ProfitLossManualVoidedBy")
+  profitLossAdjustmentsCreated        ProfitLossAdjustment[]      @relation("ProfitLossAdjustmentCreatedBy")
+  profitLossAdjustmentsVoided         ProfitLossAdjustment[]      @relation("ProfitLossAdjustmentVoidedBy")
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -565,6 +583,58 @@ model JfsCashflowSyncLock {
 
   @@id([tenantId, outletId, businessDate])
   @@index([requestId])
+}
+
+model ProfitLossManualEntry {
+  id              String                @id @default(uuid()) @db.Uuid
+  tenantId        String                @db.Uuid
+  outletId        String                @db.Uuid
+  entryDate       DateTime              @db.Date
+  entryType       ProfitLossDirection
+  category        String
+  description     String
+  amount          Decimal               @db.Decimal(18, 2)
+  reference       String?
+  status          ProfitLossEntryStatus @default(ACTIVE)
+  createdByUserId String                @db.Uuid
+  voidedAt        DateTime?             @db.Timestamptz(3)
+  voidedByUserId  String?               @db.Uuid
+  voidReason      String?
+  createdAt       DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime              @updatedAt @db.Timestamptz(3)
+  tenant          Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet          Outlet                @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  createdBy       User                  @relation("ProfitLossManualCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  voidedBy        User?                 @relation("ProfitLossManualVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, outletId, entryDate])
+  @@index([tenantId, outletId, entryType, status])
+}
+
+model ProfitLossAdjustment {
+  id              String                @id @default(uuid()) @db.Uuid
+  tenantId        String                @db.Uuid
+  outletId        String                @db.Uuid
+  adjustmentDate  DateTime              @db.Date
+  direction       ProfitLossDirection
+  category        String
+  description     String
+  amount          Decimal               @db.Decimal(18, 2)
+  reason          String
+  status          ProfitLossEntryStatus @default(ACTIVE)
+  createdByUserId String                @db.Uuid
+  voidedAt        DateTime?             @db.Timestamptz(3)
+  voidedByUserId  String?               @db.Uuid
+  voidReason      String?
+  createdAt       DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime              @updatedAt @db.Timestamptz(3)
+  tenant          Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet          Outlet                @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  createdBy       User                  @relation("ProfitLossAdjustmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  voidedBy        User?                 @relation("ProfitLossAdjustmentVoidedBy", fields: [voidedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, outletId, adjustmentDate])
+  @@index([tenantId, outletId, direction, status])
 }
 
 model RawPickup {

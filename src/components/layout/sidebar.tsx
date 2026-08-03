@@ -415,7 +415,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
                 active={pathname.startsWith("/dashboard/finance/rincian-operasional")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<ReceiptText size={17}/>} />
-              <SidebarChild href="/dashboard/finance/cashflow-jfs" label="Cashflow JFS"
+              <SidebarChild href="/dashboard/finance/cashflow-jfs" label="Profit Loss"
                 active={pathname.startsWith("/dashboard/finance/cashflow-jfs")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<WalletCards size={17}/>} />

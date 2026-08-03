@@ -157,9 +157,10 @@ describe("pickup navigation", () => {
     );
   });
 
-  it("exposes Cashflow JFS under persistent Finance & HR", async () => {
+  it("exposes Profit Loss on the compatible Cashflow JFS route", async () => {
     const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
     expect(source).toContain('href="/dashboard/finance/cashflow-jfs"');
+    expect(source).toContain('label="Profit Loss"');
     expect(source).toContain(
       'active={pathname.startsWith("/dashboard/finance/cashflow-jfs")}',
     );
