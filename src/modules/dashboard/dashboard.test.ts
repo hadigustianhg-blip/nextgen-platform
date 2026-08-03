@@ -92,12 +92,13 @@ describe("Operational executive dashboard", () => {
     expect(dashboardOverviewQuerySchema.parse({})).toHaveProperty("startDate");
   });
 
-  it("is read-only and uses donut only for three percentage/composition metrics", async () => {
+  it("is read-only and follows the refined dashboard visualization contract", async () => {
     const service = await readFile(new URL("./dashboard.service.ts", import.meta.url), "utf8");
     const client = await readFile(new URL("../../components/dashboard/dashboard-overview-client.tsx", import.meta.url), "utf8");
     expect(service).not.toMatch(/prisma\.[A-Za-z]+\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/);
     expect(service).not.toContain("prisma.$transaction");
-    expect(client.match(/<Donut\s/g)).toHaveLength(3);
+    expect(client.match(/<Donut\s/g)).toHaveLength(1);
+    expect(client.match(/variant="bar"/g)).toHaveLength(3);
     expect(client).toContain('title="Delivery Settlement"');
     expect(client).toContain('title="Operational Settlement"');
     expect(client).toContain('title="Payment Settlement"');

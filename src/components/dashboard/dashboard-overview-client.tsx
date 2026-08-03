@@ -3,12 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
   Line,
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -81,11 +84,15 @@ function DashboardChart({
   series,
   kind = "number",
   target,
+  variant = "line",
+  compact = false,
 }: {
   rows: Array<Record<string, string | number>>;
   series: Series[];
   kind?: "number" | "money" | "percent" | "weight";
   target?: number;
+  variant?: "line" | "bar";
+  compact?: boolean;
 }) {
   if (rows.length === 0) return <EmptyChart />;
   const format = (value: unknown) => {
@@ -96,21 +103,34 @@ function DashboardChart({
     return number(parsed);
   };
   return (
-    <div className="h-72 w-full">
+    <div className={compact ? "h-40 w-full" : "h-72 w-full"}>
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={rows} margin={{ top: 12, right: 16, left: 4, bottom: 2 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-          <XAxis dataKey="date" tickFormatter={labelDate} tick={{ fontSize: 11, fill: "#64748b" }} />
-          <YAxis tickFormatter={(value) => kind === "money" ? `${Math.round(Number(value) / 1000)}k` : number(value)} tick={{ fontSize: 11, fill: "#94a3b8" }} />
-          <Tooltip formatter={(value, name) => [format(value), name]} labelFormatter={(value) => fullDate(String(value))} />
-          <Legend />
-          {series.map((item) => (
-            <Line key={item.key} type="monotone" dataKey={item.key} name={item.label} stroke={item.color} strokeWidth={2.5} dot={false} />
-          ))}
-          {target !== undefined && (
-            <Line type="linear" dataKey={() => target} name={`Target ${percent(target)}`} stroke="#f59e0b" strokeDasharray="6 5" dot={false} />
-          )}
-        </LineChart>
+        {variant === "bar" ? (
+          <BarChart data={rows} margin={{ top: 12, right: 12, left: 0, bottom: 2 }} barGap={4}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+            <XAxis dataKey="date" tickFormatter={labelDate} tick={{ fontSize: 11, fill: "#64748b" }} />
+            <YAxis tickFormatter={(value) => kind === "money" ? `${Math.round(Number(value) / 1000)}k` : number(value)} tick={{ fontSize: 11, fill: "#94a3b8" }} />
+            <Tooltip formatter={(value, name) => [format(value), name]} labelFormatter={(value) => fullDate(String(value))} cursor={{ fill: "#f8fafc" }} />
+            <Legend />
+            {series.map((item) => (
+              <Bar key={item.key} dataKey={item.key} name={item.label} fill={item.color} radius={[5, 5, 0, 0]} maxBarSize={34} />
+            ))}
+            {target !== undefined && (
+              <ReferenceLine y={target} name={`Target ${percent(target)}`} stroke="#94a3b8" strokeDasharray="6 5" />
+            )}
+          </BarChart>
+        ) : (
+          <LineChart data={rows} margin={{ top: 12, right: 16, left: 4, bottom: 2 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+            <XAxis dataKey="date" tickFormatter={labelDate} tick={{ fontSize: 11, fill: "#64748b" }} />
+            <YAxis tickFormatter={(value) => kind === "money" ? `${Math.round(Number(value) / 1000)}k` : number(value)} tick={{ fontSize: 11, fill: "#94a3b8" }} />
+            <Tooltip formatter={(value, name) => [format(value), name]} labelFormatter={(value) => fullDate(String(value))} />
+            <Legend />
+            {series.map((item) => (
+              <Line key={item.key} type="monotone" dataKey={item.key} name={item.label} stroke={item.color} strokeWidth={2.5} dot={false} />
+            ))}
+          </LineChart>
+        )}
       </ResponsiveContainer>
     </div>
   );
@@ -177,7 +197,7 @@ function SectionFrame({
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-4">
+    <section className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-950">{title}</h2>
@@ -328,23 +348,22 @@ export function DashboardOverviewClient({
 
       {error && <AppCard className="border-red-200 bg-red-50 p-4 text-sm text-red-800">{error}</AppCard>}
       {loading && !result ? <SkeletonDashboard /> : result && (
-        <div className={loading ? "space-y-10 opacity-70 transition" : "space-y-10 transition"}>
+        <div className={loading ? "space-y-14 opacity-70 transition" : "space-y-14 transition"}>
           <SectionFrame title="Monitoring Operations" description="Mirror Monitoring Daily dan Monthly." href="/dashboard/monitoring/monthly" section={result.monitoring}>
             {monitoring && <>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-                <MetricCard label="Achievement Delivery" value={percent(monitoring.summary.achievement)} note={`Target ${percent(monitoring.target)}`} />
-                <MetricCard label="Total TTD" value={number(monitoring.summary.totalTtd)} />
-                <MetricCard label="Pending" value={<span className="text-red-700">{number(monitoring.summary.totalPending)}</span>} />
-                <MetricCard label="Pickup Omset" value={money(monitoring.summary.pickupRevenue)} />
-                <MetricCard label="Total Berat Pickup" value={`${number(monitoring.summary.pickupWeight, 2)} kg`} />
-              </div>
-              <div className="grid gap-4 xl:grid-cols-[320px_1fr]">
-                <AppCard className="p-4"><Donut value={Math.min(100, monitoring.summary.achievement)} remaining={Math.max(0, 100 - monitoring.summary.achievement)} valueLabel="Achieved" remainingLabel="Remaining" center={percent(monitoring.summary.achievement)} /></AppCard>
-                <AppCard className="p-5">
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(360px,2fr)]">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <MetricCard label="Achievement Delivery" value={percent(monitoring.summary.achievement)} note={`Target ${percent(monitoring.target)}`} />
+                  <MetricCard label="Total TTD" value={number(monitoring.summary.totalTtd)} />
+                  <MetricCard label="Pending" value={<span className="text-red-700">{number(monitoring.summary.totalPending)}</span>} />
+                  <MetricCard label="Pickup Omset" value={money(monitoring.summary.pickupRevenue)} />
+                  <MetricCard label="Total Berat Pickup" value={`${number(monitoring.summary.pickupWeight, 2)} kg`} />
+                </div>
+                <AppCard className="p-5 lg:p-6">
                   <div className="mb-4 flex flex-wrap gap-2">
                     {Object.entries(monitoringCharts).map(([key, chart]) => <button key={key} type="button" onClick={() => setMonitoringChart(key)} className={`rounded-lg px-3 py-2 text-xs font-bold ${monitoringChart === key ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"}`}>{chart.label}</button>)}
                   </div>
-                  <DashboardChart rows={monitoringRows} series={activeMonitoringChart.series} kind={activeMonitoringChart.kind} target={"target" in activeMonitoringChart ? activeMonitoringChart.target : undefined} />
+                  <DashboardChart rows={monitoringRows} series={activeMonitoringChart.series} kind={activeMonitoringChart.kind} target={"target" in activeMonitoringChart ? activeMonitoringChart.target : undefined} variant="bar" />
                 </AppCard>
               </div>
             </>}
@@ -370,29 +389,36 @@ export function DashboardOverviewClient({
                 <MetricCard label="Pengeluaran Operasional" value={money(operational.summary.operationalExpense)} />
                 <MetricCard label="Belum Diterima" value={<span className="text-red-700">{money(operational.summary.outstanding)}</span>} note="Kewajiban yang belum diterima" noteTone="warning" />
               </div>
-              <AppCard className="p-5"><DashboardChart rows={operational.daily.map((row) => ({ ...row, cashReceived: Number(row.cashReceived), cashAvailable: Number(row.cashAvailable), operationalExpense: Number(row.operationalExpense) }))} kind="money" series={[{ key: "cashReceived", label: "Cash Diterima", color: "#2563eb" }, { key: "operationalExpense", label: "Pengeluaran", color: "#dc2626" }, { key: "cashAvailable", label: "Cash Tersedia", color: "#16a34a" }]} /></AppCard>
+              <AppCard className="p-5 lg:p-6"><DashboardChart rows={operational.daily.map((row) => ({ ...row, cashReceived: Number(row.cashReceived), cashAvailable: Number(row.cashAvailable), operationalExpense: Number(row.operationalExpense) }))} kind="money" variant="bar" series={[{ key: "cashReceived", label: "Cash Diterima", color: "#334155" }, { key: "operationalExpense", label: "Pengeluaran", color: "#b45309" }, { key: "cashAvailable", label: "Cash Tersedia", color: "#1d4ed8" }]} /></AppCard>
             </>}
           </SectionFrame>
 
-          <SectionFrame title="Payment Settlement" description="Posisi Cash On Hand dan histori harian existing." href="/dashboard/payment/settlement" section={result.paymentSettlement}>
-            {payment && <div className="grid gap-4 xl:grid-cols-[280px_1fr]"><MetricCard label="Cash On Hand" value={money(payment.cashOnHand)} note="Current-state Payment Settlement" /><AppCard className="p-5"><DashboardChart rows={payment.daily.map((row) => ({ date: row.date, cashOnHand: Number(row.cashOnHand) }))} kind="money" series={[{ key: "cashOnHand", label: "Cash On Hand", color: "#1d4ed8" }]} /></AppCard></div>}
-          </SectionFrame>
+          <div className="grid gap-10 xl:grid-cols-2 xl:gap-8">
+            <SectionFrame title="Payment Settlement" description="Posisi Cash On Hand saat ini." href="/dashboard/payment/settlement" section={result.paymentSettlement}>
+              {payment && <div className="max-w-xl"><MetricCard label="Cash On Hand" value={<span className="text-3xl">{money(payment.cashOnHand)}</span>} note="Current-state Payment Settlement" /></div>}
+            </SectionFrame>
 
-          <SectionFrame title="Pickup Payment" description="Outstanding dan komposisi overdue existing." href="/dashboard/payment/pickup" section={result.pickupPayment}>
-            {pickup && <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_320px]">
-              <MetricCard label="Outstanding" value={money(pickup.summary.outstanding)} note={`${number(pickup.summary.outstandingWaybills)} waybill`} />
-              <MetricCard label="Overdue > 7 Hari" value={<span className="text-red-700">{number(pickup.summary.overdueOver7)}</span>} />
-              <AppCard className="p-4"><Donut value={pickup.summary.notOverdue} remaining={pickup.summary.overdueOver7} valueLabel="Belum Overdue" remainingLabel="Overdue > 7 Hari" center={number(pickup.summary.outstandingWaybills)} colors={["#2563eb", "#dc2626"]} /></AppCard>
-            </div>}
-          </SectionFrame>
+            <SectionFrame title="Pickup Payment" description="Outstanding dan overdue Pickup Payment." href="/dashboard/payment/pickup" section={result.pickupPayment}>
+              {pickup && <div className="grid gap-4 sm:grid-cols-2">
+                <MetricCard label="Outstanding" value={<span className="text-3xl">{money(pickup.summary.outstanding)}</span>} note={`${number(pickup.summary.outstandingWaybills)} waybill`} />
+                <MetricCard label="Overdue > 7 Hari" value={<span className="text-3xl text-red-700">{number(pickup.summary.overdueOver7)}</span>} note="Perlu tindak lanjut" noteTone="warning" />
+              </div>}
+            </SectionFrame>
+          </div>
 
-          <SectionFrame title="SLA Cut Off" description="Rata-rata dan histori SLA dari dataset Cut Off." href="/dashboard/quality-control/sla-cut-off" section={result.sla}>
-            {sla && <div className="grid gap-4 xl:grid-cols-[280px_280px_1fr]"><MetricCard label="Average SLA" value={percent(sla.averageSla)} note={`Target existing ${percent(sla.target)}`} /><AppCard className="p-4"><Donut value={Math.min(100, sla.averageSla)} remaining={Math.max(0, 100 - sla.averageSla)} valueLabel="Achieved" remainingLabel="Remaining" center={percent(sla.averageSla)} /></AppCard><AppCard className="p-5"><DashboardChart rows={sla.daily} kind="percent" target={sla.target} series={[{ key: "sla", label: "SLA Harian", color: "#16a34a" }]} /></AppCard></div>}
-          </SectionFrame>
+          <div className="grid gap-10 xl:grid-cols-2 xl:gap-8">
+            <SectionFrame title="SLA Cut Off" description="Rata-rata SLA dengan tren harian sebagai informasi sekunder." href="/dashboard/quality-control/sla-cut-off" section={result.sla}>
+              {sla && <div className="grid gap-4 sm:grid-cols-2">
+                <MetricCard label="Average SLA" value={<span className="text-3xl">{percent(sla.averageSla)}</span>} note={`Target existing ${percent(sla.target)}`} />
+                <AppCard className="p-3"><Donut value={Math.min(100, sla.averageSla)} remaining={Math.max(0, 100 - sla.averageSla)} valueLabel="Achieved" remainingLabel="Remaining" center={percent(sla.averageSla)} /></AppCard>
+                <AppCard className="p-5 sm:col-span-2"><DashboardChart rows={sla.daily} kind="percent" target={sla.target} variant="bar" compact series={[{ key: "sla", label: "SLA Harian", color: "#475569" }]} /></AppCard>
+              </div>}
+            </SectionFrame>
 
-          <SectionFrame title="Waybill Stuck Delivery" description="Total inventory dan tren harian tanpa bucket aging asumsi." href="/dashboard/quality-control/waybill-stuck-delivery" section={result.stuckDelivery}>
-            {stuck && <div className="grid gap-4 xl:grid-cols-[280px_1fr]"><MetricCard label="Total Inventory" value={number(stuck.totalInventory)} /><AppCard className="p-5"><DashboardChart rows={stuck.daily} series={[{ key: "totalInventory", label: "Inventory Stuck", color: "#f59e0b" }]} /></AppCard></div>}
-          </SectionFrame>
+            <SectionFrame title="Waybill Stuck Delivery" description="KPI inventory stuck pada periode aktif." href="/dashboard/quality-control/waybill-stuck-delivery" section={result.stuckDelivery}>
+              {stuck && <div className="max-w-xl"><MetricCard label="Total Inventory" value={<span className="text-3xl">{number(stuck.totalInventory)}</span>} note="Waybill dalam inventory" /></div>}
+            </SectionFrame>
+          </div>
         </div>
       )}
     </div>
