@@ -1,0 +1,4 @@
+import { NextResponse } from "next/server";
+import { businessProfileSchema, getBusinessProfile, requireSettingsApi, settingsApiError, updateBusinessProfile } from "@/modules/settings";
+export async function GET() { const access = await requireSettingsApi(); if ("response" in access) return access.response; try { return NextResponse.json({ success: true, data: await getBusinessProfile(access.scope) }); } catch (error) { return settingsApiError(error); } }
+export async function PATCH(request: Request) { const access = await requireSettingsApi(); if ("response" in access) return access.response; const parsed = businessProfileSchema.safeParse(await request.json().catch(() => null)); if (!parsed.success) return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR" } }, { status: 400 }); try { return NextResponse.json({ success: true, data: await updateBusinessProfile(access.scope, parsed.data) }); } catch (error) { return settingsApiError(error); } }

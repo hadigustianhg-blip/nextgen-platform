@@ -1,0 +1,4 @@
+import { NextResponse } from "next/server";
+import { bankAccountSchema, createBankAccount, listBankAccounts, requireSettingsApi, settingsApiError } from "@/modules/settings";
+export async function GET() { const access = await requireSettingsApi(); if ("response" in access) return access.response; try { return NextResponse.json({ success: true, data: await listBankAccounts(access.scope) }); } catch (error) { return settingsApiError(error); } }
+export async function POST(request: Request) { const access = await requireSettingsApi(); if ("response" in access) return access.response; const parsed = bankAccountSchema.safeParse(await request.json().catch(() => null)); if (!parsed.success) return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR" } }, { status: 400 }); try { return NextResponse.json({ success: true, data: await createBankAccount(access.scope, parsed.data) }, { status: 201 }); } catch (error) { return settingsApiError(error); } }

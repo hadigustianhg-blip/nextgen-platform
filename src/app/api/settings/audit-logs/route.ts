@@ -1,0 +1,3 @@
+import { NextResponse } from "next/server";
+import { auditLogQuerySchema, listAuditLogs, requireSettingsApi, settingsApiError } from "@/modules/settings";
+export async function GET(request: Request) { const access = await requireSettingsApi(); if ("response" in access) return access.response; const parsed = auditLogQuerySchema.safeParse(Object.fromEntries(new URL(request.url).searchParams)); if (!parsed.success) return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR" } }, { status: 400 }); try { return NextResponse.json({ success: true, ...(await listAuditLogs(access.scope, parsed.data)) }); } catch (error) { return settingsApiError(error); } }

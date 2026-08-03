@@ -43,6 +43,7 @@ const storageKeys = {
   paymentOpen: "nextgen.sidebar.payment.open",
   qualityControlOpen: "nextgen.sidebar.quality-control.open",
   financeOpen: "nextgen.sidebar.finance.open",
+  settingsOpen: "nextgen.sidebar.settings.open",
 } as const;
 
 const readStoredBoolean = (key: string, fallback: boolean) => {
@@ -57,12 +58,15 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
   const paymentActive = pathname.startsWith("/dashboard/payment/");
   const qualityControlActive = pathname.startsWith("/dashboard/quality-control/");
   const financeActive = pathname.startsWith("/dashboard/finance/");
+  const settingsActive = pathname.startsWith("/dashboard/settings/");
   const [collapsed, setCollapsed] = useState(false);
   const [monitoringOpen, setMonitoringOpen] = useState(monitoringActive);
   const [settlementOpen, setSettlementOpen] = useState(settlementActive);
   const [paymentOpen, setPaymentOpen] = useState(paymentActive);
   const [qualityControlOpen, setQualityControlOpen] = useState(qualityControlActive);
   const [financeOpen, setFinanceOpen] = useState(financeActive);
+  const [settingsOpen, setSettingsOpen] = useState(settingsActive);
+  const [settingsAllowed, setSettingsAllowed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
 
@@ -74,8 +78,18 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
       setPaymentOpen(readStoredBoolean(storageKeys.paymentOpen, true));
       setQualityControlOpen(readStoredBoolean(storageKeys.qualityControlOpen, true));
       setFinanceOpen(readStoredBoolean(storageKeys.financeOpen, true));
+      setSettingsOpen(readStoredBoolean(storageKeys.settingsOpen, settingsActive));
       setStorageReady(true);
     });
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/settings/access", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((result: { allowed?: boolean }) => { if (active) setSettingsAllowed(result.allowed === true); })
+      .catch(() => { if (active) setSettingsAllowed(false); });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -120,11 +134,16 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
     }
   }, [financeOpen, storageReady]);
 
+  useEffect(() => {
+    if (storageReady) window.localStorage.setItem(storageKeys.settingsOpen, String(settingsOpen));
+  }, [settingsOpen, storageReady]);
+
   const monitoringVisible = monitoringActive || monitoringOpen;
   const settlementVisible = settlementActive || settlementOpen;
   const paymentVisible = paymentActive || paymentOpen;
   const qualityControlVisible = qualityControlActive || qualityControlOpen;
   const financeVisible = financeActive || financeOpen;
+  const settingsVisible = settingsActive || settingsOpen;
   const labelClass = collapsed ? "lg:hidden" : "";
   const closeMobile = () => setMobileOpen(false);
   const itemLayout = collapsed ? "lg:justify-center lg:gap-0" : "";
@@ -438,10 +457,33 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
             </div>}
           </div>
 
+          {settingsAllowed && <div className="pt-1">
+            <button type="button" title={collapsed ? "Pengaturan" : undefined}
+              aria-expanded={settingsVisible} aria-controls="settings-submenu"
+              onClick={() => setSettingsOpen((value) => !value)}
+              className={["flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300", itemLayout].join(" ")}>
+              <Settings size={19} className="shrink-0" />
+              <span className={labelClass}>Pengaturan</span>
+              <ChevronDown size={15} className={`${labelClass} ml-auto transition-transform ${settingsVisible ? "rotate-180" : ""}`} />
+            </button>
+            {settingsVisible && <div id="settings-submenu">
+              {[
+                ["Profil Bisnis", "/dashboard/settings/business-profile"],
+                ["User & Hak Akses", "/dashboard/settings/users"],
+                ["Finance", "/dashboard/settings/finance"],
+                ["Integrasi", "/dashboard/settings/integrations"],
+                ["Maintenance", "/dashboard/settings/maintenance"],
+                ["Audit Log", "/dashboard/settings/audit-logs"],
+              ].map(([label, href]) => <SidebarChild key={href} href={href} label={label}
+                active={pathname.startsWith(href)} collapsed={collapsed} labelClass={labelClass}
+                layoutClass={childLayout} onNavigate={closeMobile} icon={<Settings size={17}/>} />)}
+            </div>}
+          </div>}
+
           {navigation
             .slice(1)
             .filter(
-              (item) => item.label !== "Monitoring" && item.label !== "Payment" && item.label !== "Quality Control" && item.label !== "Finance & HR",
+              (item) => item.label !== "Monitoring" && item.label !== "Payment" && item.label !== "Quality Control" && item.label !== "Finance & HR" && item.label !== "Pengaturan",
             )
             .map((item) => {
               const active =
