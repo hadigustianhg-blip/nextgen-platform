@@ -31,8 +31,8 @@ describe("Settings foundation", () => {
   });
 
   it("scopes data by tenant and outlet", () => {
-    expect(source).toContain("tenantId: actor.tenantId, outletId: actor.outletId");
-    expect(source).toContain("where: { id: scope.outletId, tenantId: scope.tenantId }");
+    expect(source).toContain("buildTenantOutletWhere(scope)");
+    expect(source).toContain("buildOutletWhere(scope)");
   });
 
   it("protects the last active owner and never hard-deletes a user", () => {
@@ -57,6 +57,8 @@ describe("Settings foundation", () => {
     expect(maintenance).not.toContain("$executeRaw");
     expect(maintenance).toContain("writesPerformed: 0");
     expect(maintenance).toContain("Tidak ada cache aplikasi yang dapat dibersihkan");
+    expect(maintenance).toContain("salaryPublicationShareExpired");
+    expect(maintenance).toContain("salaryPublicationShareRevoked");
   });
 
   it("uses a non-destructive additive migration", () => {

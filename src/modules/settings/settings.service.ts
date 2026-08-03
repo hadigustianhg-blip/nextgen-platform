@@ -1,7 +1,7 @@
 import argon2 from "argon2";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import type { SettingsActor, SettingsScope } from "./settings.types";
+import { buildOutletWhere, buildTenantOutletWhere, type SettingsActor, type SettingsScope } from "./settings.types";
 import type { z } from "zod";
 import type { auditLogQuerySchema, bankAccountSchema, businessProfileSchema, financialCategorySchema, userUpdateSchema } from "./settings.validation";
 
@@ -21,7 +21,7 @@ const audit = (tx: Prisma.TransactionClient, actor: SettingsActor, action: "CREA
 export async function getBusinessProfile(scope: SettingsScope) {
   const [tenant, outlet] = await Promise.all([
     prisma.tenant.findUnique({ where: { id: scope.tenantId }, select: { id: true, name: true, address: true, phone: true, email: true, timezone: true } }),
-    prisma.outlet.findFirst({ where: { id: scope.outletId, tenantId: scope.tenantId }, select: { id: true, name: true, code: true, address: true, phone: true, email: true, adminWhatsapp: true, isActive: true } }),
+    prisma.outlet.findFirst({ where: buildOutletWhere(scope), select: { id: true, name: true, code: true, address: true, phone: true, email: true, adminWhatsapp: true, isActive: true } }),
   ]);
   if (!tenant || !outlet) throw new SettingsError("SETTINGS_SCOPE_NOT_FOUND", 404);
   return { tenant, outlet };
@@ -70,22 +70,23 @@ export async function resetSettingsUserPassword(actor: SettingsActor, userId: st
   });
 }
 
-export const listBankAccounts = (scope: SettingsScope) => prisma.outletBankAccount.findMany({ where: scope, orderBy: [{ displayOrder: "asc" }, { bankName: "asc" }] });
+export const listBankAccounts = (scope: SettingsScope) => prisma.outletBankAccount.findMany({ where: buildTenantOutletWhere(scope), orderBy: [{ displayOrder: "asc" }, { bankName: "asc" }] });
 export async function createBankAccount(actor: SettingsActor, input: BankInput) { return prisma.$transaction(async (tx) => { const scope = { tenantId: actor.tenantId, outletId: actor.outletId }; if (input.isDefault) await tx.outletBankAccount.updateMany({ where: scope, data: { isDefault: false } }); const item = await tx.outletBankAccount.create({ data: { ...input, ...scope } }); await audit(tx, actor, "CREATE", "SETTINGS_BANK_ACCOUNT", item.id, Object.keys(input)); return item; }); }
 export async function updateBankAccount(actor: SettingsActor, id: string, input: BankInput) { return prisma.$transaction(async (tx) => { const scope = { tenantId: actor.tenantId, outletId: actor.outletId }; const found = await tx.outletBankAccount.findFirst({ where: { id, ...scope } }); if (!found) throw new SettingsError("BANK_ACCOUNT_NOT_FOUND", 404); if (input.isDefault) await tx.outletBankAccount.updateMany({ where: scope, data: { isDefault: false } }); const item = await tx.outletBankAccount.update({ where: { id }, data: input }); await audit(tx, actor, "UPDATE", "SETTINGS_BANK_ACCOUNT", id, Object.keys(input)); return item; }); }
 
-export const listFinancialCategories = (scope: SettingsScope) => prisma.financialCategory.findMany({ where: scope, orderBy: [{ type: "asc" }, { sortOrder: "asc" }, { name: "asc" }] });
+export const listFinancialCategories = (scope: SettingsScope) => prisma.financialCategory.findMany({ where: buildTenantOutletWhere(scope), orderBy: [{ type: "asc" }, { sortOrder: "asc" }, { name: "asc" }] });
 export async function createFinancialCategory(actor: SettingsActor, input: CategoryInput) { return prisma.$transaction(async (tx) => { const name = normalizeFinancialCategory(input.name); const item = await tx.financialCategory.create({ data: { ...input, name, canonicalName: canonicalizeFinancialCategory(name), tenantId: actor.tenantId, outletId: actor.outletId } }); await audit(tx, actor, "CREATE", "SETTINGS_FINANCIAL_CATEGORY", item.id, Object.keys(input)); return item; }); }
 export async function updateFinancialCategory(actor: SettingsActor, id: string, input: CategoryInput) { return prisma.$transaction(async (tx) => { const found = await tx.financialCategory.findFirst({ where: { id, tenantId: actor.tenantId, outletId: actor.outletId } }); if (!found) throw new SettingsError("FINANCIAL_CATEGORY_NOT_FOUND", 404); const name = normalizeFinancialCategory(input.name); const item = await tx.financialCategory.update({ where: { id }, data: { ...input, name, canonicalName: canonicalizeFinancialCategory(name) } }); await audit(tx, actor, "UPDATE", "SETTINGS_FINANCIAL_CATEGORY", id, Object.keys(input)); return item; }); }
 
 function maskHost(value?: string) { if (!value) return null; try { const url = new URL(value); return `${url.protocol}//***.${url.hostname.split(".").slice(-2).join(".")}`; } catch { return "configured"; } }
 export async function getIntegrationStatus(scope: SettingsScope) {
+  const where = buildTenantOutletWhere(scope);
   const [latestSuccess, latestFailure, cashflowSuccess, cashflowFailure, shares] = await Promise.all([
-    prisma.syncRun.findFirst({ where: { ...scope, status: "SUCCESS" }, orderBy: { completedAt: "desc" }, select: { completedAt: true, runType: true } }),
-    prisma.syncRun.findFirst({ where: { ...scope, status: "FAILED" }, orderBy: { completedAt: "desc" }, select: { completedAt: true, runType: true } }),
-    prisma.jfsCashflowSyncRun.findFirst({ where: { ...scope, status: "SUCCESS" }, orderBy: { completedAt: "desc" }, select: { completedAt: true } }),
-    prisma.jfsCashflowSyncRun.findFirst({ where: { ...scope, status: "FAILED" }, orderBy: { completedAt: "desc" }, select: { completedAt: true } }),
-    prisma.salaryPublicationShare.count({ where: { ...scope, revokedAt: null, expiresAt: { gt: new Date() } } }),
+    prisma.syncRun.findFirst({ where: { ...where, status: "SUCCESS" }, orderBy: { completedAt: "desc" }, select: { completedAt: true, runType: true } }),
+    prisma.syncRun.findFirst({ where: { ...where, status: "FAILED" }, orderBy: { completedAt: "desc" }, select: { completedAt: true, runType: true } }),
+    prisma.jfsCashflowSyncRun.findFirst({ where: { ...where, status: "SUCCESS" }, orderBy: { completedAt: "desc" }, select: { completedAt: true } }),
+    prisma.jfsCashflowSyncRun.findFirst({ where: { ...where, status: "FAILED" }, orderBy: { completedAt: "desc" }, select: { completedAt: true } }),
+    prisma.salaryPublicationShare.count({ where: { ...where, revokedAt: null, expiresAt: { gt: new Date() } } }),
   ]);
   const middlewareUrl = process.env.JFS_MIDDLEWARE_BASE_URL ?? process.env.JFS_MIDDLEWARE_URL;
   return { middleware: { status: middlewareUrl ? "CONFIGURED" : "NOT_CONFIGURED", host: maskHost(middlewareUrl) }, database: { status: "CONNECTED" }, application: { domain: maskHost(process.env.SALARY_PUBLIC_BASE_URL ?? process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL) }, salaryWhatsapp: { status: shares > 0 ? "ACTIVE" : "READY", activeShares: shares }, sync: { lastSuccessful: latestSuccess ?? cashflowSuccess, lastFailed: latestFailure ?? cashflowFailure }, cron: { jfsCashflow: cashflowSuccess?.completedAt ?? cashflowFailure?.completedAt ?? null, operational: latestSuccess?.completedAt ?? latestFailure?.completedAt ?? null } };
@@ -95,14 +96,18 @@ export async function testSettingsConnections(scope: SettingsScope) { const data
 const range = { _min: { createdAt: true }, _max: { createdAt: true }, _count: { _all: true } } as const;
 export async function getMaintenancePreview(scope: SettingsScope) {
   const old = new Date(Date.now() - 90 * 86400000);
-  const [salaryVoid, manualVoid, adjustmentVoid, oldSync] = await Promise.all([
-    prisma.salaryClosing.aggregate({ where: { ...scope, status: "VOID" }, ...range }),
-    prisma.profitLossManualEntry.aggregate({ where: { ...scope, status: "VOID" }, ...range }),
-    prisma.profitLossAdjustment.aggregate({ where: { ...scope, status: "VOID" }, ...range }),
-    prisma.syncRun.aggregate({ where: { ...scope, createdAt: { lt: old } }, ...range }),
+  const now = new Date();
+  const where = buildTenantOutletWhere(scope);
+  const [salaryVoid, expiredShares, revokedShares, manualVoid, adjustmentVoid, oldSync] = await Promise.all([
+    prisma.salaryClosing.aggregate({ where: { ...where, status: "VOID" }, ...range }),
+    prisma.salaryPublicationShare.aggregate({ where: { ...where, expiresAt: { lte: now } }, ...range }),
+    prisma.salaryPublicationShare.aggregate({ where: { ...where, revokedAt: { not: null } }, ...range }),
+    prisma.profitLossManualEntry.aggregate({ where: { ...where, status: "VOID" }, ...range }),
+    prisma.profitLossAdjustment.aggregate({ where: { ...where, status: "VOID" }, ...range }),
+    prisma.syncRun.aggregate({ where: { ...where, createdAt: { lt: old } }, ...range }),
   ]);
   const candidate = (key: string, label: string, value: typeof salaryVoid, safe: boolean, blocker: string | null) => ({ key, label, count: value._count._all, oldest: value._min.createdAt, newest: value._max.createdAt, safe, blocker });
-  return { cache: { available: false, message: "Tidak ada cache aplikasi yang dapat dibersihkan" }, deletionEnabled: false, deletionMessage: "Penghapusan akan tersedia setelah verifikasi.", candidates: [candidate("salaryClosingVoid", "Salary Closing VOID", salaryVoid, false, "Relasi Salary harus diverifikasi"), { key: "salaryRecapTest", label: "Salary Closing/Recap testing", count: 0, oldest: null, newest: null, safe: false, blocker: "Tidak ada status khusus data testing" }, candidate("profitLossManualVoid", "Profit Loss Manual VOID", manualVoid, false, "Histori audit dipertahankan"), candidate("profitLossAdjustmentVoid", "Profit Loss Adjustment VOID", adjustmentVoid, false, "Histori audit dipertahankan"), candidate("oldSyncRuns", "SyncRun lebih dari 90 hari", oldSync, false, "Relasi source record harus diverifikasi")] };
+  return { cache: { available: false, message: "Tidak ada cache aplikasi yang dapat dibersihkan" }, deletionEnabled: false, deletionMessage: "Penghapusan akan tersedia setelah verifikasi.", candidates: [candidate("salaryClosingVoid", "Salary Closing VOID", salaryVoid, false, "Relasi Salary harus diverifikasi"), candidate("salaryPublicationShareExpired", "Salary Publication Share expired", expiredShares, false, "Histori publikasi harus dipertahankan"), candidate("salaryPublicationShareRevoked", "Salary Publication Share revoked", revokedShares, false, "Histori publikasi harus dipertahankan"), { key: "salaryRecapTest", label: "Salary Closing/Recap testing", count: 0, oldest: null, newest: null, safe: false, blocker: "Tidak ada status khusus data testing" }, candidate("profitLossManualVoid", "Profit Loss Manual VOID", manualVoid, false, "Histori audit dipertahankan"), candidate("profitLossAdjustmentVoid", "Profit Loss Adjustment VOID", adjustmentVoid, false, "Histori audit dipertahankan"), candidate("oldSyncRuns", "SyncRun lebih dari 90 hari", oldSync, false, "Relasi source record harus diverifikasi")] };
 }
 export async function simulateMaintenance(scope: SettingsScope) { const preview = await getMaintenancePreview(scope); return { simulatedAt: new Date(), writesPerformed: 0, candidates: preview.candidates.map((item) => ({ ...item, tables: [item.key], relationsAffected: [], result: item.safe ? "REVIEW_REQUIRED" : "BLOCKED" })) }; }
 

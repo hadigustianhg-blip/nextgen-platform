@@ -12,4 +12,11 @@ export async function requireSettingsApi() {
   if (!scope) return { response: NextResponse.json({ success: false, error: { code: "OUTLET_REQUIRED" } }, { status: 400 }) } as const;
   return { session, scope } as const;
 }
-export function settingsApiError(error: unknown) { if (error instanceof SettingsError) return NextResponse.json({ success: false, error: { code: error.code } }, { status: error.status }); const code = (error as { code?: string })?.code === "P2002" ? "DUPLICATE_VALUE" : "SETTINGS_REQUEST_FAILED"; return NextResponse.json({ success: false, error: { code } }, { status: code === "DUPLICATE_VALUE" ? 409 : 500 }); }
+export function settingsApiError(error: unknown, route = "settings") {
+  const errorName = error instanceof Error ? error.name : "UnknownError";
+  const prismaCode = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : null;
+  console.error("[SETTINGS_API]", { route, errorName, prismaCode });
+  if (error instanceof SettingsError) return NextResponse.json({ success: false, error: { code: error.code } }, { status: error.status });
+  const code = prismaCode === "P2002" ? "DUPLICATE_VALUE" : "SETTINGS_REQUEST_FAILED";
+  return NextResponse.json({ success: false, error: { code } }, { status: code === "DUPLICATE_VALUE" ? 409 : 500 });
+}

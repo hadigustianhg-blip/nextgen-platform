@@ -5,7 +5,8 @@ import { buttonClass, inputClass, SettingsCard } from "./settings-shell";
 
 type Section = "profile" | "users" | "finance" | "integrations" | "maintenance" | "audit";
 type Json = Record<string, unknown>;
-async function api(url: string, init?: RequestInit) { const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } }); const body = await response.json().catch(() => null) as Json | null; if (!response.ok || !body) throw new Error(String((body?.error as Json | undefined)?.code ?? "REQUEST_FAILED")); return body; }
+export function parseSettingsResponse(text: string): Json | null { if (!text.trim()) return null; try { const value = JSON.parse(text) as unknown; return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Json : null; } catch { return null; } }
+async function api(url: string, init?: RequestInit) { const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } }); const text = await response.text(); const body = parseSettingsResponse(text); if (!response.ok || !body) throw new Error(String((body?.error as Json | undefined)?.code ?? "SETTINGS_REQUEST_FAILED")); return body; }
 
 export function SettingsClient({ section }: { section: Section }) {
   const [payload, setPayload] = useState<Json | null>(null); const [error, setError] = useState(""); const [loading, setLoading] = useState(true);

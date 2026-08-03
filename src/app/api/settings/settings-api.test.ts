@@ -20,6 +20,21 @@ describe("Settings API contracts", () => {
     for (const route of routes) expect(read(route), route).toContain("NextResponse.json");
   });
 
+  it("uses a safe shared error response", () => {
+    const handler = read("../../../modules/settings/settings.http.ts");
+    expect(handler).toContain("NextResponse.json");
+    expect(handler).toContain("errorName");
+    expect(handler).toContain("prismaCode");
+    expect(handler).not.toContain("error.message");
+  });
+
+  it("parses non-JSON frontend responses safely", () => {
+    const client = read("../../../components/settings/settings-client.tsx");
+    expect(client).toContain("await response.text()");
+    expect(client).toContain("parseSettingsResponse");
+    expect(client).toContain("SETTINGS_REQUEST_FAILED");
+  });
+
   it("keeps integration test and maintenance endpoints write-free", () => {
     for (const route of ["./integrations/test/route.ts", "./maintenance/preview/route.ts", "./maintenance/simulate/route.ts"]) {
       const value = read(route);
