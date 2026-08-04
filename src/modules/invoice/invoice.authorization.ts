@@ -1,5 +1,5 @@
 import type { SessionContext } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
+import { canAccessResource } from "@/lib/permissions";
 
 export const invoiceScope = (session: SessionContext) =>
   session.outletId
@@ -7,11 +7,12 @@ export const invoiceScope = (session: SessionContext) =>
     : null;
 
 export const canReadInvoice = (session: SessionContext) =>
-  hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL", "VIEWER"]);
+  canAccessResource(session.roles, "INVOICE", "READ");
 export const canMutateInvoice = (session: SessionContext) =>
-  hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL"]);
+  canAccessResource(session.roles, "INVOICE", "UPDATE");
 export const canIssueInvoice = (session: SessionContext) =>
-  hasAnyRole(session.roles, ["OWNER", "ADMIN"]);
-export const canExportInvoice = canReadInvoice;
+  canAccessResource(session.roles, "INVOICE", "FINALIZE");
+export const canExportInvoice = (session: SessionContext) =>
+  canAccessResource(session.roles, "INVOICE", "EXPORT");
 export const canPrepareInvoiceWhatsapp = canMutateInvoice;
 export const canVoidInvoice = canIssueInvoice;

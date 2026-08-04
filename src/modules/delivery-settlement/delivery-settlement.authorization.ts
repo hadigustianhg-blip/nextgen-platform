@@ -1,18 +1,18 @@
 import type { SessionContext } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
+import { canAccessResource } from "@/lib/permissions";
 
 export function deliveryScope(session: SessionContext) {
   return session.outletId ? { tenantId: session.tenantId, outletId: session.outletId } : null;
 }
 
 export function canReadDelivery(session: SessionContext) {
-  return hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL", "VIEWER"]);
+  return canAccessResource(session.roles, "DELIVERY_SETTLEMENT", "READ");
 }
 
 export function canSyncDelivery(session: SessionContext) {
-  return hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL"]);
+  return canAccessResource(session.roles, "DELIVERY_SETTLEMENT", "MANAGE");
 }
 
 export function canAdjustDelivery(session: SessionContext) {
-  return hasAnyRole(session.roles, ["OWNER", "ADMIN"]);
+  return canAccessResource(session.roles, "DELIVERY_SETTLEMENT", "UPDATE");
 }

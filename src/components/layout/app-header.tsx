@@ -36,22 +36,8 @@ export function AppHeader({ session }: { session: HeaderSession }) {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
-  const [settingsAllowed, setSettingsAllowed] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    void fetch("/api/settings/access", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((result: { allowed?: boolean }) => {
-        if (active) setSettingsAllowed(result.allowed === true);
-      })
-      .catch(() => {
-        if (active) setSettingsAllowed(false);
-      });
-    return () => { active = false; };
-  }, []);
 
   useEffect(() => {
     const closeFloatingPanels = (event: PointerEvent) => {
@@ -66,8 +52,8 @@ export function AppHeader({ session }: { session: HeaderSession }) {
   }, []);
 
   const navigation = useMemo(
-    () => getSearchableNavigation(settingsAllowed),
-    [settingsAllowed],
+    () => getSearchableNavigation(session.roles),
+    [session.roles],
   );
   const results = useMemo(
     () => filterNavigationItems(navigation, query),

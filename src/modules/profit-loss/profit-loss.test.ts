@@ -85,7 +85,7 @@ describe("Profit Loss canonical aggregator", () => {
     expect(result.transactions.filter((row) => ["MANUAL", "ADJUSTMENT"].includes(row.source)).every((row) => row.isEditable)).toBe(true);
   });
 
-  it("uses Finance read permission and Owner/Admin write permission", () => {
+  it("uses the final Profit Loss role policy", () => {
     const session = (roles: string[]) => ({
       sessionId: "s", tenantId: "t", tenantName: "Tenant", outletId: "o",
       outletCode: "OUT", userId: "u", userName: "User", email: "u@test.dev",
@@ -93,8 +93,11 @@ describe("Profit Loss canonical aggregator", () => {
     });
     expect(canReadProfitLoss(session(["VIEWER"]))).toBe(true);
     expect(canManageProfitLoss(session(["OWNER"]))).toBe(true);
-    expect(canManageProfitLoss(session(["ADMIN"]))).toBe(true);
+    expect(canManageProfitLoss(session(["ADMIN"]))).toBe(false);
     expect(canManageProfitLoss(session(["OPERATIONAL"]))).toBe(false);
+    for (const role of ["FINANCE", "HR", "QC"]) {
+      expect(canManageProfitLoss(session([role]))).toBe(true);
+    }
   });
 
   it("keeps source modules unchanged and exports four sheets", async () => {

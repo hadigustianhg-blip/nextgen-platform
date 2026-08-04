@@ -1,9 +1,8 @@
 import type { SessionContext } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
+import { canAccessResource } from "@/lib/permissions";
 
 export const paymentSettlementScope = (session: SessionContext) =>
   session.outletId ? { tenantId: session.tenantId, outletId: session.outletId } : null;
 
 export const canReadPaymentSettlement = (session: SessionContext) =>
-  hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL", "FINANCE", "VIEWER"]);
-
+  canAccessResource(session.roles, "PAYMENT_SETTLEMENT", "READ");

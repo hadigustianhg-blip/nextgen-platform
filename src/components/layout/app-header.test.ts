@@ -8,7 +8,7 @@ import {
 
 describe("premium global app header", () => {
   it("indexes existing sidebar routes and filters menu labels", () => {
-    const items = getSearchableNavigation(false);
+    const items = getSearchableNavigation(["OWNER"]);
     expect(filterNavigationItems(items, "monitoring").map((item) => item.label))
       .toEqual(["Monitoring Daily", "Monitoring Monthly"]);
     expect(filterNavigationItems(items, "pickup settlement")[0]).toMatchObject({
@@ -20,12 +20,14 @@ describe("premium global app header", () => {
   });
 
   it("uses the canonical settings access result to hide protected menu routes", () => {
-    expect(getSearchableNavigation(false).some((item) => item.label === "Audit Log")).toBe(false);
-    expect(getSearchableNavigation(true).find((item) => item.label === "Audit Log"))
+    expect(getSearchableNavigation(["VIEWER"]).some((item) => item.label === "Audit Log")).toBe(false);
+    expect(getSearchableNavigation(["OWNER"]).find((item) => item.label === "Audit Log"))
       .toMatchObject({ href: "/dashboard/settings/audit-logs" });
-    expect(getSearchableNavigation(false).some((item) => item.label === "Target & KPI")).toBe(false);
-    expect(getSearchableNavigation(true).find((item) => item.label === "Target & KPI"))
+    expect(getSearchableNavigation(["OPERATIONAL"]).some((item) => item.label === "Target & KPI")).toBe(false);
+    expect(getSearchableNavigation(["QC"]).find((item) => item.label === "Target & KPI"))
       .toMatchObject({ href: "/dashboard/settings/target-kpi" });
+    expect(getSearchableNavigation(["ADMIN"]).some((item) => item.label === "Profit Loss")).toBe(false);
+    expect(getSearchableNavigation(["FINANCE"]).some((item) => item.label === "Profit Loss")).toBe(true);
   });
 
   it("supports wrapping Arrow Up and Arrow Down navigation", () => {
@@ -73,7 +75,7 @@ describe("premium global app header", () => {
   it("wires the header through AppShell without changing Sidebar", async () => {
     const shell = await readFile(new URL("./app-shell.tsx", import.meta.url), "utf8");
     expect(shell).toContain("<AppHeader session={session} />");
-    expect(shell).toContain("<Sidebar />");
+    expect(shell).toContain("<Sidebar roles={session.roles} />");
     expect(shell).toContain("bg-[var(--nextgen-background)]");
   });
 

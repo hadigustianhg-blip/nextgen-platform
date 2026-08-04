@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
-  canRead: vi.fn(() => true),
+  canManage: vi.fn(() => true),
   createShare: vi.fn(),
 }));
 vi.mock("@/lib/auth/session", () => ({ getSession: mocks.getSession }));
@@ -13,7 +13,7 @@ vi.mock("@/modules/salary", async () => {
   );
   return {
     ...actual,
-    canReadSalaryRecap: mocks.canRead,
+    canManageSalaryRecap: mocks.canManage,
     salaryScope: () => ({ tenantId: "tenant-1", outletId: "outlet-1" }),
   };
 });
@@ -27,7 +27,7 @@ const session = {
   tenantId: "tenant-1",
   outletId: "outlet-1",
   userId: "user-1",
-  roles: ["VIEWER"],
+  roles: ["FINANCE"],
 };
 const context = {
   params: Promise.resolve({ id: "closing-1", employeeId: "employee-yudi" }),
@@ -36,7 +36,7 @@ const context = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getSession.mockResolvedValue(session);
-  mocks.canRead.mockReturnValue(true);
+  mocks.canManage.mockReturnValue(true);
   mocks.createShare.mockResolvedValue({
     shareCode: "SLP-7X4A9K",
     publicUrl: "https://app.example.test/s/SLP-7X4A9K",
@@ -50,7 +50,7 @@ describe("POST Salary publication share", () => {
     mocks.getSession.mockResolvedValueOnce(null);
     expect((await POST(new Request("https://app.test/api/share"), context)).status)
       .toBe(401);
-    mocks.canRead.mockReturnValueOnce(false);
+    mocks.canManage.mockReturnValueOnce(false);
     expect((await POST(new Request("https://app.test/api/share"), context)).status)
       .toBe(403);
     expect(mocks.createShare).not.toHaveBeenCalled();

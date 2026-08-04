@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
-  canRead: vi.fn(() => true),
+  canManage: vi.fn(() => true),
   publish: vi.fn(),
 }));
 vi.mock("@/lib/auth/session", () => ({ getSession: mocks.getSession }));
@@ -13,7 +13,7 @@ vi.mock("@/modules/salary", async () => {
   );
   return {
     ...actual,
-    canReadSalaryRecap: mocks.canRead,
+    canManageSalaryRecap: mocks.canManage,
     salaryScope: () => ({ tenantId: "tenant-1", outletId: "outlet-1" }),
   };
 });
@@ -33,9 +33,9 @@ beforeEach(() => {
     tenantId: "tenant-1",
     outletId: "outlet-1",
     userId: "user-1",
-    roles: ["VIEWER"],
+    roles: ["FINANCE"],
   });
-  mocks.canRead.mockReturnValue(true);
+  mocks.canManage.mockReturnValue(true);
   mocks.publish.mockResolvedValue({
     publicationStatus: "PUBLISHED",
     publishedAt: new Date("2026-08-03T03:18:00.000Z"),
@@ -48,7 +48,7 @@ describe("PATCH Salary publication status", () => {
     mocks.getSession.mockResolvedValueOnce(null);
     expect((await PATCH(new Request("https://app.test"), context)).status)
       .toBe(401);
-    mocks.canRead.mockReturnValueOnce(false);
+    mocks.canManage.mockReturnValueOnce(false);
     expect((await PATCH(new Request("https://app.test"), context)).status)
       .toBe(403);
     expect(mocks.publish).not.toHaveBeenCalled();

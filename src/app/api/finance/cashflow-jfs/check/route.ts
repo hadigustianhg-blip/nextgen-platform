@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { operationalScope } from "@/modules/operational-settlement";
 import {
-  canReadFinance,
   financeRangeSchema,
   JfsCashflowError,
   readJfsCashflow,
   runJfsCashflowSync,
 } from "@/modules/finance";
+import { canManageProfitLoss, canReadProfitLoss } from "@/modules/profit-loss";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 
@@ -19,10 +19,10 @@ type RouteContext =
       scope: { tenantId: string; outletId: string };
     };
 
-async function context(): Promise<RouteContext> {
+async function context(action: "READ" | "MANAGE" = "READ"): Promise<RouteContext> {
   const session = await getSession();
   if (!session) return { response: NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 }) };
-  if (!canReadFinance(session)) return { response: NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 }) };
+  if (action === "READ" ? !canReadProfitLoss(session) : !canManageProfitLoss(session)) return { response: NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 }) };
   const scope = operationalScope(session);
   if (!scope) return { response: NextResponse.json({ error: { code: "OUTLET_REQUIRED" } }, { status: 400 }) };
   return { session, scope };
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await context();
+  const auth = await context("MANAGE");
   if (auth.response) return auth.response;
   const parsed = financeRangeSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: { code: "INVALID_DATE_RANGE" } }, { status: 400 });

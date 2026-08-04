@@ -581,12 +581,12 @@ describe("Invoice validation and authorization", () => {
 
   it("enforces the requested RBAC matrix", () => {
     expect(canReadInvoice(session(["VIEWER"]))).toBe(true);
-    expect(canExportInvoice(session(["VIEWER"]))).toBe(true);
+    expect(canExportInvoice(session(["VIEWER"]))).toBe(false);
     expect(canMutateInvoice(session(["VIEWER"]))).toBe(false);
     expect(canIssueInvoice(session(["OPERATIONAL"]))).toBe(false);
     expect(canVoidInvoice(session(["OPERATIONAL"]))).toBe(false);
     expect(canPrepareInvoiceWhatsapp(session(["OPERATIONAL"]))).toBe(true);
-    for (const role of ["OWNER", "ADMIN"]) {
+    for (const role of ["OWNER", "ADMIN", "FINANCE", "HR", "QC"]) {
       expect(canIssueInvoice(session([role]))).toBe(true);
       expect(canVoidInvoice(session([role]))).toBe(true);
     }

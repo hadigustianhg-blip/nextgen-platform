@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
+import { canAccessResource } from "@/lib/permissions";
 import {
   getMonitoringDailyDiagnostic,
   monitoringDailyDiagnosticSchema,
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
       { status: 401 },
     );
   }
-  if (!hasAnyRole(session.roles, ["OWNER", "ADMIN"])) {
+  if (!canAccessResource(session.roles, "MONITORING", "MANAGE")) {
     return NextResponse.json(
       { error: { code: "FORBIDDEN", message: "Akses ditolak." } },
       { status: 403 },

@@ -16,6 +16,22 @@ export interface SessionContext {
   roles: string[];
 }
 
+export interface TeamContext {
+  userId: string;
+  tenantId: string;
+  outletId: string;
+  outletCode: string;
+  membershipId: string;
+  salaryEmployeeId: string;
+  employeeName: string;
+  employeeStatus: "ACTIVE";
+}
+
+export class TeamContextError extends Error {
+  readonly code = "TEAM_CONTEXT_FORBIDDEN";
+  readonly status = 403;
+}
+
 export function hashSessionToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
@@ -113,6 +129,59 @@ export async function requireSession() {
   if (!session) redirect("/login");
   if (isTeamSession(session)) redirect("/team");
   return session;
+}
+
+type TeamContextReader = Pick<typeof prisma, "teamMembership">;
+
+export async function resolveTeamContext(
+  session: SessionContext,
+  client: TeamContextReader = prisma,
+): Promise<TeamContext> {
+  if (!isTeamSession(session) || !session.outletId || !session.outletCode) {
+    throw new TeamContextError("TEAM_CONTEXT_FORBIDDEN");
+  }
+
+  const membership = await client.teamMembership.findFirst({
+    where: {
+      userId: session.userId,
+      tenantId: session.tenantId,
+      outletId: session.outletId,
+      status: "ACTIVE",
+      salaryEmployee: {
+        tenantId: session.tenantId,
+        outletId: session.outletId,
+        status: "ACTIVE",
+      },
+    },
+    select: {
+      id: true,
+      tenantId: true,
+      outletId: true,
+      salaryEmployeeId: true,
+      salaryEmployee: { select: { name: true, status: true } },
+    },
+  });
+  if (!membership || membership.salaryEmployee.status !== "ACTIVE") {
+    throw new TeamContextError("TEAM_CONTEXT_FORBIDDEN");
+  }
+
+  return {
+    userId: session.userId,
+    tenantId: membership.tenantId,
+    outletId: membership.outletId,
+    outletCode: session.outletCode,
+    membershipId: membership.id,
+    salaryEmployeeId: membership.salaryEmployeeId,
+    employeeName: membership.salaryEmployee.name,
+    employeeStatus: "ACTIVE",
+  };
+}
+
+export async function requireTeamContext() {
+  const session = await getAnySession();
+  if (!session) redirect("/login");
+  if (!isTeamSession(session)) redirect("/dashboard");
+  return resolveTeamContext(session);
 }
 
 export async function revokeCurrentSession() {

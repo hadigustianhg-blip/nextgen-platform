@@ -222,9 +222,8 @@ describe("Payment Settlement outstanding and period behavior", () => {
 
   it("allows every requested read-only role", () => {
     const session = (role: string) => ({ roles: [role] } as SessionContext);
-    for (const role of ["VIEWER", "OPERATIONAL", "ADMIN", "OWNER"]) {
+    for (const role of ["VIEWER", "OPERATIONAL", "ADMIN", "OWNER", "FINANCE", "HR", "QC"]) {
       expect(canReadPaymentSettlement(session(role))).toBe(true);
     }
-    expect(canReadPaymentSettlement(session("HR"))).toBe(false);
   });
 });

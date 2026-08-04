@@ -1,5 +1,5 @@
 import type { SessionContext } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
+import { canAccessResource } from "@/lib/permissions";
 
 export const salaryPermissions = {
   settingRead: "salary.setting.read",
@@ -11,18 +11,21 @@ export const salaryPermissions = {
   recapRead: "salary.recap.read",
 } as const;
 
-const readers = ["OWNER", "ADMIN", "OPERATIONAL", "FINANCE", "VIEWER"] as const;
-const managers = ["OWNER", "ADMIN"] as const;
-
 export const canReadSalarySetting = (session: SessionContext) =>
-  hasAnyRole(session.roles, readers);
+  canAccessResource(session.roles, "SALARY_SETTING", "READ");
 export const canManageSalarySetting = (session: SessionContext) =>
-  hasAnyRole(session.roles, managers);
-export const canReadSalaryClosing = canReadSalarySetting;
-export const canManageSalaryClosing = canManageSalarySetting;
-export const canManageSalaryAdjustment = canManageSalarySetting;
-export const canProcessSalary = canManageSalarySetting;
-export const canReadSalaryRecap = canReadSalarySetting;
+  canAccessResource(session.roles, "SALARY_SETTING", "MANAGE");
+export const canReadSalaryClosing = (session: SessionContext) =>
+  canAccessResource(session.roles, "SALARY_CLOSING", "READ");
+export const canManageSalaryClosing = (session: SessionContext) =>
+  canAccessResource(session.roles, "SALARY_CLOSING", "MANAGE");
+export const canManageSalaryAdjustment = canManageSalaryClosing;
+export const canProcessSalary = (session: SessionContext) =>
+  canAccessResource(session.roles, "SALARY_CLOSING", "FINALIZE");
+export const canReadSalaryRecap = (session: SessionContext) =>
+  canAccessResource(session.roles, "SALARY_RECAP", "READ");
+export const canManageSalaryRecap = (session: SessionContext) =>
+  canAccessResource(session.roles, "SALARY_RECAP", "MANAGE");
 
 export const salaryScope = (session: SessionContext) =>
   session.outletId

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
+import { canAccessResource } from "@/lib/permissions";
 import { pickupScope } from "@/modules/pickup/pickup.authorization";
 import { adjustPickupSettlement } from "@/modules/pickup";
 import { pickupAdjustmentSchema } from "@/modules/pickup/pickup-settlement.validation";
@@ -13,7 +13,7 @@ export async function POST(
   if (!session) return NextResponse.json({ error: { code: "UNAUTHORIZED", message: "Sesi tidak valid." } }, { status: 401 });
   const scope = pickupScope(session);
   if (!scope) return NextResponse.json({ error: { code: "OUTLET_REQUIRED", message: "Pilih outlet aktif." } }, { status: 400 });
-  if (!hasAnyRole(session.roles, ["OWNER", "ADMIN"])) {
+  if (!canAccessResource(session.roles, "PICKUP_SETTLEMENT", "UPDATE")) {
     return NextResponse.json({ error: { code: "FORBIDDEN", message: "Hanya Admin atau Owner yang dapat melakukan penyesuaian." } }, { status: 403 });
   }
   let body: unknown;

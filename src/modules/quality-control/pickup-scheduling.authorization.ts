@@ -1,10 +1,8 @@
 import type { SessionContext } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
-
-const OPERATORS = ["OWNER", "ADMIN", "OPERATIONAL"] as const;
+import { canAccessResource } from "@/lib/permissions";
 
 export const canReadPickupScheduling = (session: SessionContext) =>
-  hasAnyRole(session.roles, [...OPERATORS, "VIEWER"]);
+  canAccessResource(session.roles, "QUALITY_CONTROL", "READ");
 export const canSyncPickupScheduling = (session: SessionContext) =>
-  hasAnyRole(session.roles, OPERATORS);
+  canAccessResource(session.roles, "QUALITY_CONTROL", "MANAGE");
 export const canViewPickupSchedulingSensitive = canSyncPickupScheduling;

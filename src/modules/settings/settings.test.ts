@@ -13,10 +13,9 @@ const usersUi = readFileSync(new URL("../../components/settings/settings-users.t
 const maintenanceUi = readFileSync(new URL("../../components/settings/settings-maintenance.tsx", import.meta.url), "utf8");
 
 describe("Settings foundation", () => {
-  it("allows only OWNER or ADMIN", () => {
-    expect(canAccessSettings({ roles: ["OWNER"] })).toBe(true);
-    expect(canAccessSettings({ roles: ["ADMIN"] })).toBe(true);
-    for (const role of ["FINANCE", "HR", "QC", "OPERATIONAL", "VIEWER", "SUPER_ADMIN", "TEAM"]) expect(canAccessSettings({ roles: [role] })).toBe(false);
+  it("allows final full-access roles and keeps sensitive Settings hidden from others", () => {
+    for (const role of ["OWNER", "SUPER_ADMIN", "ADMIN", "FINANCE", "HR", "QC"]) expect(canAccessSettings({ roles: [role] })).toBe(true);
+    for (const role of ["OPERATIONAL", "VIEWER", "TEAM"]) expect(canAccessSettings({ roles: [role] })).toBe(false);
   });
 
   it("normalizes canonical financial category safely", () => {
@@ -103,6 +102,8 @@ describe("Settings foundation", () => {
     expect(usersUi).toContain('<option value="ADMIN_WEB">Admin</option>');
     expect(usersUi).not.toContain('>Admin Web<');
     expect(usersUi).toContain('"ADMIN_WEB"');
+    expect(usersUi).not.toMatch(/adminRoles\s*=\s*\[[^\]]*SUPER_ADMIN/);
+    expect(source).not.toMatch(/ADMIN_WEB_ROLE_CODES\s*=\s*\[[^\]]*SUPER_ADMIN/);
   });
 
   it("renders Maintenance cards and custom dialogs without raw JSON output", () => {

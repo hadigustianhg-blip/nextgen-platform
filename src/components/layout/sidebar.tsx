@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { NextgenBrand } from "@/components/ui";
+import { canAccessResource } from "@/lib/permissions";
 import {
   BarChart3,
   CalendarDays,
@@ -88,7 +89,7 @@ const readStoredBoolean = (key: string, fallback: boolean) => {
   return value === null ? fallback : value === "true";
 };
 
-export function Sidebar() {
+export function Sidebar({ roles }: { roles: readonly string[] }) {
   const pathname = usePathname();
   const monitoringActive = pathname.startsWith("/dashboard/monitoring/");
   const settlementActive = pathname.startsWith("/dashboard/settlement/");
@@ -114,7 +115,6 @@ export function Sidebar() {
     pathname,
     openGroupId: activeGroup,
   });
-  const [settingsAllowed, setSettingsAllowed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
 
@@ -130,15 +130,6 @@ export function Sidebar() {
         : current);
       setStorageReady(true);
     });
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    void fetch("/api/settings/access", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((result: { allowed?: boolean }) => { if (active) setSettingsAllowed(result.allowed === true); })
-      .catch(() => { if (active) setSettingsAllowed(false); });
-    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -164,6 +155,11 @@ export function Sidebar() {
   const qualityControlVisible = openGroupId === "quality-control";
   const financeVisible = openGroupId === "finance";
   const settingsVisible = openGroupId === "settings";
+  const settingsAllowed = canAccessResource(roles, "SETTINGS_PROFILE", "READ");
+  const canReadProfitLoss = canAccessResource(roles, "PROFIT_LOSS", "READ");
+  const canReadSalarySetting = canAccessResource(roles, "SALARY_SETTING", "READ");
+  const canReadSalaryClosing = canAccessResource(roles, "SALARY_CLOSING", "READ");
+  const canReadSalaryRecap = canAccessResource(roles, "SALARY_RECAP", "READ");
   const toggleGroup = (group: SidebarGroup) => {
     setAccordionState(toggleSidebarGroup(pathname, openGroupId, group));
   };
@@ -447,26 +443,26 @@ export function Sidebar() {
                 active={pathname.startsWith("/dashboard/finance/rincian-operasional")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<ReceiptText size={17}/>} />
-              <SidebarChild href="/dashboard/finance/cashflow-jfs" label="Profit Loss"
+              {canReadProfitLoss && <SidebarChild href="/dashboard/finance/cashflow-jfs" label="Profit Loss"
                 active={pathname.startsWith("/dashboard/finance/cashflow-jfs")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
-                onNavigate={closeMobile} icon={<WalletCards size={17}/>} />
+                onNavigate={closeMobile} icon={<WalletCards size={17}/>} />}
               <SidebarChild href="/dashboard/finance/create-invoice" label="Create Invoice"
                 active={pathname.startsWith("/dashboard/finance/create-invoice")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<FileCheck2 size={17}/>} />
-              <SidebarChild href="/dashboard/finance/salary-setting" label="Salary Setting"
+              {canReadSalarySetting && <SidebarChild href="/dashboard/finance/salary-setting" label="Salary Setting"
                 active={pathname.startsWith("/dashboard/finance/salary-setting")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
-                onNavigate={closeMobile} icon={<Settings size={17}/>} />
-              <SidebarChild href="/dashboard/finance/salary-closing" label="Salary Closing"
+                onNavigate={closeMobile} icon={<Settings size={17}/>} />}
+              {canReadSalaryClosing && <SidebarChild href="/dashboard/finance/salary-closing" label="Salary Closing"
                 active={pathname.startsWith("/dashboard/finance/salary-closing")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
-                onNavigate={closeMobile} icon={<CalendarDays size={17}/>} />
-              <SidebarChild href="/dashboard/finance/salary-recap" label="Salary Recap"
+                onNavigate={closeMobile} icon={<CalendarDays size={17}/>} />}
+              {canReadSalaryRecap && <SidebarChild href="/dashboard/finance/salary-recap" label="Salary Recap"
                 active={pathname.startsWith("/dashboard/finance/salary-recap")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
-                onNavigate={closeMobile} icon={<WalletCards size={17}/>} />
+                onNavigate={closeMobile} icon={<WalletCards size={17}/>} />}
             </div>}
           </div>
 

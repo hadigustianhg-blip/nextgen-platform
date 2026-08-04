@@ -1,9 +1,9 @@
 import type { SessionContext } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
+import { canAccessResource } from "@/lib/permissions";
 import { prisma } from "@/lib/db/prisma";
 
 export function canReadMonitoringDaily(session: SessionContext) {
-  return hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL", "VIEWER"]);
+  return canAccessResource(session.roles, "MONITORING", "READ");
 }
 
 export async function resolveMonitoringOutlet(

@@ -1,7 +1,9 @@
 import type { SessionContext } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
+import { canAccessResource } from "@/lib/permissions";
 
 export const canReadFinance = (session: SessionContext) =>
-  hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL", "VIEWER"]);
+  canAccessResource(session.roles, "OPERATIONAL_DETAIL", "READ");
 export const canExportFinance = (session: SessionContext) =>
-  hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL"]);
+  canAccessResource(session.roles, "OPERATIONAL_DETAIL", "EXPORT");
+export const canManageFinance = (session: SessionContext) =>
+  canAccessResource(session.roles, "OPERATIONAL_DETAIL", "MANAGE");

@@ -20,7 +20,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ data: { redirectTo: "/dashboard" } });
+    return NextResponse.json({ data: { redirectTo: result.redirectTo } });
   } catch {
     return NextResponse.json(
       { error: { code: "INTERNAL_ERROR", message: "Terjadi gangguan. Silakan coba kembali." } },

@@ -1,20 +1,16 @@
 import type { SessionContext } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
-
-const PICKUP_READ_ROLES = ["OWNER", "ADMIN", "OPERATIONAL", "VIEWER"] as const;
-const PICKUP_SYNC_ROLES = ["OWNER", "ADMIN", "OPERATIONAL"] as const;
-const PICKUP_PII_ROLES = ["OWNER", "ADMIN"] as const;
+import { canAccessResource } from "@/lib/permissions";
 
 export function canReadPickup(session: SessionContext) {
-  return hasAnyRole(session.roles, PICKUP_READ_ROLES);
+  return canAccessResource(session.roles, "PICKUP_SETTLEMENT", "READ");
 }
 
 export function canSyncPickup(session: SessionContext) {
-  return hasAnyRole(session.roles, PICKUP_SYNC_ROLES);
+  return canAccessResource(session.roles, "PICKUP_SETTLEMENT", "MANAGE");
 }
 
 export function canViewPickupPii(session: SessionContext) {
-  return hasAnyRole(session.roles, PICKUP_PII_ROLES);
+  return canAccessResource(session.roles, "PICKUP_SETTLEMENT", "UPDATE");
 }
 
 export function pickupScope(session: SessionContext) {

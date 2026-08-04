@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   operationalScope: vi.fn(),
   canRead: vi.fn(),
+  canManage: vi.fn(),
   schema: { safeParse: vi.fn() },
   read: vi.fn(),
   sync: vi.fn(),
@@ -12,13 +13,16 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/auth/session", () => ({ getSession: mocks.getSession }));
 vi.mock("@/modules/operational-settlement", () => ({ operationalScope: mocks.operationalScope }));
 vi.mock("@/modules/finance", () => ({
-  canReadFinance: mocks.canRead,
   financeRangeSchema: mocks.schema,
   JfsCashflowError: class JfsCashflowError extends Error {
     constructor(public readonly code: string) { super(code); }
   },
   readJfsCashflow: mocks.read,
   runJfsCashflowSync: mocks.sync,
+}));
+vi.mock("@/modules/profit-loss", () => ({
+  canReadProfitLoss: mocks.canRead,
+  canManageProfitLoss: mocks.canManage,
 }));
 
 import { GET, POST } from "./route";
@@ -33,6 +37,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getSession.mockResolvedValue({ userId: "user-1", roles: ["ADMIN"] });
   mocks.canRead.mockReturnValue(true);
+  mocks.canManage.mockReturnValue(true);
   mocks.operationalScope.mockReturnValue({ tenantId: "tenant-1", outletId: "outlet-1" });
   mocks.schema.safeParse.mockReturnValue({ success: true, data: range });
   mocks.read.mockResolvedValue(result);

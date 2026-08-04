@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import {
-  canReadSalaryRecap,
+  canManageSalaryRecap,
   salaryErrorResponse,
   salaryScope,
 } from "@/modules/salary";
@@ -23,7 +23,7 @@ export async function PATCH(_request: Request, context: Context) {
       headers: noStore,
     });
   }
-  if (!canReadSalaryRecap(session)) {
+  if (!canManageSalaryRecap(session)) {
     return NextResponse.json({ error: { code: "FORBIDDEN" } }, {
       status: 403,
       headers: noStore,

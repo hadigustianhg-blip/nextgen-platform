@@ -759,7 +759,10 @@ describe("Salary domain, permissions, UI and migration contracts", () => {
 
   it("uses role-backed permission gates and active outlet context", () => {
     expect(canManageSalarySetting(session(["OWNER"]))).toBe(true);
-    expect(canManageSalaryClosing(session(["ADMIN"]))).toBe(true);
+    expect(canManageSalaryClosing(session(["ADMIN"]))).toBe(false);
+    expect(canManageSalaryClosing(session(["FINANCE"]))).toBe(true);
+    expect(canManageSalaryClosing(session(["HR"]))).toBe(true);
+    expect(canManageSalaryClosing(session(["QC"]))).toBe(true);
     expect(canManageSalarySetting(session(["VIEWER"]))).toBe(false);
     expect(canReadSalaryRecap(session(["VIEWER"]))).toBe(true);
     expect(salaryScope(session(["ADMIN"]))).toEqual(scope);

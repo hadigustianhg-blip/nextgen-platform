@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { hashSessionToken, isTeamSession } from "./session";
+import { hashSessionToken, isTeamSession, resolveTeamContext, TeamContextError, type SessionContext } from "./session";
 
 describe("hashSessionToken", () => {
   it("returns a deterministic SHA-256 hash without retaining the token", () => {
@@ -17,6 +17,39 @@ describe("TEAM access boundary", () => {
     expect(isTeamSession({ roles: ["TEAM"] })).toBe(true);
     expect(isTeamSession({ roles: ["OWNER"] })).toBe(false);
     expect(isTeamSession({ roles: ["ADMIN"] })).toBe(false);
+  });
+
+  it("derives the employee identity only from the active scoped membership", async () => {
+    const session: SessionContext = {
+      sessionId: "session-1", tenantId: "tenant-1", tenantName: "Tenant",
+      userId: "user-1", userName: "Team", email: "team@example.test",
+      outletId: "outlet-1", outletCode: "SUM001A", roles: ["TEAM"],
+    };
+    const findFirst = async (args: { where: Record<string, unknown> }) => {
+      expect(args.where).toMatchObject({
+        userId: "user-1", tenantId: "tenant-1", outletId: "outlet-1", status: "ACTIVE",
+        salaryEmployee: { tenantId: "tenant-1", outletId: "outlet-1", status: "ACTIVE" },
+      });
+      return {
+        id: "membership-1", tenantId: "tenant-1", outletId: "outlet-1",
+        salaryEmployeeId: "employee-1", salaryEmployee: { name: "Kurir Satu", status: "ACTIVE" },
+      };
+    };
+    await expect(resolveTeamContext(session, { teamMembership: { findFirst } } as never)).resolves.toMatchObject({
+      membershipId: "membership-1", salaryEmployeeId: "employee-1", employeeName: "Kurir Satu",
+    });
+  });
+
+  it("rejects missing, inactive, cross-scope, and non-TEAM identities", async () => {
+    const base = {
+      sessionId: "session-1", tenantId: "tenant-1", tenantName: "Tenant",
+      userId: "user-1", userName: "User", email: "user@example.test",
+      outletId: "outlet-1", outletCode: "SUM001A", roles: ["TEAM"],
+    } satisfies SessionContext;
+    const noMembership = { teamMembership: { findFirst: async () => null } } as never;
+    await expect(resolveTeamContext(base, noMembership)).rejects.toBeInstanceOf(TeamContextError);
+    await expect(resolveTeamContext({ ...base, roles: ["ADMIN"] }, noMembership)).rejects.toBeInstanceOf(TeamContextError);
+    await expect(resolveTeamContext({ ...base, outletId: null, outletCode: null }, noMembership)).rejects.toBeInstanceOf(TeamContextError);
   });
 
   it("keeps TEAM out of admin sessions and redirects dashboard access centrally", () => {

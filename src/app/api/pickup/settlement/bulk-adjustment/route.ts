@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
+import { canAccessResource } from "@/lib/permissions";
 import { pickupScope } from "@/modules/pickup/pickup.authorization";
 import { bulkAdjustPickupSettlements } from "@/modules/pickup";
 import { pickupBulkAdjustmentSchema } from "@/modules/pickup/pickup-settlement.validation";
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  if (!hasAnyRole(session.roles, ["OWNER", "ADMIN"])) {
+  if (!canAccessResource(session.roles, "PICKUP_SETTLEMENT", "UPDATE")) {
     return NextResponse.json(
       {
         error: {

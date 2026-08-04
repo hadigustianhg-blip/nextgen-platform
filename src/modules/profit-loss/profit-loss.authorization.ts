@@ -1,10 +1,12 @@
 import type { SessionContext } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
-import { canReadFinance } from "@/modules/finance/finance.authorization";
+import { canAccessResource } from "@/lib/permissions";
 
-export const canReadProfitLoss = canReadFinance;
+export const canReadProfitLoss = (session: SessionContext) =>
+  canAccessResource(session.roles, "PROFIT_LOSS", "READ");
 export const canManageProfitLoss = (session: SessionContext) =>
-  hasAnyRole(session.roles, ["OWNER", "ADMIN"]);
+  canAccessResource(session.roles, "PROFIT_LOSS", "MANAGE");
+export const canExportProfitLoss = (session: SessionContext) =>
+  canAccessResource(session.roles, "PROFIT_LOSS", "EXPORT");
 export const profitLossScope = (session: SessionContext) => session.outletId
   ? { tenantId: session.tenantId, outletId: session.outletId }
   : null;

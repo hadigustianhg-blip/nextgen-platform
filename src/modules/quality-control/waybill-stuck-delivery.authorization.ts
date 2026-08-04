@@ -1,8 +1,8 @@
 import type { SessionContext } from "@/lib/auth/session";
-import { hasAnyRole } from "@/lib/permissions/roles";
+import { canAccessResource } from "@/lib/permissions";
 
 export const canReadWaybillStuck = (session: SessionContext) =>
-  hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL", "VIEWER"]);
+  canAccessResource(session.roles, "QUALITY_CONTROL", "READ");
 
 export const canSyncWaybillStuck = (session: SessionContext) =>
-  hasAnyRole(session.roles, ["OWNER", "ADMIN", "OPERATIONAL"]);
+  canAccessResource(session.roles, "QUALITY_CONTROL", "MANAGE");

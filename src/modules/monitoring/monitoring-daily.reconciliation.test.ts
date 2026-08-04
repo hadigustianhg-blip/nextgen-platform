@@ -50,7 +50,7 @@ describe("Monitoring Daily reconciliation contracts", () => {
       "utf8",
     );
     expect(route).toContain('process.env.NODE_ENV === "production"');
-    expect(route).toContain('["OWNER", "ADMIN"]');
+    expect(route).toContain('canAccessResource(session.roles, "MONITORING", "MANAGE")');
     expect(route).not.toMatch(/token|cookie|password/i);
   });
 });

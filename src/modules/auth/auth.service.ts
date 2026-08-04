@@ -17,6 +17,7 @@ export async function login(input: LoginInput) {
       tenantId: true,
       outletId: true,
       passwordHash: true,
+      roles: { select: { role: { select: { code: true } } } },
     },
   });
 
@@ -46,7 +47,10 @@ export async function login(input: LoginInput) {
     }),
   ]);
 
-  return { ok: true as const };
+  return {
+    ok: true as const,
+    redirectTo: user.roles.some(({ role }) => role.code === "TEAM") ? "/team" : "/dashboard",
+  };
 }
 
 export async function logout(session: SessionContext) {
