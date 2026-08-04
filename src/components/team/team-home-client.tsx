@@ -7,6 +7,7 @@ import { ArrowRight, CalendarPlus, CheckCircle2, Clock3, HandCoins, LogIn, LogOu
 type Attendance = { id: string; status: string; checkInAt: string | null; checkOutAt: string | null };
 type TodayData = { businessDate: string; attendance: Attendance | null; location: { configured: boolean; active: boolean; radiusMeters: number | null } };
 type ProfileData = { division: string };
+type LeaveSummary = { type: "LEAVE" | "PERMISSION" | "SICK"; startDate: string; endDate: string; status: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED" };
 type Action = "clock-in" | "clock-out";
 type ApiBody = { success?: boolean; data?: unknown; error?: { code?: string } };
 
@@ -35,6 +36,7 @@ function time(value: string | null | undefined) {
 export function TeamHomeClient({ employeeName, outletCode }: { employeeName: string; outletCode: string }) {
   const [today, setToday] = useState<TodayData | null>(null);
   const [division, setDivision] = useState("Memuat divisi…");
+  const [latestLeave, setLatestLeave] = useState<LeaveSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<Action | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -43,9 +45,10 @@ export function TeamHomeClient({ employeeName, outletCode }: { employeeName: str
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const [attendance, profile] = await Promise.all([requestJson("/api/team/attendance/today"), requestJson("/api/team/profile")]);
+      const [attendance, profile, leave] = await Promise.all([requestJson("/api/team/attendance/today"), requestJson("/api/team/profile"), requestJson("/api/team/leave?page=1&pageSize=1")]);
       setToday(attendance.data as TodayData);
       setDivision((profile.data as ProfileData).division);
+      setLatestLeave(((leave as { data?: LeaveSummary[] }).data ?? [])[0] ?? null);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Dashboard gagal dimuat."); }
     finally { setLoading(false); }
   }, []);
@@ -113,14 +116,14 @@ export function TeamHomeClient({ employeeName, outletCode }: { employeeName: str
       <section>
         <h2 className="mb-3 text-base font-extrabold text-slate-950">Aksi Cepat</h2>
         <div className="grid grid-cols-3 gap-3">
-          <QuickLink href="/team/leave" icon={CalendarPlus} label="Ajukan Cuti" />
-          <QuickLink href="/team/leave" icon={Clock3} label="Ajukan Izin" />
-          <QuickLink href="/team/leave" icon={Stethoscope} label="Ajukan Sakit" />
+          <QuickLink href="/team/leave?type=LEAVE" icon={CalendarPlus} label="Ajukan Cuti" />
+          <QuickLink href="/team/leave?type=PERMISSION" icon={Clock3} label="Ajukan Izin" />
+          <QuickLink href="/team/leave?type=SICK" icon={Stethoscope} label="Ajukan Sakit" />
         </div>
       </section>
 
       <section className="grid gap-3 sm:grid-cols-2">
-        <InfoCard href="/team/leave" title="Pengajuan" description="Cuti, izin, dan sakit sedang dipersiapkan." />
+        <InfoCard href="/team/leave" title="Pengajuan" description={latestLeave ? `${{ LEAVE: "Cuti", PERMISSION: "Izin", SICK: "Sakit" }[latestLeave.type]} · ${latestLeave.startDate} · ${{ PENDING: "Pending", APPROVED: "Disetujui", REJECTED: "Ditolak", CANCELLED: "Dibatalkan" }[latestLeave.status]}` : "Belum ada pengajuan. Lihat Pengajuan"} />
         <InfoCard href="/team/cash-advance" title="Kasbon Saya" description="Data kasbon pribadi belum tersedia." icon={<HandCoins size={21} />} />
       </section>
 

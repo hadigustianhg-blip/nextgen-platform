@@ -25,6 +25,7 @@ export const permissionResources = [
   "SETTINGS_TARGET_KPI",
   "USER_PROFILE",
   "ATTENDANCE",
+  "LEAVE_MANAGEMENT",
   "TEAM_PORTAL",
 ] as const;
 
@@ -84,6 +85,10 @@ function operationalCan(resource: PermissionResource, action: PermissionAction) 
 
 function roleCan(role: RoleCode, resource: PermissionResource, action: PermissionAction) {
   if (resource === "ATTENDANCE") {
+    if (["SUPER_ADMIN", "OWNER", "ADMIN", "HR"].includes(role)) return true;
+    return ["FINANCE", "QC"].includes(role) && action === "READ";
+  }
+  if (resource === "LEAVE_MANAGEMENT") {
     if (["SUPER_ADMIN", "OWNER", "ADMIN", "HR"].includes(role)) return true;
     return ["FINANCE", "QC"].includes(role) && action === "READ";
   }

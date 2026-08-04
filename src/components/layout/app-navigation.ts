@@ -26,6 +26,7 @@ const appNavigation: readonly AppNavigationItem[] = [
   { label: "Penjadwalan Pickup", href: "/dashboard/quality-control/pickup-scheduling", section: "Quality Control", resource: "QUALITY_CONTROL" },
   { label: "Rincian Operasional", href: "/dashboard/finance/rincian-operasional", section: "Finance & HR", resource: "OPERATIONAL_DETAIL" },
   { label: "Absensi", href: "/dashboard/hr/attendance", section: "Finance & HR", resource: "ATTENDANCE", keywords: ["attendance", "team"] },
+  { label: "Pengajuan Team", href: "/dashboard/hr/leave", section: "Finance & HR", resource: "LEAVE_MANAGEMENT", keywords: ["cuti", "izin", "sakit"] },
   { label: "Profit Loss", href: "/dashboard/finance/cashflow-jfs", section: "Finance & HR", resource: "PROFIT_LOSS", keywords: ["cashflow jfs"] },
   { label: "Create Invoice", href: "/dashboard/finance/create-invoice", section: "Finance & HR", resource: "INVOICE" },
   { label: "Salary Setting", href: "/dashboard/finance/salary-setting", section: "Finance & HR", resource: "SALARY_SETTING" },

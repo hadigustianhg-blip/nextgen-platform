@@ -18,12 +18,12 @@ describe("NEXTGEN Team PWA shell", () => {
     expect(source).not.toMatch(/AppShell|Sidebar|AppHeader/);
   });
 
-  it("keeps every Team route protected and placeholders non-mutating", async () => {
+  it("keeps every Team route protected and unfinished placeholders non-mutating", async () => {
     for (const file of [
       "src/app/team/page.tsx", "src/app/team/attendance/page.tsx", "src/app/team/leave/page.tsx",
       "src/app/team/delivery/page.tsx", "src/app/team/cash-advance/page.tsx", "src/app/team/profile/page.tsx", "src/app/team/offline/page.tsx",
     ]) expect(await read(file), file).toContain("requireTeamContext()");
-    const placeholders = await Promise.all(["src/app/team/leave/page.tsx", "src/app/team/delivery/page.tsx", "src/app/team/cash-advance/page.tsx"].map(read));
+    const placeholders = await Promise.all(["src/app/team/delivery/page.tsx", "src/app/team/cash-advance/page.tsx"].map(read));
     expect(placeholders.join("\n")).not.toMatch(/fetch\(|POST|localStorage|RawDispatch/);
   });
 

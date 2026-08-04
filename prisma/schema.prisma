@@ -163,6 +163,19 @@ enum AttendanceEventType {
   CORRECTION
 }
 
+enum LeaveRequestType {
+  LEAVE
+  PERMISSION
+  SICK
+}
+
+enum LeaveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
 enum SalaryProfileStatus {
   DRAFT
   ACTIVE
@@ -306,6 +319,7 @@ model Tenant {
   attendanceLocationSettings AttendanceLocationSetting[]
   attendanceRecords          AttendanceRecord[]
   attendanceEvents           AttendanceEvent[]
+  leaveRequests              LeaveRequest[]
 }
 
 model Outlet {
@@ -371,6 +385,7 @@ model Outlet {
   attendanceLocationSetting  AttendanceLocationSetting?
   attendanceRecords          AttendanceRecord[]
   attendanceEvents           AttendanceEvent[]
+  leaveRequests              LeaveRequest[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -434,6 +449,7 @@ model User {
   attendanceLocationsUpdated          AttendanceLocationSetting[] @relation("AttendanceLocationUpdatedBy")
   attendanceRecordsCorrected          AttendanceRecord[]          @relation("AttendanceRecordCorrectedBy")
   attendanceEventsActed               AttendanceEvent[]           @relation("AttendanceEventActor")
+  leaveRequestsReviewed               LeaveRequest[]              @relation("LeaveRequestReviewer")
 
   @@unique([tenantId, email])
   @@index([tenantId, status])
@@ -1415,6 +1431,7 @@ model SalaryEmployee {
   teamMemberships   TeamMembership[]
   attendanceRecords AttendanceRecord[]
   attendanceEvents  AttendanceEvent[]
+  leaveRequests     LeaveRequest[]
 
   @@unique([tenantId, outletId, name])
   @@index([tenantId, outletId, division, status])
@@ -1512,6 +1529,33 @@ model AttendanceEvent {
   @@unique([tenantId, outletId, idempotencyKey])
   @@index([attendanceRecordId, createdAt])
   @@index([tenantId, outletId, salaryEmployeeId, occurredAt(sort: Desc)])
+}
+
+model LeaveRequest {
+  id               String             @id @default(uuid()) @db.Uuid
+  tenantId         String             @db.Uuid
+  outletId         String             @db.Uuid
+  salaryEmployeeId String             @db.Uuid
+  type             LeaveRequestType
+  startDate        DateTime           @db.Date
+  endDate          DateTime           @db.Date
+  reason           String
+  status           LeaveRequestStatus @default(PENDING)
+  submittedAt      DateTime           @default(now()) @db.Timestamptz(3)
+  cancelledAt      DateTime?          @db.Timestamptz(3)
+  reviewedAt       DateTime?          @db.Timestamptz(3)
+  reviewedByUserId String?            @db.Uuid
+  reviewNotes      String?
+  createdAt        DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime           @updatedAt @db.Timestamptz(3)
+  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet           Outlet             @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  salaryEmployee   SalaryEmployee     @relation(fields: [salaryEmployeeId], references: [id], onDelete: Restrict)
+  reviewedBy       User?              @relation("LeaveRequestReviewer", fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, outletId, status])
+  @@index([salaryEmployeeId, startDate])
+  @@index([reviewedByUserId])
 }
 
 model SalaryProfile {

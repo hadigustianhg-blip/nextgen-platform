@@ -9,7 +9,7 @@ describe("final role permission policy", () => {
   });
 
   it.each(["FINANCE", "QC"])("preserves %s full access outside Attendance correction", (role) => {
-    for (const resource of permissionResources.filter((item) => item !== "TEAM_PORTAL" && item !== "ATTENDANCE")) {
+    for (const resource of permissionResources.filter((item) => item !== "TEAM_PORTAL" && item !== "ATTENDANCE" && item !== "LEAVE_MANAGEMENT")) {
       for (const action of permissionActions) expect(canAccessResource([role], resource, action)).toBe(true);
     }
   });
@@ -48,6 +48,20 @@ describe("final role permission policy", () => {
     }
     for (const role of ["VIEWER", "OPERATIONAL", "TEAM"]) {
       expect(canAccessResource([role], "ATTENDANCE", "UPDATE")).toBe(false);
+    }
+  });
+
+  it("keeps Leave readable for Finance/QC but approval restricted", () => {
+    for (const role of ["OWNER", "ADMIN", "HR"]) {
+      expect(canAccessResource([role], "LEAVE_MANAGEMENT", "READ")).toBe(true);
+      expect(canAccessResource([role], "LEAVE_MANAGEMENT", "APPROVE")).toBe(true);
+    }
+    for (const role of ["FINANCE", "QC"]) {
+      expect(canAccessResource([role], "LEAVE_MANAGEMENT", "READ")).toBe(true);
+      expect(canAccessResource([role], "LEAVE_MANAGEMENT", "APPROVE")).toBe(false);
+    }
+    for (const role of ["VIEWER", "OPERATIONAL", "TEAM"]) {
+      expect(canAccessResource([role], "LEAVE_MANAGEMENT", "APPROVE")).toBe(false);
     }
   });
 });

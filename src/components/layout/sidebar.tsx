@@ -161,6 +161,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
   const canReadSalaryClosing = canAccessResource(roles, "SALARY_CLOSING", "READ");
   const canReadSalaryRecap = canAccessResource(roles, "SALARY_RECAP", "READ");
   const canReadAttendance = canAccessResource(roles, "ATTENDANCE", "READ");
+  const canReadLeave = canAccessResource(roles, "LEAVE_MANAGEMENT", "READ");
   const toggleGroup = (group: SidebarGroup) => {
     setAccordionState(toggleSidebarGroup(pathname, openGroupId, group));
   };
@@ -444,6 +445,10 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
                 active={pathname.startsWith("/dashboard/hr/attendance")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<CalendarDays size={17}/>} />}
+              {canReadLeave && <SidebarChild href="/dashboard/hr/leave" label="Pengajuan Team"
+                active={pathname.startsWith("/dashboard/hr/leave")}
+                collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
+                onNavigate={closeMobile} icon={<FileCheck2 size={17}/>} />}
               <SidebarChild href="/dashboard/finance/rincian-operasional" label="Rincian Operasional"
                 active={pathname.startsWith("/dashboard/finance/rincian-operasional")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
