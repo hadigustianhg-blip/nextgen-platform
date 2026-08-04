@@ -1,0 +1,15 @@
+{
+  "primary": "#2563EB",
+  "primaryHover": "#1D4ED8",
+  "navy": "#071633",
+  "sidebar": "#08172F",
+  "background": "#F5F7FB",
+  "card": "#FFFFFF",
+  "border": "#E5E7EB",
+  "textPrimary": "#111827",
+  "textSecondary": "#6B7280",
+  "success": "#16A34A",
+  "warning": "#F59E0B",
+  "danger": "#DC2626",
+  "purpleAccent": "#7C3AED"
+}

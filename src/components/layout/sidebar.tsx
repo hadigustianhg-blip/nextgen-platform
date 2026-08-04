@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NextgenBrand } from "@/components/ui";
 import {
   BarChart3,
   CalendarDays,
@@ -202,9 +203,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
         ].join(" ")}
       >
         <div className="flex h-20 items-center border-b border-white/10 px-5">
-          <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-blue-500 font-black tracking-tight">
-            N
-          </div>
+          <NextgenBrand variant="mark" className="size-10 shrink-0" priority />
           <div className={`ml-3 min-w-0 ${labelClass}`}>
             <div className="font-extrabold tracking-[0.16em]">NEXTGEN</div>
             <div className="text-[11px] text-blue-200">Operations System</div>

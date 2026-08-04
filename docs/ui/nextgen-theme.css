@@ -1,0 +1,15 @@
+:root {
+  --nextgen-primary: #2563EB;
+  --nextgen-primary-hover: #1D4ED8;
+  --nextgen-navy: #071633;
+  --nextgen-sidebar: #08172F;
+  --nextgen-background: #F5F7FB;
+  --nextgen-card: #FFFFFF;
+  --nextgen-border: #E5E7EB;
+  --nextgen-text-primary: #111827;
+  --nextgen-text-secondary: #6B7280;
+  --nextgen-success: #16A34A;
+  --nextgen-warning: #F59E0B;
+  --nextgen-danger: #DC2626;
+  --nextgen-purple: #7C3AED;
+}

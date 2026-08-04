@@ -1,14 +1,9 @@
 import type { ReactNode } from "react";
 import type { SessionContext } from "@/lib/auth/session";
+import { UserAvatar } from "@/components/ui";
 import { Sidebar } from "./sidebar";
 
 export function AppShell({ session, children }: { session: SessionContext; children: ReactNode }) {
-  const initials = session.userName
-    .split(" ")
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("");
-
   return (
     <div className="flex min-h-screen bg-[#f4f7fb]">
       <Sidebar outletCode={session.outletCode} />
@@ -19,7 +14,7 @@ export function AppShell({ session, children }: { session: SessionContext; child
               <p className="text-sm font-semibold text-slate-800">{session.userName}</p>
               <p className="text-xs text-slate-500">{session.roles.join(" · ")}</p>
             </div>
-            <div className="grid size-10 place-items-center rounded-xl bg-blue-50 text-sm font-bold text-blue-700">{initials}</div>
+            <UserAvatar name={session.userName} />
           </div>
         </header>
         <main className="p-5 lg:p-8">{children}</main>

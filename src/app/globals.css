@@ -3,6 +3,30 @@
 :root {
   --background: #f4f7fb;
   --foreground: #172033;
+
+  /* NEXTGEN semantic theme foundation. Existing aliases preserve Phase 1 visuals. */
+  --nextgen-primary: #2563eb;
+  --nextgen-primary-hover: #1d4ed8;
+  --nextgen-primary-soft: #eff6ff;
+  --nextgen-navy: #071633;
+  --nextgen-sidebar: #08172f;
+  --nextgen-sidebar-hover: rgb(255 255 255 / 0.07);
+  --nextgen-sidebar-active: #3b82f6;
+  --nextgen-background: var(--background);
+  --nextgen-surface: #ffffff;
+  --nextgen-card: var(--nextgen-surface);
+  --nextgen-border: #e5e7eb;
+  --nextgen-text-primary: #111827;
+  --nextgen-text-secondary: #6b7280;
+  --nextgen-text-muted: #94a3b8;
+  --nextgen-success: #16a34a;
+  --nextgen-success-soft: #f0fdf4;
+  --nextgen-warning: #f59e0b;
+  --nextgen-warning-soft: #fffbeb;
+  --nextgen-danger: #dc2626;
+  --nextgen-danger-soft: #fef2f2;
+  --nextgen-purple: #7c3aed;
+  --nextgen-purple-soft: #f5f3ff;
 }
 
 * {
@@ -28,4 +52,19 @@ a {
 
 button {
   cursor: pointer;
+}
+
+.nextgen-dashboard-pattern {
+  position: relative;
+  isolation: isolate;
+}
+
+.nextgen-dashboard-pattern::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: url("/backgrounds/dashboard-pattern.svg") center / cover no-repeat;
+  content: "";
+  opacity: 0.035;
+  pointer-events: none;
 }

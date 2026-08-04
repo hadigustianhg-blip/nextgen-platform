@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420">
+<rect width="640" height="420" rx="32" fill="#F8FAFC"/>
+<circle cx="320" cy="155" r="92" fill="#E0E7FF"/>
+<text x="320" y="183" text-anchor="middle" font-family="Arial, sans-serif" font-size="86">⚙</text>
+<text x="320" y="292" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-weight="700" font-size="28" fill="#0F172A">Sedang pemeliharaan</text>
+<text x="320" y="330" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="20" fill="#64748B">Fitur akan kembali tersedia secepatnya.</text>
+</svg>
