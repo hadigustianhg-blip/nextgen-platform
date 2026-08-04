@@ -23,6 +23,9 @@ describe("premium global app header", () => {
     expect(getSearchableNavigation(false).some((item) => item.label === "Audit Log")).toBe(false);
     expect(getSearchableNavigation(true).find((item) => item.label === "Audit Log"))
       .toMatchObject({ href: "/dashboard/settings/audit-logs" });
+    expect(getSearchableNavigation(false).some((item) => item.label === "Target & KPI")).toBe(false);
+    expect(getSearchableNavigation(true).find((item) => item.label === "Target & KPI"))
+      .toMatchObject({ href: "/dashboard/settings/target-kpi" });
   });
 
   it("supports wrapping Arrow Up and Arrow Down navigation", () => {

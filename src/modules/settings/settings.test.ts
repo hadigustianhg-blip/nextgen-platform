@@ -8,6 +8,7 @@ const maintenanceSource = readFileSync(new URL("./settings.maintenance.service.t
 const schema = readFileSync(new URL("../../../prisma/schema.prisma", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../../../prisma/migrations/20260803000400_add_settings_foundation/migration.sql", import.meta.url), "utf8");
 const teamMigration = readFileSync(new URL("../../../prisma/migrations/20260803000500_add_team_membership/migration.sql", import.meta.url), "utf8");
+const targetMigration = readFileSync(new URL("../../../prisma/migrations/20260804000100_add_operational_target_setting/migration.sql", import.meta.url), "utf8");
 const usersUi = readFileSync(new URL("../../components/settings/settings-users.tsx", import.meta.url), "utf8");
 const maintenanceUi = readFileSync(new URL("../../components/settings/settings-maintenance.tsx", import.meta.url), "utf8");
 
@@ -78,6 +79,17 @@ describe("Settings foundation", () => {
     expect(teamMigration).toContain('TeamMembership_one_active_per_employee_key');
     expect(teamMigration).toContain("'TEAM'");
     expect(teamMigration).not.toMatch(/UPDATE\s+"SalaryEmployee"|DELETE FROM|DROP\s+(TABLE|COLUMN|TYPE)/i);
+  });
+
+  it("adds tenant/outlet Target & KPI storage without changing transaction tables", () => {
+    expect(schema).toContain("model OperationalTargetSetting");
+    expect(schema).toContain("@@unique([tenantId, outletId])");
+    expect(targetMigration).toContain('CREATE TABLE "OperationalTargetSetting"');
+    expect(targetMigration).toContain("ADD VALUE IF NOT EXISTS 'SETTINGS_TARGET_KPI_UPDATED'");
+    expect(targetMigration).toContain('DECIMAL(5,2)');
+    expect(targetMigration).toContain('"pendingMaximum" INTEGER');
+    expect(targetMigration).not.toMatch(/ALTER TABLE "(Raw|Master|Salary|Payment|OperationalExpense)/);
+    expect(targetMigration).not.toMatch(/DROP\s+(TABLE|COLUMN|TYPE)|TRUNCATE|DELETE FROM/i);
   });
 
   it("provides custom user management UI without native confirmation dialogs", () => {

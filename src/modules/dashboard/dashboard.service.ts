@@ -40,9 +40,10 @@ import type {
   SlaDashboardData,
   StuckDeliveryDashboardData,
 } from "./dashboard.types";
+import { getEffectiveOperationalTargets, type EffectiveOperationalTargets } from "@/modules/settings/target-kpi.service";
 
 type Scope = { tenantId: string; outletId: string };
-type Loader<T> = (scope: Scope, period: DashboardPeriod) => Promise<{
+type Loader<T> = (scope: Scope, period: DashboardPeriod, targets?: EffectiveOperationalTargets) => Promise<{
   data: T;
   updatedAt?: Date | string | null;
 }>;
@@ -81,8 +82,9 @@ function sumStrings(values: string[]) {
 export async function loadMonitoringDashboard(
   scope: Scope,
   period: DashboardPeriod,
+  providedTargets?: EffectiveOperationalTargets,
 ) {
-  const [dispatch, pickup] = await Promise.all([
+  const [dispatch, pickup, targets] = await Promise.all([
     getActiveDispatchRecords({
       ...scope,
       periodStart: dateValue(period.startDate),
@@ -106,7 +108,9 @@ export async function loadMonitoringDashboard(
         updatedAt: true,
       },
     }),
+    providedTargets ?? getEffectiveOperationalTargets(scope),
   ]);
+  const achievementTarget = targets.achievementDeliveryTarget.value ?? DELIVERY_TARGET;
   const deliveryRows = aggregateDeliveryMonitoringMetrics(dispatch);
   const pickupRows = aggregatePickupMonitoringMetrics(pickup);
   const metrics = summarizeMonitoringMetrics(deliveryRows, pickupRows);
@@ -122,7 +126,7 @@ export async function loadMonitoringDashboard(
     return {
       date,
       achievement: calculateAchievement(totalTtd, totalDelivery),
-      target: DELIVERY_TARGET,
+      target: achievementTarget,
       totalTtd,
       pending: delivery.reduce((sum, row) => sum + row.totalPending, 0),
       pickupRevenue: sumStrings(pickups.map((row) => row.regularRevenue)),
@@ -133,7 +137,10 @@ export async function loadMonitoringDashboard(
   const totalTtd = deliveryRows.reduce((sum, row) => sum + row.totalTtd, 0);
   return {
     data: {
-      target: DELIVERY_TARGET,
+      target: achievementTarget,
+      pendingMaximum: targets.pendingMaximum.value,
+      pickupRevenueTarget: targets.pickupRevenueTarget.value,
+      pickupWeightTarget: targets.pickupWeightTarget.value,
       summary: {
         achievement: calculateAchievement(totalTtd, totalDelivery),
         totalTtd,
@@ -383,12 +390,13 @@ export async function loadPickupPaymentDashboard(
   };
 }
 
-export async function loadSlaDashboard(scope: Scope, period: DashboardPeriod) {
+export async function loadSlaDashboard(scope: Scope, period: DashboardPeriod, providedTargets?: EffectiveOperationalTargets) {
+  const targets = providedTargets ?? await getEffectiveOperationalTargets(scope);
   const result = await getSlaCutOff({
     ...scope,
     periodStart: period.startDate,
     periodEnd: period.endDate,
-  });
+  }, targets);
   return {
     data: {
       target: result.period.target,
@@ -406,17 +414,19 @@ export async function loadSlaDashboard(scope: Scope, period: DashboardPeriod) {
 export async function loadStuckDeliveryDashboard(
   scope: Scope,
   period: DashboardPeriod,
+  providedTargets?: EffectiveOperationalTargets,
 ) {
-  const rows = await prisma.rawInventoryDetail.groupBy({
+  const [rows, targets] = await Promise.all([prisma.rawInventoryDetail.groupBy({
     by: ["businessDate"],
     where: { ...scope, businessDate: rangeWhere(period) },
     _count: { _all: true },
     _max: { updatedAt: true },
     orderBy: { businessDate: "asc" },
-  });
+  }), providedTargets ?? getEffectiveOperationalTargets(scope)]);
   return {
     data: {
       totalInventory: rows.reduce((sum, row) => sum + row._count._all, 0),
+      waybillStuckMaximum: targets.waybillStuckMaximum.value,
       daily: rows.map((row) => ({
         date: dateKey(row.businessDate),
         totalInventory: row._count._all,
@@ -462,7 +472,9 @@ export async function getDashboardOverview(
   scope: Scope,
   period: DashboardPeriod,
   loaders: DashboardLoaders = dashboardLoaders,
+  targetLoader: (scope: Scope) => Promise<EffectiveOperationalTargets> = getEffectiveOperationalTargets,
 ): Promise<DashboardOverview> {
+  const targets = await targetLoader(scope);
   const [
     monitoring,
     deliverySettlement,
@@ -472,13 +484,13 @@ export async function getDashboardOverview(
     sla,
     stuckDelivery,
   ] = await Promise.allSettled([
-    loaders.monitoring(scope, period),
-    loaders.deliverySettlement(scope, period),
-    loaders.operationalSettlement(scope, period),
-    loaders.paymentSettlement(scope, period),
-    loaders.pickupPayment(scope, period),
-    loaders.sla(scope, period),
-    loaders.stuckDelivery(scope, period),
+    loaders.monitoring(scope, period, targets),
+    loaders.deliverySettlement(scope, period, targets),
+    loaders.operationalSettlement(scope, period, targets),
+    loaders.paymentSettlement(scope, period, targets),
+    loaders.pickupPayment(scope, period, targets),
+    loaders.sla(scope, period, targets),
+    loaders.stuckDelivery(scope, period, targets),
   ] as const);
   const section = <T>(result: PromiseSettledResult<{
     data: T;

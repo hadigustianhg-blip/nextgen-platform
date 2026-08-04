@@ -11,6 +11,7 @@ import {
   aggregatePickupMonitoringMetrics,
   summarizeMonitoringMetrics,
 } from "./monitoring-metrics";
+import { getEffectiveOperationalTargets } from "@/modules/settings/target-kpi.service";
 
 const canonical = (value: string | null | undefined) =>
   (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ")
@@ -56,6 +57,7 @@ export async function getMonitoringDaily(input: {
   const [
     deliveryRecords,
     pickupRecords,
+    targets,
   ] = await Promise.all([
     getActiveDispatchDataset({
       tenantId: input.tenantId,
@@ -70,9 +72,15 @@ export async function getMonitoringDaily(input: {
         sourceFetchedAt: true, updatedAt: true,
       },
     }),
+    getEffectiveOperationalTargets(input),
   ]);
 
-  const deliveryRows = aggregateDeliveryMonitoringMetrics(deliveryRecords);
+  const achievementTarget = targets.achievementDeliveryTarget.value ?? DELIVERY_TARGET;
+  const deliveryRows = aggregateDeliveryMonitoringMetrics(deliveryRecords).map((row) => ({
+    ...row,
+    target: achievementTarget,
+    status: row.achievement >= achievementTarget ? "ACHIEVE" as const : "NOT ACHIEVE" as const,
+  }));
   const pickupRows = aggregatePickupMonitoringMetrics(pickupRecords);
   const metrics = summarizeMonitoringMetrics(deliveryRows, pickupRows);
   const totalDelivery = deliveryRows.reduce((sum, row) => sum + row.totalDelivery, 0);
@@ -80,7 +88,8 @@ export async function getMonitoringDaily(input: {
 
   return {
     businessDate,
-    target: DELIVERY_TARGET,
+    target: achievementTarget,
+    targetSource: targets.achievementDeliveryTarget.source,
     summary: {
       deliveryAchievement: totalDelivery === 0 ? 0 : totalTtd / totalDelivery * 100,
       totalDelivery,

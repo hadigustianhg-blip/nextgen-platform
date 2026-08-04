@@ -60,11 +60,11 @@ export function SlaCutOffClient({ outlets, initialOutletId, businessDate, canSyn
     ["Sudah Tanda Terima", number(result.summary.sudahTandaTerima), ""],
     ["Belum Tanda Terima", number(result.summary.belumTandaTerima), ""],
     ["Lewat SLA", number(result.summary.lewatSla), ""],
-    ["Hari Achieve", number(result.summary.hariAchieve), "≥ 95%"],
-    ["Hari Not Achieve", number(result.summary.hariNotAchieve), "< 95%"],
+    ["Hari Achieve", number(result.summary.hariAchieve), `≥ ${number(result.period.target)}%`],
+    ["Hari Not Achieve", number(result.summary.hariNotAchieve), `< ${number(result.period.target)}%`],
   ];
   return <div>
-    <header className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-semibold text-blue-600">Quality Control</p><h1 className="mt-1 text-3xl font-extrabold text-slate-950">SLA Cut Off</h1><p className="mt-2 text-sm text-slate-600">Monitoring performa SLA berdasarkan periode operasional tanggal 21 sampai 20.</p></div><div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600"><ShieldCheck className="mr-2 inline" size={18}/>Target SLA <b>95%</b></div></header>
+    <header className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-semibold text-blue-600">Quality Control</p><h1 className="mt-1 text-3xl font-extrabold text-slate-950">SLA Cut Off</h1><p className="mt-2 text-sm text-slate-600">Monitoring performa SLA berdasarkan periode operasional tanggal 21 sampai 20.</p></div><div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600"><ShieldCheck className="mr-2 inline" size={18}/>Target SLA <b>{number(result.period.target)}%</b></div></header>
     <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       <label className="text-xs font-semibold text-slate-600">Periode SLA<select aria-label="Periode SLA" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm">{cycles.map((cycle) => <option key={cycle.startDate} value={cycle.startDate}>{cycleLabel(cycle.startDate, cycle.endDate)}</option>)}</select></label>
       <label className="text-xs font-semibold text-slate-600">Outlet<select aria-label="Outlet" value={outletId} onChange={(e) => setOutletId(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm">{outlets.map((outlet) => <option key={outlet.id} value={outlet.id}>{outlet.code} — {outlet.name}</option>)}</select></label>

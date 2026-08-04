@@ -12,11 +12,23 @@ import {
 
 const period = { startDate: "2026-08-01", endDate: "2026-08-31" };
 const scope = { tenantId: "tenant-a", outletId: "outlet-a" };
+const targets = {
+  achievementDeliveryTarget: { value: 97, source: "CUSTOM" as const },
+  pendingMaximum: { value: null, source: "UNSET" as const },
+  slaTarget: { value: 96, source: "CUSTOM" as const },
+  pickupRevenueTarget: { value: null, source: "UNSET" as const },
+  pickupWeightTarget: { value: null, source: "UNSET" as const },
+  waybillStuckMaximum: { value: null, source: "UNSET" as const },
+};
+const targetLoader = vi.fn(async () => targets);
 
 function fixtures(): DashboardLoaders {
   return {
     monitoring: vi.fn(async () => ({ data: {
       target: 95,
+      pendingMaximum: null,
+      pickupRevenueTarget: null,
+      pickupWeightTarget: null,
       summary: { achievement: 96, totalTtd: 96, totalPending: 4, pickupRevenue: "1000", pickupWeight: "25" },
       daily: [{ date: "2026-08-01", achievement: 96, target: 95, totalTtd: 96, pending: 4, pickupRevenue: "1000", pickupWeight: "25" }],
     } })),
@@ -42,6 +54,7 @@ function fixtures(): DashboardLoaders {
     } })),
     stuckDelivery: vi.fn(async () => ({ data: {
       totalInventory: 8,
+      waybillStuckMaximum: null,
       daily: [{ date: "2026-08-01", totalInventory: 8 }],
     } })),
   };
@@ -49,7 +62,7 @@ function fixtures(): DashboardLoaders {
 
 describe("Operational executive dashboard", () => {
   it("mirrors every source contract without changing card values", async () => {
-    const result = await getDashboardOverview(scope, period, fixtures());
+    const result = await getDashboardOverview(scope, period, fixtures(), targetLoader);
     expect(result.monitoring.status === "success" && result.monitoring.data.summary)
       .toMatchObject({ achievement: 96, totalTtd: 96, totalPending: 4, pickupRevenue: "1000", pickupWeight: "25" });
     expect(result.deliverySettlement.status === "success" && result.deliverySettlement.data.summary)
@@ -65,16 +78,16 @@ describe("Operational executive dashboard", () => {
 
   it("passes tenant, outlet, and period to every source loader", async () => {
     const loaders = fixtures();
-    await getDashboardOverview(scope, period, loaders);
+    await getDashboardOverview(scope, period, loaders, targetLoader);
     for (const loader of Object.values(loaders)) {
-      expect(loader).toHaveBeenCalledWith(scope, period);
+      expect(loader).toHaveBeenCalledWith(scope, period, targets);
     }
   });
 
   it("isolates a failed source while retaining every other section", async () => {
     const loaders = fixtures();
     loaders.deliverySettlement = vi.fn(async () => { throw new Error("private upstream detail"); });
-    const result = await getDashboardOverview(scope, period, loaders);
+    const result = await getDashboardOverview(scope, period, loaders, targetLoader);
     expect(result.deliverySettlement).toEqual({
       status: "error",
       data: null,
@@ -147,5 +160,7 @@ describe("Operational executive dashboard", () => {
     expect(client.slice(slaIndex, stuckIndex)).toContain("<Donut");
     expect(client.slice(slaIndex, stuckIndex)).toContain('variant="bar" compact');
     expect(client).not.toContain("8–14 Hari");
+    expect(client).toContain('"Target belum diatur"');
+    expect(client).toContain("stuck.waybillStuckMaximum");
   });
 });

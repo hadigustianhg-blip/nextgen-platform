@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 const items = [
   ["Profil Bisnis", "/dashboard/settings/business-profile"],
   ["User & Hak Akses", "/dashboard/settings/users"],
+  ["Target & KPI", "/dashboard/settings/target-kpi"],
   ["Finance", "/dashboard/settings/finance"],
   ["Integrasi", "/dashboard/settings/integrations"],
   ["Maintenance", "/dashboard/settings/maintenance"],

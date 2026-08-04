@@ -436,6 +436,10 @@ export function DashboardOverviewClient({
     weight: { label: "Berat Pickup Harian", series: [{ key: "pickupWeight", label: "Berat Pickup", color: "var(--nextgen-warning)" }], kind: "weight" as const },
   };
   const activeMonitoringChart = monitoringCharts[monitoringChart as keyof typeof monitoringCharts];
+  const pendingWithinTarget = monitoring?.pendingMaximum != null && monitoring.summary.totalPending <= monitoring.pendingMaximum;
+  const pickupRevenueWithinTarget = monitoring?.pickupRevenueTarget != null && Number(monitoring.summary.pickupRevenue) >= monitoring.pickupRevenueTarget;
+  const pickupWeightWithinTarget = monitoring?.pickupWeightTarget != null && Number(monitoring.summary.pickupWeight) >= monitoring.pickupWeightTarget;
+  const stuckWithinTarget = stuck?.waybillStuckMaximum != null && stuck.totalInventory <= stuck.waybillStuckMaximum;
 
   return (
     <div className="mx-auto min-w-0 max-w-[1800px] space-y-6 overflow-x-clip">
@@ -479,9 +483,30 @@ export function DashboardOverviewClient({
               <div className="dashboard-kpi-strip grid gap-px bg-[var(--nextgen-border)] sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                 <MonitoringKpi label="Achievement Delivery" value={percent(monitoring.summary.achievement)} note={`Target ${percent(monitoring.target)}`} icon={Gauge} tone="emerald" index={0} />
                 <MonitoringKpi label="Total TTD" value={number(monitoring.summary.totalTtd)} note="Total tanda tangan" icon={CircleCheckBig} tone="blue" index={1} />
-                <MonitoringKpi label="Pending" value={<span className="text-[var(--nextgen-danger)]">{number(monitoring.summary.totalPending)}</span>} note="Butuh tindak lanjut" icon={CircleAlert} tone="red" index={2} />
-                <MonitoringKpi label="Pickup Omset" value={money(monitoring.summary.pickupRevenue)} note="Total omset pickup" icon={Wallet} tone="violet" index={3} />
-                <MonitoringKpi label="Total Berat Pickup" value={`${number(monitoring.summary.pickupWeight, 2)} kg`} note="Berat pickup" icon={Scale} tone="amber" index={4} />
+                <MonitoringKpi
+                  label="Pending"
+                  value={number(monitoring.summary.totalPending)}
+                  note={monitoring.pendingMaximum == null ? "Target belum diatur" : `Maksimal ${number(monitoring.pendingMaximum)} paket`}
+                  icon={CircleAlert}
+                  tone={monitoring.pendingMaximum == null ? "slate" : pendingWithinTarget ? "emerald" : "red"}
+                  index={2}
+                />
+                <MonitoringKpi
+                  label="Pickup Omset"
+                  value={money(monitoring.summary.pickupRevenue)}
+                  note={monitoring.pickupRevenueTarget == null ? "Target belum diatur" : `Target ${money(monitoring.pickupRevenueTarget)}`}
+                  icon={Wallet}
+                  tone={monitoring.pickupRevenueTarget == null ? "slate" : pickupRevenueWithinTarget ? "emerald" : "amber"}
+                  index={3}
+                />
+                <MonitoringKpi
+                  label="Total Berat Pickup"
+                  value={`${number(monitoring.summary.pickupWeight, 2)} kg`}
+                  note={monitoring.pickupWeightTarget == null ? "Target belum diatur" : `Target ${number(monitoring.pickupWeightTarget, 2)} kg`}
+                  icon={Scale}
+                  tone={monitoring.pickupWeightTarget == null ? "slate" : pickupWeightWithinTarget ? "emerald" : "amber"}
+                  index={4}
+                />
               </div>
             </AppCard>
           )}
@@ -508,7 +533,17 @@ export function DashboardOverviewClient({
 
             <SectionFrame title="Waybill Stuck Delivery" description="KPI inventory stuck periode aktif." href="/dashboard/quality-control/waybill-stuck-delivery" section={result.stuckDelivery} icon={PackageSearch} tone="amber">
               {stuck && <div className="flex min-h-64 flex-col justify-between rounded-2xl border border-[var(--nextgen-border)] bg-slate-50/60 p-5">
-                <div><p className="text-xs font-semibold text-[var(--nextgen-text-secondary)]">Total Inventory</p><p className="mt-2 text-4xl font-black tracking-tight text-[var(--nextgen-text-primary)]">{number(stuck.totalInventory)}</p><p className="mt-2 text-xs text-[var(--nextgen-danger)]">{stuck.totalInventory > 0 ? "Perlu ditindaklanjuti" : "Tidak ada waybill stuck"}</p></div>
+                <div>
+                  <p className="text-xs font-semibold text-[var(--nextgen-text-secondary)]">Total Inventory</p>
+                  <p className="mt-2 text-4xl font-black tracking-tight text-[var(--nextgen-text-primary)]">{number(stuck.totalInventory)}</p>
+                  <p className={`mt-2 text-xs ${stuck.waybillStuckMaximum == null ? "text-slate-500" : stuckWithinTarget ? "text-[var(--nextgen-success)]" : "text-[var(--nextgen-danger)]"}`}>
+                    {stuck.waybillStuckMaximum == null
+                      ? "Target belum diatur"
+                      : stuckWithinTarget
+                        ? `Dalam batas target (maks. ${number(stuck.waybillStuckMaximum)})`
+                        : `Melebihi target (maks. ${number(stuck.waybillStuckMaximum)})`}
+                  </p>
+                </div>
                 {stuck.totalInventory === 0 ? (
                   <EmptyState kind="monitoring" label="Tidak ada waybill stuck pada periode ini" className="ml-auto w-32" />
                 ) : (

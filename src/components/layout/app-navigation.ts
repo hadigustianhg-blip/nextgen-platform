@@ -29,6 +29,7 @@ const appNavigation: readonly AppNavigationItem[] = [
   { label: "Salary Recap", href: "/dashboard/finance/salary-recap", section: "Finance & HR" },
   { label: "Profil Bisnis", href: "/dashboard/settings/business-profile", section: "Pengaturan", settingsOnly: true },
   { label: "User & Hak Akses", href: "/dashboard/settings/users", section: "Pengaturan", settingsOnly: true },
+  { label: "Target & KPI", href: "/dashboard/settings/target-kpi", section: "Pengaturan", settingsOnly: true, keywords: ["target", "kpi"] },
   { label: "Finance", href: "/dashboard/settings/finance", section: "Pengaturan", settingsOnly: true },
   { label: "Integrasi", href: "/dashboard/settings/integrations", section: "Pengaturan", settingsOnly: true },
   { label: "Maintenance", href: "/dashboard/settings/maintenance", section: "Pengaturan", settingsOnly: true },

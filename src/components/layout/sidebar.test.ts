@@ -250,4 +250,10 @@ describe("pickup navigation", () => {
       );
     }
   });
+
+  it("exposes only the new Target & KPI item under Settings", async () => {
+    const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
+    expect(source).toContain('["Target & KPI", "/dashboard/settings/target-kpi"]');
+    expect(source).toContain('const settingsActive = pathname.startsWith("/dashboard/settings/")');
+  });
 });

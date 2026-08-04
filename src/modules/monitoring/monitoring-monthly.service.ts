@@ -15,6 +15,7 @@ import {
   aggregatePickupMonitoringMetrics,
   summarizeMonitoringMetrics,
 } from "./monitoring-metrics";
+import { getEffectiveOperationalTargets } from "@/modules/settings/target-kpi.service";
 
 const dateValue = (value: string) => new Date(`${value}T00:00:00.000Z`);
 
@@ -39,6 +40,7 @@ export async function getMonitoringMonthly(input: {
   const [
     deliveryRecords,
     pickupRecords,
+    targets,
   ] = await Promise.all([
     getActiveDispatchRecords({
       tenantId: input.tenantId,
@@ -54,13 +56,19 @@ export async function getMonitoringMonthly(input: {
         sourceFetchedAt: true, updatedAt: true,
       },
     }),
+    getEffectiveOperationalTargets(input),
   ]);
 
   const dailyDeliveryRows = aggregateDeliveryMonitoringMetrics(deliveryRecords);
   const dailyPickupRows = aggregatePickupMonitoringMetrics(pickupRecords);
+  const achievementTarget = targets.achievementDeliveryTarget.value ?? DELIVERY_TARGET;
   const deliveryRows = buildMonthlyDeliveryRows(
     dailyDeliveryRows,
-  );
+  ).map((row) => ({
+    ...row,
+    target: achievementTarget,
+    status: row.achievement >= achievementTarget ? "ACHIEVE" as const : "NOT ACHIEVE" as const,
+  }));
   const pickupRows = buildMonthlyPickupRows(
     dailyPickupRows,
   );
@@ -73,7 +81,8 @@ export async function getMonitoringMonthly(input: {
 
   return {
     period: { startDate: input.startDate, endDate: input.endDate },
-    target: DELIVERY_TARGET,
+    target: achievementTarget,
+    targetSource: targets.achievementDeliveryTarget.source,
     summary: {
       deliveryAchievement: calculateAchievement(totalTtd, totalDelivery),
       totalDelivery,

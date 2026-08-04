@@ -30,6 +30,17 @@ export const userUpdateSchema = z.object(userIdentityFields).superRefine(validat
 export const resetPasswordSchema = z.object({ password: z.string().min(10).max(128) });
 export const bankAccountSchema = z.object({ bankName: z.string().trim().min(2).max(100), accountNumber: z.string().trim().min(3).max(60), accountHolder: z.string().trim().min(2).max(120), displayOrder: z.coerce.number().int().min(0).max(999).default(0), isActive: z.boolean().default(true), isDefault: z.boolean().default(false) });
 export const financialCategorySchema = z.object({ name: z.string().trim().min(2).max(120), type: z.enum(["INCOME", "EXPENSE"]), isActive: z.boolean().default(true), sortOrder: z.coerce.number().int().min(0).max(999).default(0) });
+const nullablePercentage = z.number().finite().min(0).max(100).nullable();
+const nullableNonNegative = z.number().finite().min(0).nullable();
+const nullableNonNegativeInteger = z.number().finite().int().min(0).nullable();
+export const targetKpiUpdateSchema = z.object({
+  achievementDeliveryTarget: nullablePercentage,
+  pendingMaximum: nullableNonNegativeInteger,
+  slaTarget: nullablePercentage,
+  pickupRevenueTarget: nullableNonNegative,
+  pickupWeightTarget: nullableNonNegative,
+  waybillStuckMaximum: nullableNonNegativeInteger,
+}).strict();
 export const maintenanceResetSchema = z.object({
   candidateKey: z.enum(["salaryClosingVoid", "salaryPublicationShareExpired", "salaryPublicationShareRevoked", "profitLossManualVoid", "profitLossAdjustmentVoid", "oldSyncRuns", "salaryRecapTest"]),
   reason: z.string().trim().min(10).max(500),

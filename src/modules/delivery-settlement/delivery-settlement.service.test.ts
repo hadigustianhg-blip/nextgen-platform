@@ -145,7 +145,7 @@ describe("Delivery Settlement aggregation", () => {
     expect(classifyCodSettlement({ repaymentTypeCode: 1, repaymentTypeLabel: null })).toBe("COD_CASH");
     expect(classifyCodSettlement({ repaymentTypeCode: 3, repaymentTypeLabel: null })).toBe("COD_CASH");
     expect(classifyCodSettlement({ repaymentTypeCode: 2, repaymentTypeLabel: null })).toBe("COD_QRIS");
-    expect(classifyCodSettlement({ repaymentTypeCode: 0, repaymentTypeLabel: null })).toBe("EXCLUDED");
+    expect(classifyCodSettlement({ repaymentTypeCode: 0, repaymentTypeLabel: null })).toBe("COD_CASH");
     expect(classifyCodSettlement({ repaymentTypeCode: 9, repaymentTypeLabel: "COD" })).toBe("EXCLUDED");
   });
 

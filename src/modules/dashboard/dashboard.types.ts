@@ -14,6 +14,9 @@ export type DashboardSection<T> =
 
 export type MonitoringDashboardData = {
   target: number;
+  pendingMaximum: number | null;
+  pickupRevenueTarget: number | null;
+  pickupWeightTarget: number | null;
   summary: {
     achievement: number;
     totalTtd: number;
@@ -86,6 +89,7 @@ export type SlaDashboardData = {
 
 export type StuckDeliveryDashboardData = {
   totalInventory: number;
+  waybillStuckMaximum: number | null;
   daily: Array<{ date: string; totalInventory: number }>;
 };
 
