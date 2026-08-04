@@ -62,6 +62,6 @@ describe("TEAM access boundary", () => {
     expect(teamPage).toContain("Aplikasi Team sedang dipersiapkan.");
     expect(teamPage).toContain("team.tenantName");
     expect(teamPage).toContain("<UserAvatar");
-    expect(teamPage).not.toContain("attendance");
+    expect(teamPage).toContain('href="/team/attendance"');
   });
 });

@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest";
 import { canAccessResource, permissionActions, permissionResources } from "./policy";
 
 describe("final role permission policy", () => {
-  it.each(["OWNER", "SUPER_ADMIN", "FINANCE", "HR", "QC"])("grants %s full admin access", (role) => {
+  it.each(["OWNER", "SUPER_ADMIN", "HR"])("grants %s full admin access", (role) => {
     for (const resource of permissionResources.filter((item) => item !== "TEAM_PORTAL")) {
+      for (const action of permissionActions) expect(canAccessResource([role], resource, action)).toBe(true);
+    }
+  });
+
+  it.each(["FINANCE", "QC"])("preserves %s full access outside Attendance correction", (role) => {
+    for (const resource of permissionResources.filter((item) => item !== "TEAM_PORTAL" && item !== "ATTENDANCE")) {
       for (const action of permissionActions) expect(canAccessResource([role], resource, action)).toBe(true);
     }
   });
@@ -29,5 +35,19 @@ describe("final role permission policy", () => {
     expect(canAccessResource(["TEAM"], "DASHBOARD", "READ")).toBe(false);
     expect(canAccessResource(["TEAM"], "SETTINGS_USERS", "READ")).toBe(false);
     expect(canAccessResource(["TEAM"], "TEAM_PORTAL", "UPDATE")).toBe(false);
+  });
+
+  it("keeps Attendance readable for full-access roles but correction restricted", () => {
+    for (const role of ["OWNER", "ADMIN", "HR"]) {
+      expect(canAccessResource([role], "ATTENDANCE", "READ")).toBe(true);
+      expect(canAccessResource([role], "ATTENDANCE", "UPDATE")).toBe(true);
+    }
+    for (const role of ["FINANCE", "QC"]) {
+      expect(canAccessResource([role], "ATTENDANCE", "READ")).toBe(true);
+      expect(canAccessResource([role], "ATTENDANCE", "UPDATE")).toBe(false);
+    }
+    for (const role of ["VIEWER", "OPERATIONAL", "TEAM"]) {
+      expect(canAccessResource([role], "ATTENDANCE", "UPDATE")).toBe(false);
+    }
   });
 });

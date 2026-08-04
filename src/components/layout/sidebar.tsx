@@ -95,7 +95,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
   const settlementActive = pathname.startsWith("/dashboard/settlement/");
   const paymentActive = pathname.startsWith("/dashboard/payment/");
   const qualityControlActive = pathname.startsWith("/dashboard/quality-control/");
-  const financeActive = pathname.startsWith("/dashboard/finance/");
+  const financeActive = pathname.startsWith("/dashboard/finance/") || pathname.startsWith("/dashboard/hr/");
   const settingsActive = pathname.startsWith("/dashboard/settings/");
   const [collapsed, setCollapsed] = useState(false);
   const activeGroup: SidebarGroup | null = monitoringActive
@@ -160,6 +160,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
   const canReadSalarySetting = canAccessResource(roles, "SALARY_SETTING", "READ");
   const canReadSalaryClosing = canAccessResource(roles, "SALARY_CLOSING", "READ");
   const canReadSalaryRecap = canAccessResource(roles, "SALARY_RECAP", "READ");
+  const canReadAttendance = canAccessResource(roles, "ATTENDANCE", "READ");
   const toggleGroup = (group: SidebarGroup) => {
     setAccordionState(toggleSidebarGroup(pathname, openGroupId, group));
   };
@@ -439,6 +440,10 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
               <ChevronDown size={15} className={`${labelClass} ml-auto transition-transform ${financeVisible ? "rotate-180" : ""}`} />
             </button>
             {financeVisible && <div id="finance-submenu">
+              {canReadAttendance && <SidebarChild href="/dashboard/hr/attendance" label="Absensi"
+                active={pathname.startsWith("/dashboard/hr/attendance")}
+                collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
+                onNavigate={closeMobile} icon={<CalendarDays size={17}/>} />}
               <SidebarChild href="/dashboard/finance/rincian-operasional" label="Rincian Operasional"
                 active={pathname.startsWith("/dashboard/finance/rincian-operasional")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}

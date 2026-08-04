@@ -1,5 +1,6 @@
 import { requireTeamContext } from "@/lib/auth/session";
 import { UserAvatar } from "@/components/ui";
+import Link from "next/link";
 
 export const metadata = { title: "NEXTGEN Team" };
 
@@ -19,6 +20,7 @@ export default async function TeamComingSoonPage() {
         </dl>
         <h2 className="mt-5 text-lg font-bold text-slate-950">Aplikasi Team sedang dipersiapkan.</h2>
         <p className="mt-3 text-sm leading-6 text-slate-500">Akun Anda sudah siap. Fitur operasional Team/Kurir akan tersedia pada fase berikutnya.</p>
+        <Link href="/team/attendance" className="mt-6 flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-5 text-sm font-bold text-white">Buka Absensi</Link>
         <form action="/api/auth/logout" method="post" className="mt-6">
           <button className="h-11 rounded-xl border border-slate-200 px-5 text-sm font-bold text-slate-700 hover:bg-slate-50">Keluar</button>
         </form>
