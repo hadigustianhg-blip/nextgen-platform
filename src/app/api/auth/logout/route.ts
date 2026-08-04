@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+import { redirectToLogin } from "@/lib/auth/redirect";
 import { getAnySession } from "@/lib/auth/session";
 import { logout } from "@/modules/auth/auth.service";
 
-export async function POST(request: Request) {
+export async function POST() {
   const session = await getAnySession();
   if (session) await logout(session);
-  return NextResponse.redirect(new URL("/login", request.url), 303);
+  return redirectToLogin({ status: 303 });
 }

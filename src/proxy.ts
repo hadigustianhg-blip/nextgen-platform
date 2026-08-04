@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionCookieName } from "@/lib/auth/constants";
+import { redirectToPublicLogin } from "@/lib/auth/redirect";
 
 export function proxy(request: NextRequest) {
   if (!request.cookies.has(getSessionCookieName())) {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", request.nextUrl.pathname);
-    return NextResponse.redirect(loginUrl);
+    return redirectToPublicLogin({
+      appUrl: process.env.NEXT_PUBLIC_APP_URL,
+      nextPath: request.nextUrl.pathname,
+    });
   }
   return NextResponse.next();
 }
