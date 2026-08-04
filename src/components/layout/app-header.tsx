@@ -20,7 +20,7 @@ import {
 
 type HeaderSession = Pick<
   SessionContext,
-  "userName" | "roles" | "outletCode"
+  "userName" | "roles" | "outletCode" | "tenantName"
 >;
 
 function displayRole(roles: readonly string[]) {
@@ -238,16 +238,21 @@ export function AppHeader({ session }: { session: HeaderSession }) {
                   <p className="truncate text-sm font-semibold text-[var(--nextgen-text-primary)]">{session.userName}</p>
                   <p className="truncate text-xs text-[var(--nextgen-text-secondary)]">{displayRole(session.roles)}</p>
                 </div>
+                <div className="border-b border-[var(--nextgen-border)] px-3 py-2.5">
+                  <p className="truncate text-xs font-semibold text-[var(--nextgen-text-primary)]">{session.tenantName || "Tenant"}</p>
+                  <p className="mt-0.5 truncate text-[11px] text-[var(--nextgen-text-secondary)]">{outletCode}</p>
+                </div>
                 <button
                   type="button"
                   role="menuitem"
-                  disabled
-                  title="Segera tersedia"
-                  className="mt-1 flex w-full cursor-not-allowed items-center gap-2.5 rounded-[10px] px-3 py-2.5 text-left text-sm text-slate-400"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    router.push("/dashboard/profile");
+                  }}
+                  className="mt-1 flex w-full items-center gap-2.5 rounded-[10px] px-3 py-2.5 text-left text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-300"
                 >
                   <UserRound size={17} aria-hidden="true" />
                   <span className="flex-1">Profil Saya</span>
-                  <span className="text-[10px]">Segera tersedia</span>
                 </button>
                 <form action="/api/auth/logout" method="post">
                   <button

@@ -5,7 +5,7 @@ describe("loginSchema", () => {
   it("accepts a valid login payload", () => {
     expect(
       loginSchema.safeParse({
-        tenant: "nextgen-demo",
+        tenant: "tenant-development",
         email: "owner@nextgen.local",
         password: "NextgenDev123!",
       }).success,

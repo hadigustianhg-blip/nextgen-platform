@@ -36,7 +36,7 @@ describe("TEAM access boundary", () => {
       };
     };
     await expect(resolveTeamContext(session, { teamMembership: { findFirst } } as never)).resolves.toMatchObject({
-      membershipId: "membership-1", salaryEmployeeId: "employee-1", employeeName: "Kurir Satu",
+      membershipId: "membership-1", salaryEmployeeId: "employee-1", employeeName: "Kurir Satu", tenantName: "Tenant",
     });
   });
 
@@ -60,6 +60,8 @@ describe("TEAM access boundary", () => {
     expect(session).toContain('if (isTeamSession(session)) redirect("/team")');
     expect(layout).toContain("await requireSession()");
     expect(teamPage).toContain("Aplikasi Team sedang dipersiapkan.");
+    expect(teamPage).toContain("team.tenantName");
+    expect(teamPage).toContain("<UserAvatar");
     expect(teamPage).not.toContain("attendance");
   });
 });

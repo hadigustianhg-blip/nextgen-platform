@@ -19,6 +19,7 @@ export interface SessionContext {
 export interface TeamContext {
   userId: string;
   tenantId: string;
+  tenantName: string;
   outletId: string;
   outletCode: string;
   membershipId: string;
@@ -101,7 +102,7 @@ async function resolveSession(): Promise<SessionContext | null> {
   return {
     sessionId: session.id,
     tenantId: session.tenantId,
-    tenantName: session.tenant.name,
+    tenantName: session.tenant.name.trim() || "Tenant",
     userId: session.userId,
     userName: session.user.name,
     email: session.user.email,
@@ -168,6 +169,7 @@ export async function resolveTeamContext(
   return {
     userId: session.userId,
     tenantId: membership.tenantId,
+    tenantName: session.tenantName || "Tenant",
     outletId: membership.outletId,
     outletCode: session.outletCode,
     membershipId: membership.id,

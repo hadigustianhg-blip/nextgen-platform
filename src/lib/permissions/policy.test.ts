@@ -21,6 +21,7 @@ describe("final role permission policy", () => {
       expect(canAccessResource(["VIEWER"], "INVOICE", action)).toBe(false);
     }
     expect(canAccessResource(["VIEWER"], "SETTINGS_PROFILE", "READ")).toBe(false);
+    expect(canAccessResource(["VIEWER"], "USER_PROFILE", "UPDATE")).toBe(true);
   });
 
   it("isolates TEAM to its own read-only portal", () => {

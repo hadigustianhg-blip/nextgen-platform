@@ -39,8 +39,8 @@ See [MIGRATION_PLAN.md](./MIGRATION_PLAN.md) for the staged migration and [ARCHI
 
 Open `http://localhost:3000`. Development seed login:
 
-- Tenant: `nextgen-demo`
-- Email: `owner@nextgen.local`
+- Tenant: `tenant-development`
+- Email: `owner@example.test`
 - Password: `SEED_OWNER_PASSWORD`, or `NextgenDev123!` when seeding outside production without that variable
 
 Never use the default development password in a shared or production environment.

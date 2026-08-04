@@ -22,15 +22,15 @@ async function main() {
   }
 
   const tenant = await prisma.tenant.upsert({
-    where: { slug: "nextgen-demo" },
-    update: { name: "NEXTGEN Demo" },
-    create: { name: "NEXTGEN Demo", slug: "nextgen-demo" },
+    where: { slug: "tenant-development" },
+    update: {},
+    create: { name: "Tenant Development", slug: "tenant-development" },
   });
 
   const outlet = await prisma.outlet.upsert({
-    where: { tenantId_code: { tenantId: tenant.id, code: "SUM001A" } },
-    update: { name: "SUM001A", isActive: true },
-    create: { tenantId: tenant.id, code: "SUM001A", name: "SUM001A" },
+    where: { tenantId_code: { tenantId: tenant.id, code: "DEV001" } },
+    update: { isActive: true },
+    create: { tenantId: tenant.id, code: "DEV001", name: "Development Outlet" },
   });
 
   const roles = await Promise.all(
@@ -51,7 +51,7 @@ async function main() {
     where: {
       tenantId_email: {
         tenantId: tenant.id,
-        email: "owner@nextgen.local",
+        email: "owner@example.test",
       },
     },
     update: {
@@ -62,7 +62,7 @@ async function main() {
     create: {
       tenantId: tenant.id,
       outletId: outlet.id,
-      email: "owner@nextgen.local",
+      email: "owner@example.test",
       name: "Development Owner",
       passwordHash: await argon2.hash(password, { type: argon2.argon2id }),
     },
@@ -77,7 +77,7 @@ async function main() {
     create: { userId: owner.id, roleId: ownerRole.id },
   });
 
-  console.info("Seed complete: NEXTGEN Demo / SUM001A / owner@nextgen.local");
+  console.info("Development seed completed.");
 }
 
 main()

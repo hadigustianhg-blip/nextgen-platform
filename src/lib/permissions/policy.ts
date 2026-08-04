@@ -23,6 +23,7 @@ export const permissionResources = [
   "SETTINGS_MAINTENANCE",
   "SETTINGS_AUDIT",
   "SETTINGS_TARGET_KPI",
+  "USER_PROFILE",
   "TEAM_PORTAL",
 ] as const;
 
@@ -62,11 +63,13 @@ const operationalResources = new Set<PermissionResource>([
   "QUALITY_CONTROL",
   "OPERATIONAL_DETAIL",
   "INVOICE",
+  "USER_PROFILE",
 ]);
 
 function operationalCan(resource: PermissionResource, action: PermissionAction) {
   if (!operationalResources.has(resource)) return false;
   if (action === "READ") return true;
+  if (resource === "USER_PROFILE") return action === "UPDATE";
   if (resource === "DASHBOARD") return false;
   if (resource === "PAYMENT_SETTLEMENT") return action === "CREATE";
   if (resource === "OPERATIONAL_DETAIL") return action === "EXPORT";
@@ -81,7 +84,10 @@ function operationalCan(resource: PermissionResource, action: PermissionAction) 
 function roleCan(role: RoleCode, resource: PermissionResource, action: PermissionAction) {
   if (fullAccessRoles.has(role)) return resource !== "TEAM_PORTAL";
   if (role === "TEAM") return resource === "TEAM_PORTAL" && action === "READ";
-  if (role === "VIEWER") return !settingsResources.has(resource) && resource !== "TEAM_PORTAL" && action === "READ";
+  if (role === "VIEWER") {
+    if (resource === "USER_PROFILE") return action === "READ" || action === "UPDATE";
+    return !settingsResources.has(resource) && resource !== "TEAM_PORTAL" && action === "READ";
+  }
   if (role === "ADMIN") return resource !== "TEAM_PORTAL" && !adminRestricted.has(resource);
   if (role === "OPERATIONAL") return operationalCan(resource, action);
   return false;

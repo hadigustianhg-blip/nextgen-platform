@@ -11,6 +11,7 @@ export type AppNavigationItem = {
 // Search-only, read-only index of routes already exposed by the existing sidebar.
 const appNavigation: readonly AppNavigationItem[] = [
   { label: "Dashboard", href: "/dashboard", section: "Utama", resource: "DASHBOARD", keywords: ["beranda", "overview"] },
+  { label: "Profil Saya", href: "/dashboard/profile", section: "Akun", resource: "USER_PROFILE", keywords: ["akun", "password"] },
   { label: "Monitoring Daily", href: "/dashboard/monitoring/daily", section: "Monitoring", resource: "MONITORING" },
   { label: "Monitoring Monthly", href: "/dashboard/monitoring/monthly", section: "Monitoring", resource: "MONITORING" },
   { label: "Pickup Settlement", href: "/dashboard/settlement/pickup", section: "Settlement Center", resource: "PICKUP_SETTLEMENT" },

@@ -107,6 +107,8 @@ export function SettingsUsers({ data, outletCode, reload }: { data: SettingsUser
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
 
   const summary = useMemo(() => ({
     total: data.length,
@@ -160,11 +162,15 @@ export function SettingsUsers({ data, outletCode, reload }: { data: SettingsUser
   }
 
   async function resetPassword() {
-    if (!passwordFor) return;
+    if (!passwordFor || saving) return;
+    if (form.password.length < 10 || form.password.length > 128 || form.password !== form.confirmPassword) {
+      setError(form.password !== form.confirmPassword ? "Konfirmasi password tidak sama." : "Password harus terdiri dari 10–128 karakter.");
+      return;
+    }
     setSaving(true); setError("");
     try {
       await settingsUserApi(`/api/settings/users/${passwordFor.id}/reset-password`, { method: "POST", body: JSON.stringify({ password: form.password }) });
-      setPasswordFor(null); setForm(emptyForm); setMessage("Password berhasil direset dan session lama dicabut.");
+      setPasswordFor(null); setForm(emptyForm); setShowResetPassword(false); setShowResetConfirmPassword(false); setMessage("Password berhasil direset dan session lama dicabut.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Password gagal direset."); } finally { setSaving(false); }
   }
 
@@ -247,7 +253,19 @@ export function SettingsUsers({ data, outletCode, reload }: { data: SettingsUser
       {error && <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700" role="alert">{error}</p>}
       <div className="mt-5 flex justify-end gap-2"><button type="button" className={`${buttonClass} bg-slate-100 text-slate-700`} onClick={() => setEditing(null)}>Batal</button><button type="button" className={buttonClass} disabled={!validUserForm || saving} onClick={() => void saveUser()}>{saving ? "Menyimpan..." : "Simpan User"}</button></div>
     </Modal>}
-    {passwordFor && <Modal title={`Reset Password — ${passwordFor.name}`} onClose={() => setPasswordFor(null)}><div className="space-y-3"><Field label="Password Baru"><input type="password" className={inputClass} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })}/></Field><Field label="Konfirmasi Password"><input type="password" className={inputClass} value={form.confirmPassword} onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })}/></Field><p className="text-xs text-slate-500">Minimal 10 karakter. Reset akan mencabut seluruh session lama.</p></div><div className="mt-5 flex justify-end gap-2"><button className={`${buttonClass} bg-slate-100 text-slate-700`} onClick={() => setPasswordFor(null)}>Batal</button><button className={buttonClass} disabled={saving || form.password.length < 10 || form.password !== form.confirmPassword} onClick={() => void resetPassword()}>{saving ? "Mereset..." : "Reset Password"}</button></div></Modal>}
+    {passwordFor && <Modal title={`Reset Password — ${passwordFor.name}`} onClose={() => { setPasswordFor(null); setShowResetPassword(false); setShowResetConfirmPassword(false); }}>
+      <div className="space-y-3">
+        <Field label="Password Baru">
+          <div className="relative"><input type={showResetPassword ? "text" : "password"} autoComplete="new-password" maxLength={128} className={`${inputClass} pr-11`} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })}/><button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-500 outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-blue-400" aria-label={showResetPassword ? "Sembunyikan password" : "Tampilkan password"} onClick={() => setShowResetPassword((visible) => !visible)}>{showResetPassword ? <EyeOff size={17} aria-hidden="true"/> : <Eye size={17} aria-hidden="true"/>}</button></div>
+        </Field>
+        <Field label="Konfirmasi Password">
+          <div className="relative"><input type={showResetConfirmPassword ? "text" : "password"} autoComplete="new-password" maxLength={128} className={`${inputClass} pr-11`} value={form.confirmPassword} onChange={(event) => setForm({ ...form, confirmPassword: event.target.value })}/><button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-500 outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-blue-400" aria-label={showResetConfirmPassword ? "Sembunyikan password" : "Tampilkan password"} onClick={() => setShowResetConfirmPassword((visible) => !visible)}>{showResetConfirmPassword ? <EyeOff size={17} aria-hidden="true"/> : <Eye size={17} aria-hidden="true"/>}</button></div>
+        </Field>
+        <p className="text-xs text-slate-500">Gunakan 10–128 karakter. Reset akan mencabut seluruh session lama.</p>
+      </div>
+      {error && <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700" role="alert">{error}</p>}
+      <div className="mt-5 flex justify-end gap-2"><button type="button" className={`${buttonClass} bg-slate-100 text-slate-700`} onClick={() => { setPasswordFor(null); setShowResetPassword(false); setShowResetConfirmPassword(false); }}>Batal</button><button type="button" className={buttonClass} disabled={saving || form.password.length < 10 || form.password.length > 128 || form.password !== form.confirmPassword} onClick={() => void resetPassword()}>{saving ? "Mereset..." : "Reset Password"}</button></div>
+    </Modal>}
     {statusFor && <Modal title={statusFor.status === "ACTIVE" ? "Nonaktifkan User" : "Aktifkan User"} onClose={() => setStatusFor(null)}><p className="text-sm leading-6 text-slate-600">{statusFor.status === "ACTIVE" ? `Nonaktifkan ${statusFor.name}? Seluruh session aktif akan dicabut.` : `Aktifkan kembali ${statusFor.name}?`}</p><div className="mt-5 flex justify-end gap-2"><button className={`${buttonClass} bg-slate-100 text-slate-700`} onClick={() => setStatusFor(null)}>Batal</button><button className={buttonClass} disabled={saving} onClick={() => void changeStatus()}>{saving ? "Memproses..." : "Konfirmasi"}</button></div></Modal>}
   </div>;
 }

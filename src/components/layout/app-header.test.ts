@@ -70,6 +70,10 @@ describe("premium global app header", () => {
     expect(source).toContain('method="post"');
     expect(source).toContain("session.userName");
     expect(source).toContain("displayRole(session.roles)");
+    expect(source).toContain('router.push("/dashboard/profile")');
+    expect(source).not.toContain("Segera tersedia");
+    expect(getSearchableNavigation(["VIEWER"]).find((item) => item.label === "Profil Saya"))
+      .toMatchObject({ href: "/dashboard/profile" });
   });
 
   it("wires the header through AppShell without changing Sidebar", async () => {

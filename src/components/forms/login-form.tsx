@@ -17,7 +17,7 @@ export function LoginForm() {
     formState: { errors, isSubmitting },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { tenant: "nextgen-demo", email: "owner@nextgen.local", password: "" },
+    defaultValues: { tenant: "", email: "", password: "" },
   });
 
   async function onSubmit(values: LoginInput) {
@@ -45,7 +45,7 @@ export function LoginForm() {
         <span className="mb-2 block text-sm font-semibold text-slate-700">Tenant</span>
         <span className="relative block">
           <Network className="absolute left-4 top-3.5 text-slate-400" size={19} />
-          <input {...register("tenant")} className={fieldClass} autoComplete="organization" placeholder="nextgen-demo" />
+          <input {...register("tenant")} className={fieldClass} autoComplete="organization" placeholder="Masukkan kode tenant" />
         </span>
         {errors.tenant && <span className="mt-1.5 block text-xs text-red-600">{errors.tenant.message}</span>}
       </label>

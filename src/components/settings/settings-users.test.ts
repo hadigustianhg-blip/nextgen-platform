@@ -73,4 +73,13 @@ describe("Settings Users create form", () => {
     const teamForm: UserForm = { ...validAdmin, userType: "TEAM_PWA", roleCode: "TEAM", salaryEmployeeId: "" };
     expect(validateSettingsUserForm(teamForm, { isCreate: true, outletCode: "SUM001A" }).salaryEmployeeId).toBe("Team member wajib dipilih.");
   });
+
+  it("uses independent non-submit Eye toggles in admin reset password", () => {
+    expect(source).toContain('type={showResetPassword ? "text" : "password"}');
+    expect(source).toContain('type={showResetConfirmPassword ? "text" : "password"}');
+    expect(source).toContain('aria-label={showResetPassword ? "Sembunyikan password" : "Tampilkan password"}');
+    expect(source).toContain('aria-label={showResetConfirmPassword ? "Sembunyikan password" : "Tampilkan password"}');
+    expect(source).toMatch(/<button type="button"[^>]+aria-label=\{showResetPassword/);
+    expect(source).toMatch(/<button type="button"[^>]+aria-label=\{showResetConfirmPassword/);
+  });
 });
