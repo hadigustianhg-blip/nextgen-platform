@@ -90,11 +90,12 @@ describe("premium global app header", () => {
     expect(source.indexOf('aria-label="Notifikasi"')).toBeLessThan(source.indexOf('aria-label="Buka menu profil"'));
   });
 
-  it("uses one file-based browser favicon while retaining the separate Apple icon", async () => {
+  it("uses one cache-busted browser favicon while retaining the separate Apple icon", async () => {
     const layout = await readFile(new URL("../../app/layout.tsx", import.meta.url), "utf8");
-    const icon = await readFile(new URL("../../app/icon.svg", import.meta.url), "utf8");
+    const icon = await readFile(new URL("../../../public/icon-v2.svg", import.meta.url), "utf8");
     expect(layout).not.toContain('url: "/brand/favicon.png"');
     expect(layout).not.toContain("shortcut:");
+    expect(layout.match(/icon: \[\{ url: "\/icon-v2\.svg"/g)).toHaveLength(1);
     expect(layout).toContain('apple: [{ url: "/brand/app-icon-192.png"');
     expect(icon).toContain('fill="#050505"');
     expect(icon).toContain("nextgen-icon-primary");

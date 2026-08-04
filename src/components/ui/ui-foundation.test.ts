@@ -14,7 +14,7 @@ const svgAssets = [
   "public/brand/nextgen-logo-dark.svg",
   "public/brand/nextgen-mark.svg",
   "public/brand/nextgen-wordmark.svg",
-  "src/app/icon.svg",
+  "public/icon-v2.svg",
   "public/illustrations/integration-empty.svg",
   "public/illustrations/empty-search.svg",
   "public/illustrations/empty-monitoring.svg",
@@ -90,7 +90,8 @@ describe("NEXTGEN UI asset and theme foundation", () => {
       "maintenance.svg",
     ]) expect(empty).toContain(path);
     expect(layout).not.toContain('url: "/brand/favicon.png"');
-    expect(await readFile(asset("src/app/icon.svg"), "utf8"))
+    expect(layout.match(/icon: \[\{ url: "\/icon-v2\.svg"/g)).toHaveLength(1);
+    expect(await readFile(asset("public/icon-v2.svg"), "utf8"))
       .toContain('fill="#050505"');
     expect(layout).toContain('url: "/brand/app-icon-192.png"');
     expect(layout).not.toContain("shortcut:");
