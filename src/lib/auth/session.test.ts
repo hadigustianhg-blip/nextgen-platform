@@ -56,12 +56,14 @@ describe("TEAM access boundary", () => {
     const session = readFileSync(new URL("./session.ts", import.meta.url), "utf8");
     const layout = readFileSync(new URL("../../app/(dashboard)/dashboard/layout.tsx", import.meta.url), "utf8");
     const teamPage = readFileSync(new URL("../../app/team/page.tsx", import.meta.url), "utf8");
+    const teamShell = readFileSync(new URL("../../components/team/team-shell.tsx", import.meta.url), "utf8");
     expect(session).toContain("session && !isTeamSession(session) ? session : null");
     expect(session).toContain('if (isTeamSession(session)) redirect("/team")');
     expect(layout).toContain("await requireSession()");
-    expect(teamPage).toContain("Aplikasi Team sedang dipersiapkan.");
-    expect(teamPage).toContain("team.tenantName");
-    expect(teamPage).toContain("<UserAvatar");
-    expect(teamPage).toContain('href="/team/attendance"');
+    expect(teamPage).toContain("requireTeamContext()");
+    expect(teamPage).toContain("<TeamHomeClient");
+    expect(teamPage).toContain("team.employeeName");
+    expect(teamPage).toContain("team.outletCode");
+    expect(teamShell).toContain('href: "/team/attendance"');
   });
 });

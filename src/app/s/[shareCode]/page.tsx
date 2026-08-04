@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { unstable_noStore as noStore } from "next/cache";
+import { redirect } from "next/navigation";
 import { SalaryRecapPublicCard } from "@/components/finance/salary-recap-public-card";
+import { getAnySession, isTeamSession } from "@/lib/auth/session";
 import {
   getPublicSalaryCardByShareCode,
 } from "@/modules/salary/salary.publication-share.service";
@@ -16,6 +18,8 @@ export default async function ShortSalaryCardPage({ params }: {
   params: Promise<{ shareCode: string }>;
 }) {
   noStore();
+  const session = await getAnySession();
+  if (session && isTeamSession(session)) redirect("/team");
   const { shareCode } = await params;
   const publication = await getPublicSalaryCardByShareCode(shareCode)
     .catch(() => null);
