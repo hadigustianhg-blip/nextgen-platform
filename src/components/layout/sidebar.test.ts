@@ -8,6 +8,16 @@ import {
 } from "./sidebar";
 
 describe("pickup navigation", () => {
+  it("keeps outlet identity only in the global header", async () => {
+    const source = await readFile(
+      new URL("./sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toContain("Outlet aktif");
+    expect(source).not.toContain("Semua Outlet");
+    expect(source).toContain('<nav\n          className="mt-5');
+  });
+
   it("hides RAW Pickup and exposes Pickup Settlement under Settlement Center", async () => {
     const source = await readFile(
       new URL("./sidebar.tsx", import.meta.url),

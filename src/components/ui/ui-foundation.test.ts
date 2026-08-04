@@ -14,6 +14,7 @@ const svgAssets = [
   "public/brand/nextgen-logo-dark.svg",
   "public/brand/nextgen-mark.svg",
   "public/brand/nextgen-wordmark.svg",
+  "src/app/icon.svg",
   "public/illustrations/integration-empty.svg",
   "public/illustrations/empty-search.svg",
   "public/illustrations/empty-monitoring.svg",
@@ -88,9 +89,11 @@ describe("NEXTGEN UI asset and theme foundation", () => {
       "empty-payment.svg", "empty-sync.svg", "integration-empty.svg",
       "maintenance.svg",
     ]) expect(empty).toContain(path);
-    expect(layout).toContain('url: "/brand/favicon.png"');
+    expect(layout).not.toContain('url: "/brand/favicon.png"');
+    expect(await readFile(asset("src/app/icon.svg"), "utf8"))
+      .toContain('fill="#050505"');
     expect(layout).toContain('url: "/brand/app-icon-192.png"');
-    expect(layout).toContain('url: "/brand/app-icon-512.png"');
+    expect(layout).not.toContain("shortcut:");
   });
 
   it("renders light/dark brands, empty-state assets, and the avatar fallback", () => {

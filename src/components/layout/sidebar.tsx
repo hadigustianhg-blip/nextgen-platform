@@ -88,7 +88,7 @@ const readStoredBoolean = (key: string, fallback: boolean) => {
   return value === null ? fallback : value === "true";
 };
 
-export function Sidebar({ outletCode }: { outletCode: string | null }) {
+export function Sidebar() {
   const pathname = usePathname();
   const monitoringActive = pathname.startsWith("/dashboard/monitoring/");
   const settlementActive = pathname.startsWith("/dashboard/settlement/");
@@ -216,17 +216,6 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
           >
             <X size={20} />
           </button>
-        </div>
-
-        <div
-          className={`mx-4 mt-5 rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3 ${collapsed ? "lg:hidden" : ""}`}
-        >
-          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-300">
-            Outlet aktif
-          </p>
-          <p className="mt-1 text-sm font-semibold">
-            {outletCode ?? "Semua Outlet"}
-          </p>
         </div>
 
         <nav
