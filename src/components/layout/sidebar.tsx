@@ -38,13 +38,25 @@ const navigation = [
 
 const storageKeys = {
   collapsed: "nextgen.sidebar.collapsed",
-  monitoringOpen: "nextgen.sidebar.monitoring.open",
-  settlementOpen: "nextgen.sidebar.settlement.open",
-  paymentOpen: "nextgen.sidebar.payment.open",
-  qualityControlOpen: "nextgen.sidebar.quality-control.open",
-  financeOpen: "nextgen.sidebar.finance.open",
-  settingsOpen: "nextgen.sidebar.settings.open",
+  openGroup: "nextgen.sidebar.open-group",
 } as const;
+
+type SidebarGroup =
+  | "monitoring"
+  | "settlement"
+  | "payment"
+  | "quality-control"
+  | "finance"
+  | "settings";
+
+const sidebarGroups: SidebarGroup[] = [
+  "monitoring",
+  "settlement",
+  "payment",
+  "quality-control",
+  "finance",
+  "settings",
+];
 
 const readStoredBoolean = (key: string, fallback: boolean) => {
   const value = window.localStorage.getItem(key);
@@ -60,12 +72,20 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
   const financeActive = pathname.startsWith("/dashboard/finance/");
   const settingsActive = pathname.startsWith("/dashboard/settings/");
   const [collapsed, setCollapsed] = useState(false);
-  const [monitoringOpen, setMonitoringOpen] = useState(monitoringActive);
-  const [settlementOpen, setSettlementOpen] = useState(settlementActive);
-  const [paymentOpen, setPaymentOpen] = useState(paymentActive);
-  const [qualityControlOpen, setQualityControlOpen] = useState(qualityControlActive);
-  const [financeOpen, setFinanceOpen] = useState(financeActive);
-  const [settingsOpen, setSettingsOpen] = useState(settingsActive);
+  const activeGroup: SidebarGroup | null = monitoringActive
+    ? "monitoring"
+    : settlementActive
+      ? "settlement"
+      : paymentActive
+        ? "payment"
+        : qualityControlActive
+          ? "quality-control"
+          : financeActive
+            ? "finance"
+            : settingsActive
+              ? "settings"
+              : null;
+  const [openGroup, setOpenGroup] = useState<SidebarGroup | null>(activeGroup);
   const [settingsAllowed, setSettingsAllowed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
@@ -73,12 +93,11 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
   useEffect(() => {
     queueMicrotask(() => {
       setCollapsed(readStoredBoolean(storageKeys.collapsed, false));
-      setMonitoringOpen(readStoredBoolean(storageKeys.monitoringOpen, true));
-      setSettlementOpen(readStoredBoolean(storageKeys.settlementOpen, true));
-      setPaymentOpen(readStoredBoolean(storageKeys.paymentOpen, true));
-      setQualityControlOpen(readStoredBoolean(storageKeys.qualityControlOpen, true));
-      setFinanceOpen(readStoredBoolean(storageKeys.financeOpen, true));
-      setSettingsOpen(readStoredBoolean(storageKeys.settingsOpen, settingsActive));
+      const storedGroup = window.localStorage.getItem(storageKeys.openGroup);
+      const validStoredGroup = sidebarGroups.includes(storedGroup as SidebarGroup)
+        ? (storedGroup as SidebarGroup)
+        : null;
+      setOpenGroup((current) => current ?? validStoredGroup);
       setStorageReady(true);
     });
   }, []);
@@ -94,56 +113,33 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
 
   useEffect(() => {
     if (storageReady) {
-      window.localStorage.setItem(
-        storageKeys.monitoringOpen,
-        String(monitoringOpen),
-      );
-    }
-  }, [monitoringOpen, storageReady]);
-
-  useEffect(() => {
-    if (storageReady) {
       window.localStorage.setItem(storageKeys.collapsed, String(collapsed));
     }
   }, [collapsed, storageReady]);
 
+  const visibleGroup = activeGroup ?? openGroup;
+
   useEffect(() => {
-    if (storageReady) {
-      window.localStorage.setItem(
-        storageKeys.settlementOpen,
-        String(settlementOpen),
-      );
+    if (!storageReady) return;
+    if (visibleGroup) {
+      window.localStorage.setItem(storageKeys.openGroup, visibleGroup);
+    } else {
+      window.localStorage.removeItem(storageKeys.openGroup);
     }
-  }, [settlementOpen, storageReady]);
+  }, [storageReady, visibleGroup]);
 
-  useEffect(() => {
-    if (storageReady) {
-      window.localStorage.setItem(storageKeys.paymentOpen, String(paymentOpen));
-    }
-  }, [paymentOpen, storageReady]);
-
-  useEffect(() => {
-    if (storageReady) {
-      window.localStorage.setItem(storageKeys.qualityControlOpen, String(qualityControlOpen));
-    }
-  }, [qualityControlOpen, storageReady]);
-
-  useEffect(() => {
-    if (storageReady) {
-      window.localStorage.setItem(storageKeys.financeOpen, String(financeOpen));
-    }
-  }, [financeOpen, storageReady]);
-
-  useEffect(() => {
-    if (storageReady) window.localStorage.setItem(storageKeys.settingsOpen, String(settingsOpen));
-  }, [settingsOpen, storageReady]);
-
-  const monitoringVisible = monitoringActive || monitoringOpen;
-  const settlementVisible = settlementActive || settlementOpen;
-  const paymentVisible = paymentActive || paymentOpen;
-  const qualityControlVisible = qualityControlActive || qualityControlOpen;
-  const financeVisible = financeActive || financeOpen;
-  const settingsVisible = settingsActive || settingsOpen;
+  const monitoringVisible = visibleGroup === "monitoring";
+  const settlementVisible = visibleGroup === "settlement";
+  const paymentVisible = visibleGroup === "payment";
+  const qualityControlVisible = visibleGroup === "quality-control";
+  const financeVisible = visibleGroup === "finance";
+  const settingsVisible = visibleGroup === "settings";
+  const toggleGroup = (group: SidebarGroup) => {
+    setOpenGroup((current) => {
+      if (current !== group) return group;
+      return activeGroup === group ? current : null;
+    });
+  };
   const labelClass = collapsed ? "lg:hidden" : "";
   const closeMobile = () => setMobileOpen(false);
   const itemLayout = collapsed ? "lg:justify-center lg:gap-0" : "";
@@ -219,7 +215,10 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
                 key={item.label}
                 href={item.href}
                 title={collapsed ? item.label : undefined}
-                onClick={closeMobile}
+                onClick={() => {
+                  setOpenGroup(null);
+                  closeMobile();
+                }}
                 className={[
                   "flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-300",
                   active
@@ -240,7 +239,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
               title={collapsed ? "Monitoring" : undefined}
               aria-expanded={monitoringVisible}
               aria-controls="monitoring-submenu"
-              onClick={() => setMonitoringOpen((value) => !value)}
+              onClick={() => toggleGroup("monitoring")}
               className={[
                 "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300",
                 itemLayout,
@@ -285,7 +284,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
               title={collapsed ? "Settlement Center" : undefined}
               aria-expanded={settlementVisible}
               aria-controls="settlement-submenu"
-              onClick={() => setSettlementOpen((value) => !value)}
+              onClick={() => toggleGroup("settlement")}
               className={[
                 "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300",
                 itemLayout,
@@ -342,7 +341,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
               title={collapsed ? "Payment" : undefined}
               aria-expanded={paymentVisible}
               aria-controls="payment-submenu"
-              onClick={() => setPaymentOpen((value) => !value)}
+              onClick={() => toggleGroup("payment")}
               className={[
                 "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300",
                 itemLayout,
@@ -394,7 +393,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
           <div className="pt-1">
             <button type="button" title={collapsed ? "Quality Control" : undefined}
               aria-expanded={qualityControlVisible} aria-controls="quality-control-submenu"
-              onClick={() => setQualityControlOpen((value) => !value)}
+              onClick={() => toggleGroup("quality-control")}
               className={["flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300", itemLayout].join(" ")}>
               <ShieldCheck size={19} className="shrink-0" />
               <span className={labelClass}>Quality Control</span>
@@ -423,7 +422,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
           <div className="pt-1">
             <button type="button" title={collapsed ? "Finance & HR" : undefined}
               aria-expanded={financeVisible} aria-controls="finance-submenu"
-              onClick={() => setFinanceOpen((value) => !value)}
+              onClick={() => toggleGroup("finance")}
               className={["flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300", itemLayout].join(" ")}>
               <UsersRound size={19} className="shrink-0" />
               <span className={labelClass}>Finance & HR</span>
@@ -460,7 +459,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
           {settingsAllowed && <div className="pt-1">
             <button type="button" title={collapsed ? "Pengaturan" : undefined}
               aria-expanded={settingsVisible} aria-controls="settings-submenu"
-              onClick={() => setSettingsOpen((value) => !value)}
+              onClick={() => toggleGroup("settings")}
               className={["flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300", itemLayout].join(" ")}>
               <Settings size={19} className="shrink-0" />
               <span className={labelClass}>Pengaturan</span>

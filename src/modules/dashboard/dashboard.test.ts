@@ -95,8 +95,7 @@ describe("Operational executive dashboard", () => {
   it("is read-only and follows the refined dashboard visualization contract", async () => {
     const service = await readFile(new URL("./dashboard.service.ts", import.meta.url), "utf8");
     const client = await readFile(new URL("../../components/dashboard/dashboard-overview-client.tsx", import.meta.url), "utf8");
-    const monitoringIndex = client.indexOf('title="Monitoring Operations"');
-    const qualityControlIndex = client.indexOf("Quality Control Overview");
+    const monitoringIndex = client.indexOf('title="Monitoring Performance"');
     const slaIndex = client.indexOf('title="SLA Cut Off"');
     const stuckIndex = client.indexOf('title="Waybill Stuck Delivery"');
     const deliveryIndex = client.indexOf('title="Delivery Settlement"');
@@ -106,8 +105,7 @@ describe("Operational executive dashboard", () => {
     expect(service).not.toMatch(/prisma\.[A-Za-z]+\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\s*\(/);
     expect(service).not.toContain("prisma.$transaction");
     expect(monitoringIndex).toBeGreaterThan(-1);
-    expect(qualityControlIndex).toBeGreaterThan(monitoringIndex);
-    expect(slaIndex).toBeGreaterThan(qualityControlIndex);
+    expect(slaIndex).toBeGreaterThan(monitoringIndex);
     expect(stuckIndex).toBeGreaterThan(slaIndex);
     expect(deliveryIndex).toBeGreaterThan(stuckIndex);
     expect(operationalIndex).toBeGreaterThan(deliveryIndex);
@@ -115,10 +113,13 @@ describe("Operational executive dashboard", () => {
     expect(pickupIndex).toBeGreaterThan(paymentIndex);
     expect(client.match(/<Donut\s/g)).toHaveLength(1);
     expect(client.match(/variant="bar"/g)).toHaveLength(3);
-    expect(client.match(/<DashboardMetricCard\s/g)).toHaveLength(18);
+    expect(client.match(/<MonitoringKpi\s/g)).toHaveLength(5);
+    expect(client.match(/<DashboardMetricCard\s/g)).toHaveLength(11);
     expect(client).toContain('className="dashboard-metric-card flex min-h-28');
-    expect(client).toContain("icon={PackageSearch}");
+    expect(client).toContain("<PackageSearch size={42}");
     expect(client).toContain("icon={Gauge}");
+    expect(client).toContain("xl:grid-cols-5");
+    expect(client).toContain("2xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)_minmax(260px,0.9fr)]");
     expect(client).toContain("setPresentationKey((value) => value + 1)");
     expect(client).toContain("key={presentationKey}");
     expect(client).toContain("@keyframes dashboard-card-in");

@@ -17,7 +17,7 @@ describe("pickup navigation", () => {
     );
   });
 
-  it("provides independent semantic submenu toggles", async () => {
+  it("provides one semantic accordion state for every submenu", async () => {
     const source = await readFile(
       new URL("./sidebar.tsx", import.meta.url),
       "utf8",
@@ -26,30 +26,29 @@ describe("pickup navigation", () => {
     expect(source).toContain('aria-controls="settlement-submenu"');
     expect(source).toContain('aria-controls="payment-submenu"');
     expect(source).toContain('aria-controls="monitoring-submenu"');
-    expect(source).toContain("setMonitoringOpen((value) => !value)");
-    expect(source).toContain("setSettlementOpen((value) => !value)");
-    expect(source).toContain("setPaymentOpen((value) => !value)");
-    expect(source).toContain(
-      "const settlementVisible = settlementActive || settlementOpen",
-    );
-    expect(source).toContain(
-      "const paymentVisible = paymentActive || paymentOpen",
-    );
-    expect(source).toContain(
-      "const monitoringVisible = monitoringActive || monitoringOpen",
-    );
+    expect(source).toContain('toggleGroup("monitoring")');
+    expect(source).toContain('toggleGroup("settlement")');
+    expect(source).toContain('toggleGroup("payment")');
+    expect(source).toContain('const [openGroup, setOpenGroup]');
+    expect(source).toContain('const monitoringVisible = visibleGroup === "monitoring"');
+    expect(source).toContain('const settlementVisible = visibleGroup === "settlement"');
+    expect(source).toContain('const paymentVisible = visibleGroup === "payment"');
+    expect(source).not.toContain("setMonitoringOpen");
+    expect(source).not.toContain("setSettlementOpen");
+    expect(source).not.toContain("setPaymentOpen");
   });
 
-  it("persists desktop and submenu preferences with namespaced keys", async () => {
+  it("persists desktop and the single open group with namespaced keys", async () => {
     const source = await readFile(
       new URL("./sidebar.tsx", import.meta.url),
       "utf8",
     );
 
     expect(source).toContain('"nextgen.sidebar.collapsed"');
-    expect(source).toContain('"nextgen.sidebar.monitoring.open"');
-    expect(source).toContain('"nextgen.sidebar.settlement.open"');
-    expect(source).toContain('"nextgen.sidebar.payment.open"');
+    expect(source).toContain('"nextgen.sidebar.open-group"');
+    expect(source).toContain("const visibleGroup = activeGroup ?? openGroup");
+    expect(source).toContain("current ?? validStoredGroup");
+    expect(source).toContain("return activeGroup === group ? current : null");
     expect(source).toContain("storageReady");
   });
 
@@ -90,10 +89,7 @@ describe("pickup navigation", () => {
       "utf8",
     );
     expect(source).toContain('aria-controls="quality-control-submenu"');
-    expect(source).toContain('"nextgen.sidebar.quality-control.open"');
-    expect(source).toContain(
-      'const qualityControlVisible = qualityControlActive || qualityControlOpen',
-    );
+    expect(source).toContain('const qualityControlVisible = visibleGroup === "quality-control"');
     expect(source).toContain(
       'href="/dashboard/quality-control/sla-cut-off"',
     );
@@ -149,7 +145,7 @@ describe("pickup navigation", () => {
 
   it("exposes Rincian Operasional under persistent Finance & HR", async () => {
     const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
-    expect(source).toContain('"nextgen.sidebar.finance.open"');
+    expect(source).toContain('const financeVisible = visibleGroup === "finance"');
     expect(source).toContain('aria-controls="finance-submenu"');
     expect(source).toContain('href="/dashboard/finance/rincian-operasional"');
     expect(source).toContain(
