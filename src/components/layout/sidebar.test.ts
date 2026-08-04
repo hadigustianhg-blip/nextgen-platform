@@ -1,5 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import {
+  resolveSidebarOpenGroup,
+  toggleSidebarGroup,
+  type SidebarAccordionState,
+  type SidebarGroup,
+} from "./sidebar";
 
 describe("pickup navigation", () => {
   it("hides RAW Pickup and exposes Pickup Settlement under Settlement Center", async () => {
@@ -29,10 +35,10 @@ describe("pickup navigation", () => {
     expect(source).toContain('toggleGroup("monitoring")');
     expect(source).toContain('toggleGroup("settlement")');
     expect(source).toContain('toggleGroup("payment")');
-    expect(source).toContain('const [openGroup, setOpenGroup]');
-    expect(source).toContain('const monitoringVisible = visibleGroup === "monitoring"');
-    expect(source).toContain('const settlementVisible = visibleGroup === "settlement"');
-    expect(source).toContain('const paymentVisible = visibleGroup === "payment"');
+    expect(source).toContain("useState<SidebarAccordionState>");
+    expect(source).toContain('const monitoringVisible = openGroupId === "monitoring"');
+    expect(source).toContain('const settlementVisible = openGroupId === "settlement"');
+    expect(source).toContain('const paymentVisible = openGroupId === "payment"');
     expect(source).not.toContain("setMonitoringOpen");
     expect(source).not.toContain("setSettlementOpen");
     expect(source).not.toContain("setPaymentOpen");
@@ -46,10 +52,59 @@ describe("pickup navigation", () => {
 
     expect(source).toContain('"nextgen.sidebar.collapsed"');
     expect(source).toContain('"nextgen.sidebar.open-group"');
-    expect(source).toContain("const visibleGroup = activeGroup ?? openGroup");
-    expect(source).toContain("current ?? validStoredGroup");
-    expect(source).toContain("return activeGroup === group ? current : null");
+    expect(source).toContain("resolveSidebarOpenGroup(pathname, activeGroup, accordionState)");
+    expect(source).toContain("current.openGroupId === null");
+    expect(source).toContain("state.pathname === pathname ? state.openGroupId : activeGroup");
     expect(source).toContain("storageReady");
+  });
+
+  it("lets user clicks override the current route group until navigation changes", () => {
+    const monitoringPath = "/dashboard/monitoring/daily";
+    let state: SidebarAccordionState = {
+      pathname: monitoringPath,
+      openGroupId: "monitoring",
+    };
+    let openGroup: SidebarGroup | null = resolveSidebarOpenGroup(
+      monitoringPath,
+      "monitoring",
+      state,
+    );
+
+    state = toggleSidebarGroup(monitoringPath, openGroup, "settings");
+    openGroup = resolveSidebarOpenGroup(monitoringPath, "monitoring", state);
+    expect(openGroup).toBe("settings");
+
+    const settingsPath = "/dashboard/settings/integrations";
+    expect(resolveSidebarOpenGroup(settingsPath, "settings", state)).toBe("settings");
+    state = toggleSidebarGroup(settingsPath, "settings", "finance");
+    expect(resolveSidebarOpenGroup(settingsPath, "settings", state)).toBe("finance");
+
+    const financePath = "/dashboard/finance/salary-setting";
+    expect(resolveSidebarOpenGroup(financePath, "finance", state)).toBe("finance");
+    state = toggleSidebarGroup(financePath, "finance", "settlement");
+    expect(resolveSidebarOpenGroup(financePath, "finance", state)).toBe("settlement");
+  });
+
+  it("opens the active parent immediately after navigation or reload", () => {
+    const staleState: SidebarAccordionState = {
+      pathname: "/dashboard/finance/salary-setting",
+      openGroupId: "settlement",
+    };
+    expect(resolveSidebarOpenGroup(
+      "/dashboard/settlement/delivery",
+      "settlement",
+      staleState,
+    )).toBe("settlement");
+
+    const reloadState: SidebarAccordionState = {
+      pathname: "/dashboard/payment/pickup",
+      openGroupId: "payment",
+    };
+    expect(resolveSidebarOpenGroup(
+      "/dashboard/payment/pickup",
+      "payment",
+      reloadState,
+    )).toBe("payment");
   });
 
   it("keeps mobile drawer behavior and accessible controls", async () => {
@@ -89,7 +144,7 @@ describe("pickup navigation", () => {
       "utf8",
     );
     expect(source).toContain('aria-controls="quality-control-submenu"');
-    expect(source).toContain('const qualityControlVisible = visibleGroup === "quality-control"');
+    expect(source).toContain('const qualityControlVisible = openGroupId === "quality-control"');
     expect(source).toContain(
       'href="/dashboard/quality-control/sla-cut-off"',
     );
@@ -145,7 +200,7 @@ describe("pickup navigation", () => {
 
   it("exposes Rincian Operasional under persistent Finance & HR", async () => {
     const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
-    expect(source).toContain('const financeVisible = visibleGroup === "finance"');
+    expect(source).toContain('const financeVisible = openGroupId === "finance"');
     expect(source).toContain('aria-controls="finance-submenu"');
     expect(source).toContain('href="/dashboard/finance/rincian-operasional"');
     expect(source).toContain(

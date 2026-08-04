@@ -41,7 +41,7 @@ const storageKeys = {
   openGroup: "nextgen.sidebar.open-group",
 } as const;
 
-type SidebarGroup =
+export type SidebarGroup =
   | "monitoring"
   | "settlement"
   | "payment"
@@ -57,6 +57,30 @@ const sidebarGroups: SidebarGroup[] = [
   "finance",
   "settings",
 ];
+
+export type SidebarAccordionState = {
+  pathname: string;
+  openGroupId: SidebarGroup | null;
+};
+
+export function resolveSidebarOpenGroup(
+  pathname: string,
+  activeGroup: SidebarGroup | null,
+  state: SidebarAccordionState,
+) {
+  return state.pathname === pathname ? state.openGroupId : activeGroup;
+}
+
+export function toggleSidebarGroup(
+  pathname: string,
+  openGroupId: SidebarGroup | null,
+  group: SidebarGroup,
+): SidebarAccordionState {
+  return {
+    pathname,
+    openGroupId: openGroupId === group ? null : group,
+  };
+}
 
 const readStoredBoolean = (key: string, fallback: boolean) => {
   const value = window.localStorage.getItem(key);
@@ -85,7 +109,10 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
             : settingsActive
               ? "settings"
               : null;
-  const [openGroup, setOpenGroup] = useState<SidebarGroup | null>(activeGroup);
+  const [accordionState, setAccordionState] = useState<SidebarAccordionState>({
+    pathname,
+    openGroupId: activeGroup,
+  });
   const [settingsAllowed, setSettingsAllowed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [storageReady, setStorageReady] = useState(false);
@@ -97,7 +124,9 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
       const validStoredGroup = sidebarGroups.includes(storedGroup as SidebarGroup)
         ? (storedGroup as SidebarGroup)
         : null;
-      setOpenGroup((current) => current ?? validStoredGroup);
+      setAccordionState((current) => current.openGroupId === null
+        ? { ...current, openGroupId: validStoredGroup }
+        : current);
       setStorageReady(true);
     });
   }, []);
@@ -117,28 +146,25 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
     }
   }, [collapsed, storageReady]);
 
-  const visibleGroup = activeGroup ?? openGroup;
+  const openGroupId = resolveSidebarOpenGroup(pathname, activeGroup, accordionState);
 
   useEffect(() => {
     if (!storageReady) return;
-    if (visibleGroup) {
-      window.localStorage.setItem(storageKeys.openGroup, visibleGroup);
+    if (openGroupId) {
+      window.localStorage.setItem(storageKeys.openGroup, openGroupId);
     } else {
       window.localStorage.removeItem(storageKeys.openGroup);
     }
-  }, [storageReady, visibleGroup]);
+  }, [openGroupId, storageReady]);
 
-  const monitoringVisible = visibleGroup === "monitoring";
-  const settlementVisible = visibleGroup === "settlement";
-  const paymentVisible = visibleGroup === "payment";
-  const qualityControlVisible = visibleGroup === "quality-control";
-  const financeVisible = visibleGroup === "finance";
-  const settingsVisible = visibleGroup === "settings";
+  const monitoringVisible = openGroupId === "monitoring";
+  const settlementVisible = openGroupId === "settlement";
+  const paymentVisible = openGroupId === "payment";
+  const qualityControlVisible = openGroupId === "quality-control";
+  const financeVisible = openGroupId === "finance";
+  const settingsVisible = openGroupId === "settings";
   const toggleGroup = (group: SidebarGroup) => {
-    setOpenGroup((current) => {
-      if (current !== group) return group;
-      return activeGroup === group ? current : null;
-    });
+    setAccordionState(toggleSidebarGroup(pathname, openGroupId, group));
   };
   const labelClass = collapsed ? "lg:hidden" : "";
   const closeMobile = () => setMobileOpen(false);
@@ -216,7 +242,7 @@ export function Sidebar({ outletCode }: { outletCode: string | null }) {
                 href={item.href}
                 title={collapsed ? item.label : undefined}
                 onClick={() => {
-                  setOpenGroup(null);
+                  setAccordionState({ pathname, openGroupId: null });
                   closeMobile();
                 }}
                 className={[

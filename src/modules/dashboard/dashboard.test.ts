@@ -115,7 +115,9 @@ describe("Operational executive dashboard", () => {
     expect(client.match(/variant="bar"/g)).toHaveLength(3);
     expect(client.match(/<MonitoringKpi\s/g)).toHaveLength(5);
     expect(client.match(/<DashboardMetricCard\s/g)).toHaveLength(11);
-    expect(client).toContain('className="dashboard-metric-card flex min-h-28');
+    expect(client).toContain('className="dashboard-metric-card flex h-auto min-h-28');
+    expect(client).toContain('section-frame h-full min-h-0 overflow-visible');
+    expect(client).toContain('className="grid items-stretch gap-5 xl:grid-cols-2"');
     expect(client).toContain("<PackageSearch size={42}");
     expect(client).toContain("icon={Gauge}");
     expect(client).toContain("xl:grid-cols-5");
@@ -127,6 +129,8 @@ describe("Operational executive dashboard", () => {
     expect(client).toContain("prefers-reduced-motion: reduce");
     expect(client).toContain("isAnimationActive={!reducedMotion}");
     expect(client.slice(stuckIndex, deliveryIndex)).not.toContain("<DashboardChart");
+    expect(client.slice(paymentIndex, pickupIndex)).not.toContain("absolute");
+    expect(client.slice(paymentIndex, pickupIndex)).not.toContain("overflow-hidden");
     expect(client.slice(slaIndex, stuckIndex)).toContain("<Donut");
     expect(client.slice(slaIndex, stuckIndex)).toContain('variant="bar" compact');
     expect(client).not.toContain("8–14 Hari");

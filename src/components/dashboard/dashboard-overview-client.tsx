@@ -221,7 +221,7 @@ function DashboardMetricCard({
 }) {
   return (
     <AppCard
-      className="dashboard-metric-card flex min-h-28 h-full flex-col border-slate-200/80 p-4 shadow-none transition duration-200 motion-safe:hover:-translate-y-0.5 motion-safe:hover:shadow-md motion-reduce:transform-none motion-reduce:transition-none"
+      className="dashboard-metric-card flex h-auto min-h-28 flex-col border-slate-200/80 p-4 shadow-none transition duration-200 motion-safe:hover:-translate-y-0.5 motion-safe:hover:shadow-md motion-reduce:transform-none motion-reduce:transition-none"
       style={{ "--dashboard-delay": `${Math.min(index, 8) * 45}ms` } as CSSProperties}
     >
       <span className={`grid size-10 place-items-center rounded-xl ${metricToneClasses[tone]}`} aria-hidden="true">
@@ -262,7 +262,7 @@ function SectionFrame({
   className?: string;
 }) {
   return (
-    <AppCard className={`section-frame h-full border-slate-200/80 p-5 shadow-sm lg:p-6 ${className}`}>
+    <AppCard className={`section-frame h-full min-h-0 overflow-visible border-slate-200/80 p-5 shadow-sm lg:p-6 ${className}`}>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-extrabold text-slate-950 lg:text-lg">{title}</h2>
@@ -515,7 +515,7 @@ export function DashboardOverviewClient({
             </SectionFrame>
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid items-stretch gap-5 xl:grid-cols-2">
             <SectionFrame title="Payment Settlement" description="Posisi Cash On Hand saat ini." href="/dashboard/payment/settlement" section={result.paymentSettlement}>
               {payment && <DashboardMetricCard label="Cash On Hand" value={<span className="text-3xl">{money(payment.cashOnHand)}</span>} note="Current-state Payment Settlement" icon={Wallet} tone="blue" index={0} />}
             </SectionFrame>
