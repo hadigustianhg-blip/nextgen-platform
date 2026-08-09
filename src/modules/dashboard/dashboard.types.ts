@@ -88,6 +88,8 @@ export type SlaDashboardData = {
 };
 
 export type StuckDeliveryDashboardData = {
+  todayDate?: string;
+  totalStuckToday?: number;
   totalInventory: number;
   waybillStuckMaximum: number | null;
   daily: Array<{ date: string; totalInventory: number }>;

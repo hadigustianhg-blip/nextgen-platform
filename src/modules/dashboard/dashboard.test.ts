@@ -110,7 +110,7 @@ describe("Operational executive dashboard", () => {
     const client = await readFile(new URL("../../components/dashboard/dashboard-overview-client.tsx", import.meta.url), "utf8");
     const monitoringIndex = client.indexOf('title="Monitoring Performance"');
     const slaIndex = client.indexOf('title="SLA Cut Off"');
-    const stuckIndex = client.indexOf('title="Waybill Stuck Delivery"');
+    const stuckIndex = client.indexOf('title="Problem Waybill Stuck"');
     const deliveryIndex = client.indexOf('title="Delivery Settlement"');
     const operationalIndex = client.indexOf('title="Operational Settlement"');
     const paymentIndex = client.indexOf('title="Payment Settlement"');
@@ -153,7 +153,8 @@ describe("Operational executive dashboard", () => {
     expect(client).toContain("prefers-reduced-motion: reduce");
     expect(client).toContain("isAnimationActive={!reducedMotion}");
     expect(client.slice(stuckIndex, deliveryIndex)).not.toContain("<DashboardChart");
-    expect(client.slice(stuckIndex, deliveryIndex)).toContain('stuck.totalInventory === 0');
+    expect(client.slice(stuckIndex, deliveryIndex)).toContain("Total Stuck Hari Ini");
+    expect(client.slice(stuckIndex, deliveryIndex)).toContain("Data per");
     expect(client.slice(stuckIndex, deliveryIndex)).toContain('<EmptyState kind="monitoring"');
     expect(client.slice(paymentIndex, pickupIndex)).not.toContain("absolute");
     expect(client.slice(paymentIndex, pickupIndex)).not.toContain("overflow-hidden");
@@ -162,5 +163,15 @@ describe("Operational executive dashboard", () => {
     expect(client).not.toContain("8–14 Hari");
     expect(client).toContain('"Target belum diatur"');
     expect(client).toContain("stuck.waybillStuckMaximum");
+  });
+
+  it("scopes Problem Waybill Stuck dashboard card strictly to the single active business date snapshot", async () => {
+    const service = await readFile(new URL("./dashboard.service.ts", import.meta.url), "utf8");
+    const stuckFn = service.slice(service.indexOf("export async function loadStuckDeliveryDashboard"), service.indexOf("export const dashboardLoaders"));
+    expect(service).toContain("jakartaOperationalDate");
+    expect(service).toContain("loadStuckDeliveryDashboard");
+    expect(service).toContain("todayDate");
+    expect(service).toContain("totalStuckToday");
+    expect(stuckFn).not.toContain("rangeWhere(period)");
   });
 });

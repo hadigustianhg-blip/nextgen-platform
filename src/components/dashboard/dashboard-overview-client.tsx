@@ -531,11 +531,16 @@ export function DashboardOverviewClient({
               </div>}
             </SectionFrame>
 
-            <SectionFrame title="Waybill Stuck Delivery" description="KPI inventory stuck periode aktif." href="/dashboard/quality-control/waybill-stuck-delivery" section={result.stuckDelivery} icon={PackageSearch} tone="amber">
+            <SectionFrame title="Problem Waybill Stuck" description="Waybill stuck hari ini." href="/dashboard/quality-control/waybill-stuck-delivery" section={result.stuckDelivery} icon={PackageSearch} tone="amber">
               {stuck && <div className="flex min-h-64 flex-col justify-between rounded-2xl border border-[var(--nextgen-border)] bg-slate-50/60 p-5">
                 <div>
-                  <p className="text-xs font-semibold text-[var(--nextgen-text-secondary)]">Total Inventory</p>
-                  <p className="mt-2 text-4xl font-black tracking-tight text-[var(--nextgen-text-primary)]">{number(stuck.totalInventory)}</p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-[var(--nextgen-text-secondary)]">Total Stuck Hari Ini</p>
+                    <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900">
+                      Data per {fullDate(stuck.todayDate ?? startDate)}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-4xl font-black tracking-tight text-[var(--nextgen-text-primary)]">{number(stuck.totalStuckToday ?? stuck.totalInventory)}</p>
                   <p className={`mt-2 text-xs ${stuck.waybillStuckMaximum == null ? "text-slate-500" : stuckWithinTarget ? "text-[var(--nextgen-success)]" : "text-[var(--nextgen-danger)]"}`}>
                     {stuck.waybillStuckMaximum == null
                       ? "Target belum diatur"
@@ -544,8 +549,8 @@ export function DashboardOverviewClient({
                         : `Melebihi target (maks. ${number(stuck.waybillStuckMaximum)})`}
                   </p>
                 </div>
-                {stuck.totalInventory === 0 ? (
-                  <EmptyState kind="monitoring" label="Tidak ada waybill stuck pada periode ini" className="ml-auto w-32" />
+                {(stuck.totalStuckToday ?? stuck.totalInventory) === 0 ? (
+                  <EmptyState kind="monitoring" label="Tidak ada waybill stuck hari ini" className="ml-auto w-32" />
                 ) : (
                   <span className="ml-auto grid size-20 place-items-center rounded-2xl bg-[var(--nextgen-warning-soft)] text-[var(--nextgen-warning)]" aria-hidden="true"><PackageSearch size={42} strokeWidth={1.6} /></span>
                 )}

@@ -21,7 +21,7 @@ const appNavigation: readonly AppNavigationItem[] = [
   { label: "Pickup Payment", href: "/dashboard/payment/pickup", section: "Payment", resource: "PICKUP_PAYMENT" },
   { label: "Cash Flow Payment", href: "/dashboard/payment/cash-flow", section: "Payment", resource: "PAYMENT_SETTLEMENT" },
   { label: "SLA Cut Off", href: "/dashboard/quality-control/sla-cut-off", section: "Quality Control", resource: "QUALITY_CONTROL" },
-  { label: "Waybill Stuck Delivery", href: "/dashboard/quality-control/waybill-stuck-delivery", section: "Quality Control", resource: "QUALITY_CONTROL" },
+  { label: "Problem Waybill Stuck", href: "/dashboard/quality-control/waybill-stuck-delivery", section: "Quality Control", resource: "QUALITY_CONTROL" },
   { label: "Problem Waybill Delivery", href: "/dashboard/quality-control/problem-waybill-delivery", section: "Quality Control", resource: "QUALITY_CONTROL" },
   { label: "Penjadwalan Pickup", href: "/dashboard/quality-control/pickup-scheduling", section: "Quality Control", resource: "QUALITY_CONTROL" },
   { label: "Rincian Operasional", href: "/dashboard/finance/rincian-operasional", section: "Finance & HR", resource: "OPERATIONAL_DETAIL" },

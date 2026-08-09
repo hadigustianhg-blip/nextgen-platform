@@ -28,6 +28,7 @@ import {
   listPickupPayment,
 } from "@/modules/payment";
 import { getSlaCutOff } from "@/modules/quality-control";
+import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
 import type {
   DashboardOverview,
   DashboardPeriod,
@@ -416,23 +417,49 @@ export async function loadStuckDeliveryDashboard(
   period: DashboardPeriod,
   providedTargets?: EffectiveOperationalTargets,
 ) {
-  const [rows, targets] = await Promise.all([prisma.rawInventoryDetail.groupBy({
-    by: ["businessDate"],
-    where: { ...scope, businessDate: rangeWhere(period) },
-    _count: { _all: true },
-    _max: { updatedAt: true },
-    orderBy: { businessDate: "asc" },
-  }), providedTargets ?? getEffectiveOperationalTargets(scope)]);
+  const todayStr = jakartaOperationalDate();
+  const todayDate = dateValue(todayStr);
+
+  const [todayGroup, targets] = await Promise.all([
+    prisma.rawInventoryDetail.aggregate({
+      where: { ...scope, businessDate: todayDate },
+      _count: { _all: true },
+      _max: { updatedAt: true },
+    }),
+    providedTargets ?? getEffectiveOperationalTargets(scope),
+  ]);
+
+  let activeBusinessDateStr = todayStr;
+  let totalStuckToday = todayGroup._count._all;
+  let maxUpdatedAt = todayGroup._max.updatedAt;
+
+  if (totalStuckToday === 0) {
+    const latestRow = await prisma.rawInventoryDetail.findFirst({
+      where: { ...scope, businessDate: { lte: todayDate } },
+      select: { businessDate: true },
+      orderBy: { businessDate: "desc" },
+    });
+    if (latestRow) {
+      activeBusinessDateStr = dateKey(latestRow.businessDate);
+      const latestGroup = await prisma.rawInventoryDetail.aggregate({
+        where: { ...scope, businessDate: latestRow.businessDate },
+        _count: { _all: true },
+        _max: { updatedAt: true },
+      });
+      totalStuckToday = latestGroup._count._all;
+      maxUpdatedAt = latestGroup._max.updatedAt;
+    }
+  }
+
   return {
     data: {
-      totalInventory: rows.reduce((sum, row) => sum + row._count._all, 0),
+      todayDate: activeBusinessDateStr,
+      totalStuckToday,
+      totalInventory: totalStuckToday,
       waybillStuckMaximum: targets.waybillStuckMaximum.value,
-      daily: rows.map((row) => ({
-        date: dateKey(row.businessDate),
-        totalInventory: row._count._all,
-      })),
+      daily: [{ date: activeBusinessDateStr, totalInventory: totalStuckToday }],
     },
-    updatedAt: latestDate(rows.map((row) => row._max.updatedAt)),
+    updatedAt: maxUpdatedAt,
   };
 }
 

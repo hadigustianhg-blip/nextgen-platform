@@ -416,7 +416,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
                 active={pathname.startsWith("/dashboard/quality-control/sla-cut-off")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<ShieldCheck size={17}/>} />
-              <SidebarChild href="/dashboard/quality-control/waybill-stuck-delivery" label="Waybill Stuck Delivery"
+              <SidebarChild href="/dashboard/quality-control/waybill-stuck-delivery" label="Problem Waybill Stuck"
                 active={pathname.startsWith("/dashboard/quality-control/waybill-stuck-delivery")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<PackageCheck size={17}/>} />

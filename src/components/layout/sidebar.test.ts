@@ -187,9 +187,9 @@ describe("pickup navigation", () => {
       'href="/dashboard/quality-control/waybill-stuck-delivery"',
     );
     expect(source.indexOf('label="SLA Cut Off"')).toBeLessThan(
-      source.indexOf('label="Waybill Stuck Delivery"'),
+      source.indexOf('label="Problem Waybill Stuck"'),
     );
-    expect(source.indexOf('label="Waybill Stuck Delivery"')).toBeLessThan(
+    expect(source.indexOf('label="Problem Waybill Stuck"')).toBeLessThan(
       source.indexOf('label="Problem Waybill Delivery"'),
     );
   });

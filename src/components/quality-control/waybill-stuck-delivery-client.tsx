@@ -158,7 +158,7 @@ export function WaybillStuckDeliveryClient({ canSync }: { canSync: boolean }) {
   return <div className="space-y-6">
     <PageHeader
       eyebrow="Quality Control"
-      title="Waybill Stuck Delivery"
+      title="Problem Waybill Stuck"
       description="Monitoring paket yang masih berada di Inventory beserta status scan terakhir."
       actions={<>
         <button disabled={loading || syncing} onClick={() => void load()} className={nextgenNeutralButtonClass}><RefreshCw size={17}/>Refresh</button>
