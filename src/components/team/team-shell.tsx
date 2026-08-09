@@ -11,7 +11,7 @@ const navigation = [
   { href: "/team", label: "Home", icon: Home },
   { href: "/team/attendance", label: "Absensi", icon: ClipboardList },
   { href: "/team/leave", label: "Pengajuan", icon: CalendarPlus },
-  { href: "/team/delivery", label: "Delivery", icon: PackageCheck },
+  { href: "/team/delivery", label: "Operasional", icon: PackageCheck },
   { href: "/team/profile", label: "Profil", icon: UserRound },
 ] as const;
 
@@ -28,7 +28,7 @@ export function TeamShell({ children, employeeName, outletCode, greeting }: {
   const pathname = usePathname();
 
   return (
-    <div className="team-pwa min-h-dvh overflow-x-hidden bg-[#f4f7fb] text-slate-950">
+    <div className="team-pwa min-h-dvh bg-[#f4f7fb] text-slate-950">
       <TeamServiceWorkerRegistration />
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 pt-[env(safe-area-inset-top)] shadow-[0_8px_24px_rgba(15,23,42,0.04)] backdrop-blur">
         <div className="mx-auto flex min-h-16 max-w-3xl items-center gap-3 px-4 sm:px-6">
@@ -46,7 +46,7 @@ export function TeamShell({ children, employeeName, outletCode, greeting }: {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl px-4 pb-[calc(6.75rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 sm:pt-7">
+      <main className="mx-auto w-full max-w-3xl overflow-x-hidden px-4 pb-[calc(6.75rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 sm:pt-7">
         {children}
       </main>
 

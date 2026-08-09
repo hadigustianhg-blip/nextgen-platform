@@ -102,7 +102,7 @@ export function TeamLeaveClient() {
   </div>;
 }
 
-function QuickAction({ label, icon: Icon, onClick }: { label: string; icon: typeof CalendarDays; onClick: () => void }) { return <button type="button" onClick={onClick} className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-2 rounded-[20px] border border-slate-200 bg-white p-2 text-xs font-bold text-slate-700 shadow-[0_8px_24px_rgba(15,23,42,0.04)]"><span className="grid size-10 place-items-center rounded-2xl bg-blue-50 text-blue-700"><Icon size={19}/></span>{label}</button>; }
+function QuickAction({ label, icon: Icon, onClick }: { label: string; icon: typeof CalendarDays; onClick: () => void }) { return <button type="button" onClick={onClick} className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-2 rounded-[20px] border border-slate-200 bg-white p-2 text-xs font-bold text-slate-700 shadow-[0_8px_24px_rgba(15,23,42,0.04)]"><span className="grid size-10 place-items-center rounded-2xl bg-blue-50 text-blue-700"><Icon size={19}/></span><span className="w-full truncate">{label}</span></button>; }
 function StatusBadge({ status }: { status: LeaveStatus }) { return <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${statusStyles[status]}`}>{statusLabels[status]}</span>; }
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block text-sm font-bold text-slate-700"><span className="mb-1.5 block">{label}</span>{children}</label>; }
 function Detail({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-bold text-slate-500">{label}</p><p className="mt-1 text-sm leading-6 text-slate-800">{value}</p></div>; }
