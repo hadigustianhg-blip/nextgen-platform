@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type SyncRunStatus } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { createAutomaticCashMovement, voidAutomaticCashMovements } from "@/modules/payment/cash-flow.service";
+import type { SettingsScope } from "@/modules/settings/settings.types";
 import { fetchDeliverySource, DeliverySourceError } from "./delivery-settlement.client";
 import { codRecordSchema, dispatchRecordSchema } from "./delivery-settlement.validation";
 import { selectLatestDispatchRecords } from "./dispatch-deduplication";
@@ -21,11 +22,12 @@ export async function fetchDeliverySources(
   fetchSource: SourceFetcher,
   operationalDate: string,
   onStage: (stage: "FETCH_DISPATCH" | "FETCH_COD") => void = () => {},
+  scope?: SettingsScope,
 ) {
   onStage("FETCH_DISPATCH");
-  const dispatchEnvelope = await fetchSource("/jfs-dispatch", operationalDate);
+  const dispatchEnvelope = await fetchSource("/jfs-dispatch", operationalDate, { scope });
   onStage("FETCH_COD");
-  const codEnvelope = await fetchSource("/jfs-cod", operationalDate);
+  const codEnvelope = await fetchSource("/jfs-cod", operationalDate, { scope });
   return { dispatchEnvelope, codEnvelope };
 }
 
@@ -213,11 +215,13 @@ export async function syncDeliverySettlement(
 
   try {
     const fetchSource = options.fetchSource ?? fetchDeliverySource;
+    const scope = { tenantId: context.tenantId, outletId: context.outletId };
     // Both reads must finish successfully before the first financial write.
     const { dispatchEnvelope, codEnvelope } = await fetchDeliverySources(
       fetchSource,
       operationalDate,
       (currentStage) => { stage = currentStage; },
+      scope,
     );
     dispatchFetch = "diagnostic" in dispatchEnvelope ? dispatchEnvelope.diagnostic : null;
     codFetch = "diagnostic" in codEnvelope ? codEnvelope.diagnostic : null;

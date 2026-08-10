@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
+import type { SettingsScope } from "@/modules/settings/settings.types";
 
 export type JfsCashflowDirection = "income" | "expense";
 export type JfsCashflowSourceRecord = {
@@ -125,7 +127,36 @@ export async function fetchJfsCashflow(input: {
   endDate: string;
   fetcher?: typeof fetch;
   wait?: (milliseconds: number) => Promise<unknown>;
+  scope?: SettingsScope;
 }) {
+  if (input.scope) {
+    try {
+      const result = await executeTrustedMultiOutletScraper(input.scope, "IBK", {
+        startDate: input.startDate,
+        endDate: input.endDate,
+        fetcher: input.fetcher,
+      });
+
+      const dataArray = Array.isArray(result.data) ? result.data : [];
+      const normalized = dataArray.map(normalizeIbkRecord);
+      const records = normalized.filter((record: JfsCashflowSourceRecord | null): record is JfsCashflowSourceRecord => Boolean(
+        record && record.date >= input.startDate && record.date <= input.endDate,
+      ));
+      return {
+        records,
+        fetchedCount: dataArray.length,
+        anomalyCount: normalized.length - records.length,
+        ...summarizeJfsCashflow(records),
+        receivedAt: new Date().toISOString(),
+      };
+    } catch (err) {
+      if (err instanceof JfsCashflowError) throw err;
+      if (isSecurityFailure(err)) throw err;
+      console.warn(`[MultiOutletFallback] IBK multi-outlet fetch failed, falling back to legacy GET /jfs-ibk-report:`, err instanceof Error ? err.message : err);
+      // Fallback to legacy GET for unconfigured or degraded outlets
+    }
+  }
+
   const baseUrl = process.env.JFS_MIDDLEWARE_BASE_URL?.trim()
     || process.env.JFS_MIDDLEWARE_URL?.trim();
   if (!baseUrl) throw new JfsCashflowError("MIDDLEWARE_NOT_CONFIGURED");

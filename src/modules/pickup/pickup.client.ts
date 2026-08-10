@@ -1,6 +1,8 @@
 import "server-only";
 import { pickupEnvelopeSchema, pickupRecordSchema } from "./pickup.validation";
 import type { PickupEnvelope, PickupSourceRecord } from "./pickup.types";
+import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
+import type { SettingsScope } from "@/modules/settings/settings.types";
 
 const DEFAULT_PICKUP_URL =
   "https://jfs-middleware-v2-production.up.railway.app/jfs-pickup";
@@ -14,8 +16,30 @@ export class PickupSourceError extends Error {
 
 export async function fetchPickupSource(
   operationalDate: string,
-  options: { fetcher?: typeof fetch; baseUrl?: string } = {},
+  options: { fetcher?: typeof fetch; baseUrl?: string; scope?: SettingsScope } = {},
 ): Promise<PickupEnvelope> {
+  if (options.scope) {
+    try {
+      const result = await executeTrustedMultiOutletScraper(options.scope, "PICKUP", {
+        date: operationalDate,
+        fetcher: options.fetcher,
+      });
+
+      const body = result.data ? result : { total: result.total ?? 0, data: result.data ?? [] };
+      const envelope = pickupEnvelopeSchema.safeParse(body);
+      if (envelope.success && envelope.data.total === envelope.data.data.length) {
+        return {
+          total: envelope.data.total,
+          data: envelope.data.data as PickupSourceRecord[],
+        };
+      }
+    } catch (err) {
+      if (isSecurityFailure(err)) throw err;
+      console.warn(`[MultiOutletFallback] PICKUP multi-outlet fetch failed, falling back to legacy GET /jfs-pickup:`, err instanceof Error ? err.message : err);
+      // Fallback to legacy GET endpoint for unconfigured or degraded outlets
+    }
+  }
+
   const fetcher = options.fetcher ?? fetch;
   const url = new URL(options.baseUrl ?? process.env.JFS_PICKUP_URL ?? DEFAULT_PICKUP_URL);
   url.searchParams.set("date", operationalDate);

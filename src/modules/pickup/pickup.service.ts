@@ -94,7 +94,8 @@ export async function syncPickup(
       runType: "PICKUP",
       operationalDate,
     });
-    const envelope = await (options.fetchPickup ?? fetchPickupSource)(operationalDate);
+    const scope = { tenantId: context.tenantId, outletId: context.outletId };
+    const envelope = await (options.fetchPickup ?? fetchPickupSource)(operationalDate, { scope });
     let created = 0;
     let updated = 0;
     let duplicate = 0;

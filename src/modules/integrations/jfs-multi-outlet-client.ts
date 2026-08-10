@@ -41,22 +41,23 @@ export async function executeTrustedMultiOutletScraper(
   const baseUrl = process.env.JFS_MIDDLEWARE_BASE_URL || "https://jfs-middleware-v2-production.up.railway.app";
   const authKey = process.env.JFS_MIDDLEWARE_AUTH_KEY || "";
 
-  // Dynamic route selection: fallback to /jfs-<endpoint> or /internal/multi-outlet/ if available
+  // Dynamic route selection: support both clean path and /jfs- prefixed path
   const endpointMap: Record<ScraperOperation, string> = {
-    PICKUP: "/jfs-pickup",
-    DISPATCH: "/jfs-dispatch",
-    COD: "/jfs-cod",
-    IBK: "/jfs-ibk",
-    OMS: "/jfs-order-sync",
-    INVENTORY: "/jfs-inventory-detail",
-    AGING_SIGN: "/jfs-aging-sign",
-    WAYBILL_STATUS: "/jfs-waybill-status",
-    SENDER_DETAIL: "/jfs-sender-detail",
+    PICKUP: "/pickup",
+    DISPATCH: "/dispatch",
+    COD: "/cod",
+    IBK: "/ibk",
+    OMS: "/oms",
+    INVENTORY: "/inventory",
+    AGING_SIGN: "/aging-sign",
+    WAYBILL_STATUS: "/waybill-status",
+    SENDER_DETAIL: "/sender-detail",
   };
 
-  const url = `${baseUrl}${endpointMap[operation]}`;
+  const url = `${baseUrl.replace(/\/+$/, "")}${endpointMap[operation]}`;
+  const customFetcher = (options.fetcher as typeof fetch) ?? fetch;
 
-  const res = await fetch(url, {
+  const res = await customFetcher(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -80,5 +81,24 @@ export async function executeTrustedMultiOutletScraper(
   }
 
   const json = await res.json();
+  if (json && typeof json === "object" && json.success === true && json.data && typeof json.data === "object") {
+    return json.data;
+  }
   return json;
+}
+
+export function isSecurityFailure(error: unknown): boolean {
+  if (!error) return false;
+  const msg = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: string })?.code || "";
+
+  return (
+    code === "JFS_NETWORK_MISMATCH" ||
+    code === "TENANT_OUTLET_MISMATCH" ||
+    code === "UNAUTHORIZED" ||
+    msg.includes("NETWORK_MISMATCH") ||
+    msg.includes("TENANT_OUTLET_MISMATCH") ||
+    msg.includes("UNAUTHORIZED") ||
+    msg.includes("network yang berbeda")
+  );
 }

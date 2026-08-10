@@ -1,5 +1,7 @@
 import "server-only";
 import { sourceEnvelopeSchema } from "./delivery-settlement.validation";
+import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
+import type { SettingsScope } from "@/modules/settings/settings.types";
 
 export type DeliveryFetchErrorCode =
   | "SYNC_FETCH_DISPATCH_FAILED"
@@ -80,15 +82,43 @@ export async function fetchDeliverySource(
     timeoutMs?: number;
     maxAttempts?: number;
     sleep?: (milliseconds: number) => Promise<void>;
+    scope?: SettingsScope;
   } = {},
 ) {
+  const startedAt = Date.now();
+
+  if (options.scope) {
+    const op = endpoint === "/jfs-dispatch" ? "DISPATCH" : "COD";
+    try {
+      const result = await executeTrustedMultiOutletScraper(options.scope, op, {
+        date: operationalDate,
+        fetcher: options.fetcher,
+      });
+
+      const body = result.data ? result : { total: result.total ?? 0, data: result.data ?? [] };
+      const parsed = sourceEnvelopeSchema.safeParse(body);
+      if (parsed.success && parsed.data.total === parsed.data.data.length) {
+        return {
+          ...parsed.data,
+          diagnostic: {
+            endpoint, httpStatus: 200, contentType: "application/json",
+            attemptCount: 1, durationMs: Date.now() - startedAt,
+          } satisfies FetchDiagnostic,
+        };
+      }
+    } catch (err) {
+      if (isSecurityFailure(err)) throw err;
+      console.warn(`[MultiOutletFallback] ${op} multi-outlet fetch failed, falling back to legacy GET ${endpoint}:`, err instanceof Error ? err.message : err);
+      // Fallback to legacy GET endpoint for unconfigured or degraded outlets
+    }
+  }
+
   const url = new URL(endpoint, resolveDeliveryMiddlewareBaseUrl(options.baseUrl));
   url.searchParams.set("date", operationalDate);
   const fetcher = options.fetcher ?? fetch;
   const timeoutMs = options.timeoutMs ?? 45_000;
   const maxAttempts = options.maxAttempts ?? 3;
   const sleep = options.sleep ?? ((milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
-  const startedAt = Date.now();
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     let response: Response;

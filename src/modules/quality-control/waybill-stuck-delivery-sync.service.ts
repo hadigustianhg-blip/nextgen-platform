@@ -2,6 +2,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
+import type { SettingsScope } from "@/modules/settings/settings.types";
 
 const DEFAULT_BASE_URL = "https://jfs-middleware-v2-production.up.railway.app";
 const BATCH_SIZE = 100;
@@ -127,7 +129,27 @@ export async function requestWithRetry(
 export async function fetchInventoryDetail(
   businessDate: string,
   fetcher: typeof fetch = fetch,
+  scope?: SettingsScope,
 ) {
+  if (scope) {
+    try {
+      const envelope = await executeTrustedMultiOutletScraper(scope, "INVENTORY", {
+        startDate: businessDate,
+        endDate: businessDate,
+        fetcher,
+      });
+      if (!envelope || typeof envelope !== "object" || envelope.success !== true || !Array.isArray(envelope.data)) {
+        throw new WaybillStuckSourceError("INVALID_RESPONSE");
+      }
+      return (envelope.data as unknown[]).map(normalizeInventoryRecord);
+    } catch (err) {
+      if (err instanceof WaybillStuckSourceError) throw err;
+      if (isSecurityFailure(err)) throw err;
+      console.warn(`[MultiOutletFallback] INVENTORY multi-outlet fetch failed, falling back to legacy GET /jfs-inventory-detail:`, err instanceof Error ? err.message : err);
+      // Fallback to legacy GET endpoint for unconfigured or degraded outlets
+    }
+  }
+
   const url = new URL(
     "/jfs-inventory-detail",
     process.env.JFS_MIDDLEWARE_URL ?? DEFAULT_BASE_URL,
@@ -157,8 +179,29 @@ export async function fetchWaybillStatusBatch(
   waybills: string[],
   businessDate: string,
   fetcher: typeof fetch = fetch,
+  scope?: SettingsScope,
 ) {
   if (waybills.length > BATCH_SIZE) throw new Error("BATCH_LIMIT_EXCEEDED");
+  if (scope) {
+    try {
+      const envelope = await executeTrustedMultiOutletScraper(scope, "WAYBILL_STATUS", {
+        waybillList: waybills,
+        startDate: businessDate,
+        endDate: businessDate,
+        fetcher,
+      });
+      if (!envelope || typeof envelope !== "object" || envelope.success !== true || !Array.isArray(envelope.data)) {
+        throw new WaybillStuckSourceError("INVALID_RESPONSE");
+      }
+      return (envelope.data as unknown[]).map(normalizeWaybillStatusRecord);
+    } catch (err) {
+      if (err instanceof WaybillStuckSourceError) throw err;
+      if (isSecurityFailure(err)) throw err;
+      console.warn(`[MultiOutletFallback] WAYBILL_STATUS multi-outlet fetch failed, falling back to legacy POST /jfs-waybill-status-batch:`, err instanceof Error ? err.message : err);
+      // Fallback to legacy POST endpoint for unconfigured or degraded outlets
+    }
+  }
+
   const response = await requestWithRetry(() =>
     fetcher(new URL("/jfs-waybill-status-batch", process.env.JFS_MIDDLEWARE_URL ?? DEFAULT_BASE_URL), {
       method: "POST",
@@ -185,15 +228,25 @@ async function syncWaybillStuckDeliveryCore(input: {
   businessDate: string;
   fetchInventory?: typeof fetchInventoryDetail;
   fetchStatus?: typeof fetchWaybillStatusBatch;
+  scope?: SettingsScope;
 }) {
   const startedAt = new Date();
-  const inventory = await (input.fetchInventory ?? fetchInventoryDetail)(input.businessDate);
+  const scope: SettingsScope = input.scope ?? { tenantId: input.tenantId, outletId: input.outletId };
+
+  const inventory = input.fetchInventory
+    ? await input.fetchInventory(input.businessDate)
+    : await fetchInventoryDetail(input.businessDate, fetch, scope);
+
   const uniqueWaybills = [...new Set(inventory.map((record) => record.billCode))];
   const statusRecords: StatusRecord[] = [];
   let failedBatches = 0;
   for (const batch of chunks(uniqueWaybills, BATCH_SIZE)) {
     try {
-      statusRecords.push(...await (input.fetchStatus ?? fetchWaybillStatusBatch)(batch, input.businessDate));
+      if (input.fetchStatus) {
+        statusRecords.push(...await input.fetchStatus(batch, input.businessDate));
+      } else {
+        statusRecords.push(...await fetchWaybillStatusBatch(batch, input.businessDate, fetch, scope));
+      }
     } catch {
       failedBatches += 1;
     }

@@ -1,5 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
+import type { SettingsScope } from "@/modules/settings/settings.types";
 import {
   type AgingSignRecord,
   normalizeAgingSign,
@@ -56,7 +58,26 @@ export async function fetchAgingSignSnapshot(
   fetcher: Fetcher = fetch,
   wait: (milliseconds: number) => Promise<unknown> = sleep,
   maxAttempts = 3,
+  scope?: SettingsScope,
 ) {
+  if (scope) {
+    try {
+      const payload = await executeTrustedMultiOutletScraper(scope, "AGING_SIGN", { fetcher });
+      if (!payload.success || !Array.isArray(payload.data) || payload.data.length !== 1) {
+        throw new SlaSyncError(
+          "Respons jfs-aging-sign tidak valid.",
+          "INVALID_RESPONSE",
+          false,
+        );
+      }
+      return { record: normalizeAgingSign(payload.data[0]), attempts: 1 };
+    } catch (error) {
+      if (isSecurityFailure(error)) throw error;
+      console.warn(`[MultiOutletFallback] AGING_SIGN multi-outlet fetch failed, falling back to legacy GET /jfs-aging-sign:`, error instanceof Error ? error.message : error);
+      // Fallback to legacy GET endpoint for unconfigured or degraded outlets
+    }
+  }
+
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const response = await fetcher(SLA_SOURCE_ENDPOINT, {

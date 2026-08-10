@@ -2,6 +2,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
+import type { SettingsScope } from "@/modules/settings/settings.types";
 
 const locks = new Set<string>();
 const text = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : null;
@@ -41,7 +43,24 @@ export async function fetchPickupScheduleList(
   startDate: string,
   endDate: string,
   fetcher: typeof fetch = fetch,
+  scope?: SettingsScope,
 ) {
+  if (scope) {
+    try {
+      const result = await executeTrustedMultiOutletScraper(scope, "OMS", {
+        startDate,
+        endDate,
+        fetcher,
+      });
+      const bodyData = Array.isArray(result.data) ? result.data : [];
+      return bodyData.map(normalizePickupListRecord);
+    } catch (err) {
+      if (isSecurityFailure(err)) throw err;
+      console.warn(`[MultiOutletFallback] OMS multi-outlet fetch failed, falling back to legacy GET /jfs-order-list-sync:`, err instanceof Error ? err.message : err);
+      // Fallback to legacy GET endpoint for unconfigured or degraded outlets
+    }
+  }
+
   const baseUrl = process.env.JFS_MIDDLEWARE_BASE_URL?.trim()
     || process.env.JFS_MIDDLEWARE_URL?.trim();
   if (!baseUrl) throw new Error("MIDDLEWARE_NOT_CONFIGURED");
@@ -61,12 +80,19 @@ export async function syncPickupScheduling(input: {
   tenantId: string; outletId: string; actorId: string;
   startDate: string; endDate: string;
   fetchList?: typeof fetchPickupScheduleList;
+  scope?: SettingsScope;
 }) {
   const lockKey = `${input.tenantId}:${input.outletId}`;
   if (locks.has(lockKey)) throw Object.assign(new Error("SYNC_IN_PROGRESS"), { code: "SYNC_IN_PROGRESS" });
   locks.add(lockKey);
+
+  const scope: SettingsScope = input.scope ?? { tenantId: input.tenantId, outletId: input.outletId };
+
   try {
-    const records = await (input.fetchList || fetchPickupScheduleList)(input.startDate, input.endDate);
+    const records = input.fetchList
+      ? await input.fetchList(input.startDate, input.endDate)
+      : await fetchPickupScheduleList(input.startDate, input.endDate, fetch, scope);
+
     const syncedAt = new Date();
     let created = 0; let updated = 0; let unchanged = 0;
     await prisma.$transaction(async (tx) => {
