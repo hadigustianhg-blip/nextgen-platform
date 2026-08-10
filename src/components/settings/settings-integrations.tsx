@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Cloud, Database, Eye, Globe2, Link2, LockKeyhole, RefreshCw, ShieldAlert, ShieldCheck, X } from "lucide-react";
+import { CheckCircle2, Cloud, Database, Eye, EyeOff, Globe2, Link2, LockKeyhole, RefreshCw, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { buttonClass, inputClass, SettingsCard } from "./settings-shell";
 
 type DatasetStatus = "SUCCESS" | "FAILED" | "RUNNING" | "NEVER_SYNCED" | "STALE" | "UNAVAILABLE";
@@ -46,6 +46,7 @@ export function JfsConnectionCard({ data }: { data: JfsConnectionState }) {
   const [conn, setConn] = useState<JfsConnectionState>(data);
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -175,13 +176,23 @@ export function JfsConnectionCard({ data }: { data: JfsConnectionState }) {
           />
         </Field>
         <Field label="Password JFS">
-          <input
-            className={inputClass}
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={isConnected ? "•••••••••••• (Credential tersimpan aman)" : "Masukkan Password JFS"}
-          />
+          <div className="relative flex items-center">
+            <input
+              className={`${inputClass} pr-10`}
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={isConnected ? "•••••••••••• (Credential tersimpan aman)" : "Masukkan Password JFS"}
+            />
+            <button
+              type="button"
+              aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"}
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 text-slate-400 hover:text-slate-600 focus:outline-none"
+            >
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
         </Field>
         <Field label="Outlet NEXTGEN">
           <input className={inputClass} disabled value={conn.outletCode} />
