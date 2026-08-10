@@ -77,8 +77,8 @@ describe("Settings Integration control center", () => {
   });
 
   it("renders a professional UI with self-service connection actions, Eye/EyeOff password toggle, and no raw JSON pre elements", () => {
-    for (const section of ["Ringkasan Integrasi", "Koneksi Akun JFS", "Status Sinkronisasi", "Infrastruktur", "Riwayat Aktivitas Integrasi"]) expect(uiSource).toContain(section);
-    for (const action of ["Hubungkan JFS", "Test Koneksi", "Putuskan Koneksi"]) expect(uiSource).toContain(action);
+    for (const section of ["Ringkasan Integrasi", "Koneksi Akun JFS", "Status Sinkronisasi", "Infrastruktur", "Riwayat Aktivitas Integrasi", "SettingsOwnerControl"]) expect(uiSource).toContain(section);
+    for (const action of ["Hubungkan JFS", "Test Koneksi", "Login Ulang", "Sync Sekarang", "Putuskan Koneksi"]) expect(uiSource).toContain(action);
     expect(uiSource).toContain("showPassword");
     expect(uiSource).toContain("EyeOff");
     expect(uiSource).not.toContain("<pre");

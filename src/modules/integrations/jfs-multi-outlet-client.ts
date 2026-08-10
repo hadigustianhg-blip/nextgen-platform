@@ -1,0 +1,84 @@
+import { decryptCredential } from "./credential-crypto";
+import { prisma } from "@/lib/db/prisma";
+import type { SettingsScope } from "@/modules/settings/settings.types";
+
+export type ScraperOperation =
+  | "PICKUP"
+  | "DISPATCH"
+  | "COD"
+  | "IBK"
+  | "OMS"
+  | "INVENTORY"
+  | "AGING_SIGN"
+  | "WAYBILL_STATUS"
+  | "SENDER_DETAIL";
+
+export async function executeTrustedMultiOutletScraper(
+  scope: SettingsScope,
+  operation: ScraperOperation,
+  options: Record<string, unknown> = {}
+) {
+  const credential = await prisma.integrationCredential.findUnique({
+    where: {
+      tenantId_outletId_provider: {
+        tenantId: scope.tenantId,
+        outletId: scope.outletId,
+        provider: "JFS",
+      },
+    },
+    include: {
+      outlet: { select: { code: true } },
+    },
+  });
+
+  if (!credential || credential.connectionStatus !== "CONNECTED" || !credential.isActive) {
+    throw new Error(`JFS Integration is not connected or active for outlet ${scope.outletId}`);
+  }
+
+  const decryptedAccount = decryptCredential<{ account: string }>(credential.accountEncrypted).account;
+  const decryptedPassword = decryptCredential<{ password: string }>(credential.passwordEncrypted).password;
+
+  const baseUrl = process.env.JFS_MIDDLEWARE_BASE_URL || "https://jfs-middleware-v2-production.up.railway.app";
+  const authKey = process.env.JFS_MIDDLEWARE_AUTH_KEY || "";
+
+  // Dynamic route selection: fallback to /jfs-<endpoint> or /internal/multi-outlet/ if available
+  const endpointMap: Record<ScraperOperation, string> = {
+    PICKUP: "/jfs-pickup",
+    DISPATCH: "/jfs-dispatch",
+    COD: "/jfs-cod",
+    IBK: "/jfs-ibk",
+    OMS: "/jfs-order-sync",
+    INVENTORY: "/jfs-inventory-detail",
+    AGING_SIGN: "/jfs-aging-sign",
+    WAYBILL_STATUS: "/jfs-waybill-status",
+    SENDER_DETAIL: "/jfs-sender-detail",
+  };
+
+  const url = `${baseUrl}${endpointMap[operation]}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Auth-Key": authKey,
+      "X-JFS-Tenant-Id": scope.tenantId,
+      "X-JFS-Outlet-Id": scope.outletId,
+      "X-JFS-Outlet-Code": credential.outlet?.code || credential.networkCode || "SUM001A",
+      "X-JFS-Network-Code": credential.networkCode || credential.outlet?.code || "SUM001A",
+      "X-JFS-Account": decryptedAccount,
+      "X-JFS-Password": decryptedPassword,
+    },
+    body: JSON.stringify({
+      networkCode: credential.networkCode || credential.outlet?.code,
+      ...options,
+    }),
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "");
+    throw new Error(`Upstream middleware request failed with status ${res.status}: ${errorBody}`);
+  }
+
+  const json = await res.json();
+  return json;
+}

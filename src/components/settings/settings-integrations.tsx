@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckCircle2, Cloud, Database, Eye, EyeOff, Globe2, Link2, LockKeyhole, RefreshCw, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { buttonClass, inputClass, SettingsCard } from "./settings-shell";
+import { SettingsOwnerControl } from "./settings-owner-control";
 
 type DatasetStatus = "SUCCESS" | "FAILED" | "RUNNING" | "NEVER_SYNCED" | "STALE" | "UNAVAILABLE";
 type DatasetView = { key: string; label: string; status: DatasetStatus; lastSyncedAt: string | null; resultSummary: string; recordCount: number | null; errorCode: string | null; detailAvailable: boolean };
@@ -137,6 +138,24 @@ export function JfsConnectionCard({ data }: { data: JfsConnectionState }) {
     }
   }
 
+  async function handleSync() {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setLoading("SYNCING");
+    try {
+      const res = await fetch("/api/settings/integrations/jfs/sync", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error?.message || json.error?.code || "Sinkronisasi JFS gagal.");
+      }
+      setSuccessMsg("Sinkronisasi dataset JFS berhasil diproses!");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Sinkronisasi JFS gagal.");
+    } finally {
+      setLoading(null);
+    }
+  }
+
   return (
     <SettingsCard title="Koneksi Akun JFS">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
@@ -231,6 +250,26 @@ export function JfsConnectionCard({ data }: { data: JfsConnectionState }) {
 
               <button
                 type="button"
+                className={`${buttonClass} bg-blue-50 text-blue-700 hover:bg-blue-100`}
+                onClick={handleTest}
+                disabled={loading !== null}
+              >
+                <RefreshCw size={16} />
+                Login Ulang
+              </button>
+
+              <button
+                type="button"
+                className={`${buttonClass} bg-amber-50 text-amber-700 hover:bg-amber-100`}
+                onClick={handleSync}
+                disabled={loading !== null}
+              >
+                <RefreshCw size={16} />
+                {loading === "SYNCING" ? "Menyinkronkan..." : "Sync Sekarang"}
+              </button>
+
+              <button
+                type="button"
                 className={`${buttonClass} bg-red-50 text-red-700 hover:bg-red-100`}
                 onClick={handleDisconnect}
                 disabled={loading !== null}
@@ -275,6 +314,7 @@ export function SettingsIntegrations({ data }: { data: IntegrationData }) {
     <JfsConnectionCard data={connection}/>
     <SettingsCard title="Status Sinkronisasi"><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-600">Status hanya berasal dari run canonical yang tersedia.</p><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">Segera Tersedia</span></div><div>{(data.datasets ?? []).map((dataset) => <DatasetSyncRow key={dataset.key} dataset={dataset} onDetail={() => setDetail(dataset)}/>)}</div><div className="mt-4"><ComingSoonButton><RefreshCw size={16}/> Sinkronkan Sekarang</ComingSoonButton></div></SettingsCard>
     {data.infrastructure && <InfrastructureCard data={data.infrastructure}/>}<IntegrationActivityTable activities={data.activities ?? []}/>
+    <SettingsOwnerControl />
     <p className="flex items-center gap-2 text-xs text-slate-500"><LockKeyhole size={14}/> Credential, token, environment secret, dan response mentah tidak ditampilkan.</p>
     {detail && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4" role="dialog" aria-modal="true"><section className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl"><div className="flex items-center justify-between"><h3 className="text-lg font-bold text-slate-950">Detail {detail.label}</h3><button aria-label="Tutup" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" onClick={() => setDetail(null)}><X size={18}/></button></div><dl className="mt-5 grid gap-4 sm:grid-cols-2"><Info label="Status" value={statusLabel[detail.status]}/><Info label="Sinkronisasi terakhir" value={formatDate(detail.lastSyncedAt)}/><Info label="Jumlah record" value={detail.recordCount === null ? "—" : String(detail.recordCount)}/><Info label="Kode error aman" value={detail.errorCode ?? "—"}/></dl><p className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">{detail.resultSummary}</p><div className="mt-5 flex justify-end"><button className={`${buttonClass} bg-slate-100 text-slate-700`} onClick={() => setDetail(null)}>Tutup</button></div></section></div>}
   </div>;
