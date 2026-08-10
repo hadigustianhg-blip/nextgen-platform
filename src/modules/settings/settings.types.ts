@@ -3,7 +3,7 @@ import type { SessionContext } from "@/lib/auth/session";
 export type SettingsScope = { tenantId: string; outletId: string };
 export type SettingsActor = SettingsScope & { userId: string };
 
-export type JfsConnectionStatus = "NOT_CONFIGURED" | "CONNECTED" | "RELOGIN_REQUIRED" | "DEGRADED";
+export type JfsConnectionStatus = "NOT_CONFIGURED" | "CONNECTED" | "RELOGIN_REQUIRED" | "DEGRADED" | "DISCONNECTED" | "FAILED";
 export type IntegrationDatasetStatus = "SUCCESS" | "FAILED" | "RUNNING" | "NEVER_SYNCED" | "STALE" | "UNAVAILABLE";
 export type IntegrationDatasetKey = "PICKUP" | "DISPATCH" | "COD" | "CASHFLOW" | "SLA" | "OMS" | "AGING_SIGN" | "INVENTORY";
 
@@ -15,12 +15,15 @@ export type IntegrationSummary = {
 };
 
 export type IntegrationConnectionView = {
-  available: false;
+  available: boolean;
+  connected?: boolean;
   outletCode: string;
-  networkCode: null;
-  status: "COMING_SOON";
-  lastLoginAt: null;
-  lastTestedAt: null;
+  networkCode?: string | null;
+  status: string;
+  accountMasked?: string | null;
+  lastConnectedAt?: string | null;
+  lastTestedAt?: string | null;
+  lastLoginAt?: string | null;
 };
 
 export type IntegrationDatasetView = {

@@ -2,6 +2,7 @@ import argon2 from "argon2";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { buildOutletWhere, buildTenantOutletWhere, type IntegrationActivityView, type IntegrationControlCenter, type IntegrationDatasetStatus, type IntegrationDatasetView, type SettingsActor, type SettingsScope } from "./settings.types";
+import { getJfsIntegrationStatus } from "@/modules/integrations/jfs-credential.service";
 import type { z } from "zod";
 import type { auditLogQuerySchema, bankAccountSchema, businessProfileSchema, financialCategorySchema, userCreateSchema, userUpdateSchema } from "./settings.validation";
 
@@ -349,10 +350,20 @@ export async function getIntegrationStatus(scope: SettingsScope): Promise<Integr
   const cashflowLast = cashflowRuns[0]?.completedAt ?? cashflowRuns[0]?.startedAt ?? null;
   const databaseStatus = "CONNECTED" as const;
   const salaryCardStatus = activeShares > 0 ? "ACTIVE" as const : "READY" as const;
+  const jfsConnection = await getJfsIntegrationStatus(scope).catch(() => ({
+    available: true,
+    connected: false,
+    outletCode: outlet.code,
+    networkCode: null,
+    status: "DISCONNECTED" as const,
+    accountMasked: null,
+    lastConnectedAt: null,
+    lastTestedAt: null,
+  }));
 
   return {
-    summary: { jfsConnectionStatus: "NOT_CONFIGURED", middlewareStatus, databaseStatus, applicationDomain: appDomain },
-    connection: { available: false, outletCode: outlet.code, networkCode: null, status: "COMING_SOON", lastLoginAt: null, lastTestedAt: null },
+    summary: { jfsConnectionStatus: jfsConnection.status, middlewareStatus, databaseStatus, applicationDomain: appDomain },
+    connection: jfsConnection,
     datasets,
     infrastructure: {
       middlewareHostMasked: middlewareHostMasked(middlewareUrl), middlewareStatus, databaseStatus, applicationDomain: appDomain, salaryCardStatus,

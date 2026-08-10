@@ -386,6 +386,7 @@ model Outlet {
   attendanceRecords          AttendanceRecord[]
   attendanceEvents           AttendanceEvent[]
   leaveRequests              LeaveRequest[]
+  integrationCredentials     IntegrationCredential[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -523,20 +524,38 @@ model AuditLog {
   @@index([tenantId, actorId, createdAt(sort: Desc)])
 }
 
-model IntegrationCredential {
-  id               String   @id @default(uuid()) @db.Uuid
-  tenantId         String   @db.Uuid
-  provider         String
-  label            String
-  encryptedPayload String
-  keyVersion       Int      @default(1)
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+enum IntegrationConnectionStatus {
+  CONNECTED
+  DISCONNECTED
+  FAILED
+}
 
-  @@unique([tenantId, provider, label])
-  @@index([tenantId, provider, isActive])
+model IntegrationCredential {
+  id                String                      @id @default(uuid()) @db.Uuid
+  tenantId          String                      @db.Uuid
+  outletId          String                      @db.Uuid
+  provider          String                      @default("JFS")
+  accountEncrypted  String
+  passwordEncrypted String
+  networkCode       String?
+  networkName       String?
+  financeCode       String?
+  financeId         Int?
+  scanSiteCode      String?
+  connectionStatus  IntegrationConnectionStatus @default(DISCONNECTED)
+  lastConnectedAt   DateTime?
+  lastTestedAt      DateTime?
+  lastFailureAt     DateTime?
+  lastFailureCode   String?
+  keyVersion        Int                         @default(1)
+  isActive          Boolean                     @default(true)
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+  tenant            Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  outlet            Outlet                      @relation(fields: [outletId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, outletId, provider])
+  @@index([tenantId, outletId, provider, isActive])
 }
 
 model SyncRun {
