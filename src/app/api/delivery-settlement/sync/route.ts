@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ data: await syncDeliverySettlement({ ...scope, actorId: session.userId }, { operationalDate: parsed?.data }) });
   } catch (error) {
     if (error instanceof DeliverySyncError) {
-      const source = error.reference.stage === "FETCH_DISPATCH" ? "Dispatch" : error.reference.stage === "FETCH_COD" ? "COD" : "sumber";
+      const source = error.reference.stage === "FETCH_DISPATCH" ? "Dispatch" : error.reference.stage === "FETCH_COD" ? "COD" : error.reference.stage;
       return NextResponse.json({ error: {
         code: error.reference.code,
         stage: error.reference.stage,
