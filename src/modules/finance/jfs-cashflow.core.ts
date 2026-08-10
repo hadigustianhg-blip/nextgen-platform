@@ -129,7 +129,9 @@ export async function fetchJfsCashflow(input: {
   wait?: (milliseconds: number) => Promise<unknown>;
   scope?: SettingsScope;
 }) {
-  if (input.scope) {
+  const isSum001a = !input.scope || input.scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
+
+  if (input.scope && !isSum001a) {
     try {
       const result = await executeTrustedMultiOutletScraper(input.scope, "IBK", {
         startDate: input.startDate,

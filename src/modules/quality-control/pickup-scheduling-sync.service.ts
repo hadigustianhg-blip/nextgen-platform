@@ -45,7 +45,9 @@ export async function fetchPickupScheduleList(
   fetcher: typeof fetch = fetch,
   scope?: SettingsScope,
 ) {
-  if (scope) {
+  const isSum001a = !scope || scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
+
+  if (scope && !isSum001a) {
     try {
       const result = await executeTrustedMultiOutletScraper(scope, "OMS", {
         startDate,

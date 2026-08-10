@@ -131,7 +131,9 @@ export async function fetchInventoryDetail(
   fetcher: typeof fetch = fetch,
   scope?: SettingsScope,
 ) {
-  if (scope) {
+  const isSum001a = !scope || scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
+
+  if (scope && !isSum001a) {
     try {
       const envelope = await executeTrustedMultiOutletScraper(scope, "INVENTORY", {
         startDate: businessDate,
@@ -182,7 +184,9 @@ export async function fetchWaybillStatusBatch(
   scope?: SettingsScope,
 ) {
   if (waybills.length > BATCH_SIZE) throw new Error("BATCH_LIMIT_EXCEEDED");
-  if (scope) {
+  const isSum001a = !scope || scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
+
+  if (scope && !isSum001a) {
     try {
       const envelope = await executeTrustedMultiOutletScraper(scope, "WAYBILL_STATUS", {
         waybillList: waybills,

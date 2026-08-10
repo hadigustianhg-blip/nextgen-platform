@@ -60,7 +60,9 @@ export async function fetchAgingSignSnapshot(
   maxAttempts = 3,
   scope?: SettingsScope,
 ) {
-  if (scope) {
+  const isSum001a = !scope || scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
+
+  if (scope && !isSum001a) {
     try {
       const payload = await executeTrustedMultiOutletScraper(scope, "AGING_SIGN", { fetcher });
       if (!payload.success || !Array.isArray(payload.data) || payload.data.length !== 1) {
