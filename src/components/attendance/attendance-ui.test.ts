@@ -31,4 +31,12 @@ describe("Attendance UI and API boundaries", () => {
     const source = (await Promise.all(files.map((file) => readFile(file, "utf8")))).join("\n");
     expect(source).not.toMatch(/selfie|camera|mediaDevices|serviceWorker|offline queue|upload/i);
   });
+
+  it("safely handles leave approval rendering without un-guarded charAt or undefined property access", async () => {
+    const admin = await readFile(new URL("./attendance-admin-client.tsx", import.meta.url), "utf8");
+    expect(admin).not.toContain("item.employeeName.charAt");
+    expect(admin).toContain("item.employee?.name || item.employeeName");
+    expect(admin).toContain("empName.trim().charAt(0)");
+    expect(admin).toContain("{reviewerName &&");
+  });
 });

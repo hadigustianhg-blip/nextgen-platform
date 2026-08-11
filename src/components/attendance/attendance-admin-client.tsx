@@ -115,8 +115,6 @@ type ReportData = {
 
 type AdminLeaveRow = {
   id: string;
-  employeeName: string;
-  division: string;
   type: "LEAVE" | "PERMISSION" | "SICK";
   startDate: string;
   endDate: string;
@@ -124,6 +122,18 @@ type AdminLeaveRow = {
   status: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
   submittedAt: string;
   reviewNotes?: string | null;
+  reviewedAt?: string | null;
+  employeeName?: string | null;
+  division?: string | null;
+  employee?: {
+    id?: string;
+    name?: string | null;
+    division?: string | null;
+  } | null;
+  reviewer?: {
+    id?: string;
+    name?: string | null;
+  } | null;
 };
 
 type ApiBody = {
@@ -914,6 +924,10 @@ export function AttendanceAdminClient({ canCorrect }: { canCorrect: boolean }) {
                 {approvals.map((item) => {
                   const duration = calculateDaysDuration(item.startDate, item.endDate);
                   const isPending = item.status === "PENDING";
+                  const empName = item.employee?.name || item.employeeName || "Karyawan";
+                  const empDivision = item.employee?.division || item.division || "-";
+                  const empInitial = (empName.trim() ? empName.trim().charAt(0) : "K").toUpperCase();
+                  const reviewerName = item.reviewer?.name || null;
 
                   return (
                     <div
@@ -923,11 +937,11 @@ export function AttendanceAdminClient({ canCorrect }: { canCorrect: boolean }) {
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
                           <div className="grid size-11 place-items-center rounded-2xl bg-blue-50 text-blue-700 font-black text-sm">
-                            {item.employeeName.charAt(0)}
+                            {empInitial}
                           </div>
                           <div>
-                            <h3 className="text-base font-black text-slate-950">{item.employeeName}</h3>
-                            <p className="text-xs font-semibold text-slate-500">{item.division}</p>
+                            <h3 className="text-base font-black text-slate-950">{empName}</h3>
+                            <p className="text-xs font-semibold text-slate-500">{empDivision}</p>
                           </div>
                         </div>
 
@@ -955,7 +969,7 @@ export function AttendanceAdminClient({ canCorrect }: { canCorrect: boolean }) {
                                 : "bg-slate-100 text-slate-700"
                             }`}
                           >
-                            {item.status}
+                            {item.status ?? "PENDING"}
                           </span>
                         </div>
                       </div>
@@ -979,8 +993,22 @@ export function AttendanceAdminClient({ canCorrect }: { canCorrect: boolean }) {
 
                       <div className="text-xs">
                         <span className="font-bold text-slate-500">Alasan: </span>
-                        <span className="font-semibold text-slate-800">{item.reason}</span>
+                        <span className="font-semibold text-slate-800">{item.reason || "-"}</span>
                       </div>
+
+                      {reviewerName && (
+                        <div className="text-xs text-slate-600 bg-slate-100 p-2.5 rounded-xl flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <span className="font-bold">Direview oleh: </span>
+                            <span>{reviewerName}</span>
+                          </div>
+                          {item.reviewedAt && (
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              {formatTime(item.reviewedAt)}
+                            </span>
+                          )}
+                        </div>
+                      )}
 
                       {item.reviewNotes && (
                         <div className="text-xs text-slate-600 bg-slate-100 p-2.5 rounded-xl">

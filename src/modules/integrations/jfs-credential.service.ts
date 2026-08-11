@@ -35,7 +35,7 @@ async function callMiddlewareLogin(account: string, password: string): Promise<{
   const middlewareBaseUrl =
     process.env.JFS_MIDDLEWARE_BASE_URL ||
     process.env.JFS_MIDDLEWARE_URL ||
-    "http://localhost:3000";
+    "https://jfs-middleware-v2-production.up.railway.app";
   const authKey =
     process.env.JFS_MIDDLEWARE_AUTH_KEY ||
     process.env.JFS_AUTH_KEY ||
