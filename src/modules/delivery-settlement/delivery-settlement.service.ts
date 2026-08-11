@@ -247,169 +247,359 @@ export async function syncDeliverySettlement(
     duplicate += codOverlapDuplicate;
 
     stage = "NORMALIZE_AND_UPSERT";
-    await prisma.$transaction(async (tx) => {
-      const missingDispatches = await tx.rawDispatch.updateMany({
+
+    const waybillNos = uniqueDispatches.map((r) => r.waybillNo.trim());
+    const missingDispatches = await prisma.rawDispatch.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        operationalDate: date,
+        isActive: true,
+        ...(waybillNos.length ? { waybillNo: { notIn: waybillNos } } : {}),
+      },
+      data: { isActive: false },
+    });
+    dispatchInactive += missingDispatches?.count ?? 0;
+
+    const existingDispatches = await prisma.rawDispatch.findMany({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        operationalDate: date,
+      },
+    });
+    const dispatchMap = new Map(existingDispatches.map((d) => [d.sourceRecordKey, d]));
+
+    const DISPATCH_BATCH_SIZE = 50;
+    for (let i = 0; i < uniqueDispatches.length; i += DISPATCH_BATCH_SIZE) {
+      const batch = uniqueDispatches.slice(i, i + DISPATCH_BATCH_SIZE);
+      await prisma.$transaction(async (tx) => {
+        for (const record of batch) {
+          const waybillNoTrim = record.waybillNo.trim();
+          const key = `v2:dispatch:${waybillNoTrim}`;
+          const hash = sourceHash(record);
+          const existing = dispatchMap.get(key);
+
+          const common = {
+            operationalDate: date,
+            sourceEndpoint: "/jfs-dispatch",
+            sourceFetchedAt: startedAt,
+            syncedAt: new Date(),
+            syncStatus: "NORMALIZED" as const,
+            syncError: null,
+            sourceRecordHash: hash,
+            sourcePayload: record as unknown as Prisma.InputJsonValue,
+            lastSeenRunId: run.id,
+            waybillNo: record.waybillNo,
+            courierNameRaw: record.kurir || null,
+            freightAmount: decimal(record.ongkir),
+            dispatchTimeRaw: record.waktu || null,
+            dispatchAt: parseSourceDate(record.waktu),
+            receiverName: record.receiver || null,
+            receiverAddress: record.address || null,
+            deliveryStatusRaw: record.status || null,
+            chargeWeight: decimal(record.berat),
+            settlementTypeRaw: record.pembayaran || null,
+            serviceRaw: record.service || null,
+            codStatusRaw: record.codStatus || null,
+            codValue: decimal(record.codValue),
+            goodsDescription: record.barang || null,
+            isActive: true,
+          };
+
+          const supersededDispatches = await tx.rawDispatch.updateMany({
+            where: {
+              tenantId: context.tenantId,
+              outletId: context.outletId,
+              operationalDate: date,
+              waybillNo: record.waybillNo,
+              ...(existing ? { id: { not: existing.id } } : {}),
+              isActive: true,
+            },
+            data: { isActive: false },
+          });
+          dispatchInactive += supersededDispatches?.count ?? 0;
+
+          if (!existing) {
+            const created = await tx.rawDispatch.create({
+              data: {
+                tenantId: context.tenantId,
+                outletId: context.outletId,
+                sourceRecordKey: key,
+                firstSeenRunId: run.id,
+                ...common,
+              },
+            });
+            dispatchMap.set(key, created);
+            dispatchCreated += 1;
+          } else if (existing.sourceRecordHash === hash) {
+            await tx.rawDispatch.update({
+              where: { id: existing.id },
+              data: {
+                sourceFetchedAt: startedAt,
+                syncedAt: new Date(),
+                lastSeenRunId: run.id,
+                isActive: true,
+              },
+            });
+            dispatchUnchanged += 1;
+            duplicate += 1;
+          } else {
+            const updated = await tx.rawDispatch.update({
+              where: { id: existing.id },
+              data: common,
+            });
+            dispatchMap.set(key, updated);
+            dispatchUpdated += 1;
+          }
+        }
+      });
+    }
+
+    const existingCods = await prisma.rawCod.findMany({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        operationalDate: date,
+      },
+    });
+    const codMap = new Map(existingCods.map((c) => [c.sourceRecordKey, c]));
+
+    const COD_BATCH_SIZE = 50;
+    for (let i = 0; i < uniqueCods.length; i += COD_BATCH_SIZE) {
+      const batch = uniqueCods.slice(i, i + COD_BATCH_SIZE);
+      await prisma.$transaction(async (tx) => {
+        for (const record of batch) {
+          const typeCode =
+            record.repaymentTypeCode ??
+            (typeof record.repaymentType === "number" ? record.repaymentType : null);
+          const typeLabel =
+            record.repaymentTypeLabel ??
+            (typeof record.repaymentType === "string" ? record.repaymentType : null);
+          const key = codSourceKey(record.waybillNo);
+          const hash = sourceHash(record);
+          const existing = codMap.get(key);
+
+          const common = {
+            operationalDate: date,
+            sourceEndpoint: "/jfs-cod",
+            sourceFetchedAt: startedAt,
+            syncedAt: new Date(),
+            syncStatus: "NORMALIZED" as const,
+            syncError: null,
+            sourceRecordHash: hash,
+            sourcePayload: record as unknown as Prisma.InputJsonValue,
+            lastSeenRunId: run.id,
+            waybillNo: record.waybillNo,
+            codAmount: decimal(record.codAmount),
+            repaymentStatusRaw: record.repaymentStatus as Prisma.InputJsonValue,
+            repaymentStatusCode:
+              typeof record.repaymentStatus === "number" ? record.repaymentStatus : null,
+            repaymentTypeRaw: record.repaymentType as Prisma.InputJsonValue,
+            repaymentTypeCode: typeCode,
+            repaymentTypeLabel: typeLabel,
+            signTimeRaw: record.signTime || null,
+            signedAt: parseSourceDate(record.signTime),
+            courierNameRaw: record.dispatchStaffName || null,
+          };
+
+          if (!existing) {
+            const created = await tx.rawCod.create({
+              data: {
+                tenantId: context.tenantId,
+                outletId: context.outletId,
+                sourceRecordKey: key,
+                firstSeenRunId: run.id,
+                ...common,
+              },
+            });
+            codMap.set(key, created);
+            codCreated += 1;
+          } else if (existing.sourceRecordHash === hash) {
+            await tx.rawCod.update({
+              where: { id: existing.id },
+              data: {
+                sourceFetchedAt: startedAt,
+                syncedAt: new Date(),
+                lastSeenRunId: run.id,
+              },
+            });
+            codUnchanged += 1;
+            duplicate += 1;
+          } else {
+            const updated = await tx.rawCod.update({
+              where: { id: existing.id },
+              data: common,
+            });
+            codMap.set(key, updated);
+            codUpdated += 1;
+          }
+        }
+      });
+    }
+
+    stage = "LOAD_FINAL_SOURCES";
+    const [dispatchVersions, cods] = await Promise.all([
+      prisma.rawDispatch.findMany({
         where: {
           tenantId: context.tenantId,
           outletId: context.outletId,
           operationalDate: date,
+          syncStatus: "NORMALIZED",
           isActive: true,
-          ...(uniqueDispatches.length
-            ? { waybillNo: { notIn: uniqueDispatches.map((row) => row.waybillNo) } }
-            : {}),
         },
-        data: { isActive: false },
-      });
-      dispatchInactive += missingDispatches?.count ?? 0;
-      for (const record of uniqueDispatches) {
-        const key = `v2:dispatch:${record.waybillNo.trim()}`;
-        const hash = sourceHash(record);
-        const existing = await tx.rawDispatch.findUnique({ where: { tenantId_outletId_sourceRecordKey: {
-          tenantId: context.tenantId, outletId: context.outletId, sourceRecordKey: key,
-        } } });
-        const common = {
-          operationalDate: date, sourceEndpoint: "/jfs-dispatch", sourceFetchedAt: startedAt,
-          syncedAt: new Date(), syncStatus: "NORMALIZED" as const, syncError: null,
-          sourceRecordHash: hash, sourcePayload: record as unknown as Prisma.InputJsonValue,
-          lastSeenRunId: run.id, waybillNo: record.waybillNo, courierNameRaw: record.kurir || null,
-          freightAmount: decimal(record.ongkir), dispatchTimeRaw: record.waktu || null,
-          dispatchAt: parseSourceDate(record.waktu), receiverName: record.receiver || null,
-          receiverAddress: record.address || null, deliveryStatusRaw: record.status || null,
-          chargeWeight: decimal(record.berat), settlementTypeRaw: record.pembayaran || null,
-          serviceRaw: record.service || null, codStatusRaw: record.codStatus || null,
-          codValue: decimal(record.codValue), goodsDescription: record.barang || null,
-          isActive: true,
-        };
-        const supersededDispatches = await tx.rawDispatch.updateMany({
-          where: {
+      }),
+      prisma.rawCod.findMany({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          operationalDate: date,
+          syncStatus: "NORMALIZED",
+        },
+      }),
+    ]);
+    const dispatches = selectLatestDispatchRecords(dispatchVersions);
+    const finalCods = selectLatestCodRecords(cods);
+
+    stage = "AGGREGATE_DELIVERY";
+    const aggregate = aggregateDeliveryRecords(dispatches, finalCods);
+    anomaly += aggregate.anomaly;
+
+    stage = "UPSERT_MASTER_SETORAN";
+    await prisma.$transaction(async (tx) => {
+      for (const candidate of aggregate.rows) {
+        const total = candidate.dfod.plus(candidate.codCash);
+        const where = {
+          tenantId_outletId_operationalDate_courierKey: {
             tenantId: context.tenantId,
             outletId: context.outletId,
             operationalDate: date,
-            waybillNo: record.waybillNo,
-            ...(existing ? { id: { not: existing.id } } : {}),
-            isActive: true,
+            courierKey: candidate.courierKey,
           },
-          data: { isActive: false },
-        });
-        dispatchInactive += supersededDispatches?.count ?? 0;
-        if (!existing) {
-          await tx.rawDispatch.create({ data: { tenantId: context.tenantId, outletId: context.outletId, sourceRecordKey: key, firstSeenRunId: run.id, ...common } });
-          dispatchCreated += 1;
-        } else if (existing.sourceRecordHash === hash) {
-          await tx.rawDispatch.update({ where: { id: existing.id }, data: {
-            sourceFetchedAt: startedAt, syncedAt: new Date(),
-            lastSeenRunId: run.id, isActive: true,
-          } });
-          dispatchUnchanged += 1;
-          duplicate += 1;
-        } else {
-          await tx.rawDispatch.update({ where: { id: existing.id }, data: common });
-          dispatchUpdated += 1;
-        }
-      }
-
-      for (const record of uniqueCods) {
-        const typeCode = record.repaymentTypeCode ?? (typeof record.repaymentType === "number" ? record.repaymentType : null);
-        const typeLabel = record.repaymentTypeLabel ?? (typeof record.repaymentType === "string" ? record.repaymentType : null);
-        const key = codSourceKey(record.waybillNo);
-        const hash = sourceHash(record);
-        const existing = await tx.rawCod.findUnique({ where: { tenantId_outletId_sourceRecordKey: {
-          tenantId: context.tenantId, outletId: context.outletId, sourceRecordKey: key,
-        } } });
-        const common = {
-          operationalDate: date, sourceEndpoint: "/jfs-cod", sourceFetchedAt: startedAt,
-          syncedAt: new Date(), syncStatus: "NORMALIZED" as const, syncError: null,
-          sourceRecordHash: hash, sourcePayload: record as unknown as Prisma.InputJsonValue,
-          lastSeenRunId: run.id, waybillNo: record.waybillNo, codAmount: decimal(record.codAmount),
-          repaymentStatusRaw: record.repaymentStatus as Prisma.InputJsonValue,
-          repaymentStatusCode: typeof record.repaymentStatus === "number" ? record.repaymentStatus : null,
-          repaymentTypeRaw: record.repaymentType as Prisma.InputJsonValue,
-          repaymentTypeCode: typeCode, repaymentTypeLabel: typeLabel,
-          signTimeRaw: record.signTime || null, signedAt: parseSourceDate(record.signTime),
-          courierNameRaw: record.dispatchStaffName || null,
         };
-        if (!existing) {
-          await tx.rawCod.create({ data: { tenantId: context.tenantId, outletId: context.outletId, sourceRecordKey: key, firstSeenRunId: run.id, ...common } });
-          codCreated += 1;
-        } else if (existing.sourceRecordHash === hash) {
-          await tx.rawCod.update({ where: { id: existing.id }, data: { sourceFetchedAt: startedAt, syncedAt: new Date(), lastSeenRunId: run.id } });
-          codUnchanged += 1;
-          duplicate += 1;
-        } else {
-          await tx.rawCod.update({ where: { id: existing.id }, data: common });
-          codUpdated += 1;
-        }
-      }
-
-      stage = "LOAD_FINAL_SOURCES";
-      const [dispatchVersions, cods] = await Promise.all([
-        tx.rawDispatch.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED", isActive: true } }),
-        tx.rawCod.findMany({ where: { tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, syncStatus: "NORMALIZED" } }),
-      ]);
-      const dispatches = selectLatestDispatchRecords(dispatchVersions);
-      const finalCods = selectLatestCodRecords(cods);
-      stage = "AGGREGATE_DELIVERY";
-      const aggregate = aggregateDeliveryRecords(dispatches, finalCods);
-      anomaly += aggregate.anomaly;
-      stage = "UPSERT_MASTER_SETORAN";
-      for (const candidate of aggregate.rows) {
-        const total = candidate.dfod.plus(candidate.codCash);
-        const where = { tenantId_outletId_operationalDate_courierKey: {
-          tenantId: context.tenantId, outletId: context.outletId, operationalDate: date, courierKey: candidate.courierKey,
-        } };
         const existing = await tx.masterSetoran.findUnique({ where });
         if (!existing) {
-          await tx.masterSetoran.create({ data: {
-            tenantId: context.tenantId, outletId: context.outletId, operationalDate: date,
-            courierKey: candidate.courierKey, courierName: candidate.courierName,
-            dfodAmount: candidate.dfod, codCashAmount: candidate.codCash, codQrisAmount: candidate.codQris,
-            totalSettlementAmount: total, normalizationVersion: 3,
-            sourceFetchedFrom: startedAt, sourceFetchedTo: new Date(),
-          } });
-        } else if (existing.normalizationVersion < 3) {
-          await tx.masterSetoran.update({ where: { id: existing.id }, data: {
-            courierName: candidate.courierName, dfodAmount: candidate.dfod,
-            codCashAmount: candidate.codCash, codQrisAmount: candidate.codQris,
-            totalSettlementAmount: total, previousObligationAmount: existing.totalSettlementAmount,
-            needsReview: false, proposedDfodAmount: null, proposedCodCashAmount: null,
-            proposedCodQrisAmount: null, proposedObligationAmount: null,
-            reviewDecision: null, reviewedAt: null, reviewedByUserId: null,
-            normalizationVersion: 3, obligationVersion: { increment: 1 },
-            sourceFetchedTo: new Date(),
-          } });
-          await tx.auditLog.create({ data: {
-            tenantId: context.tenantId, outletId: context.outletId, actorId: context.actorId,
-            action: "UPDATE", entityType: "DELIVERY_SETTLEMENT_SEMANTICS_ALIGNED",
-            entityId: existing.id, metadata: {
-              previous: existing.totalSettlementAmount.toString(), current: total.toString(),
+          await tx.masterSetoran.create({
+            data: {
+              tenantId: context.tenantId,
+              outletId: context.outletId,
+              operationalDate: date,
+              courierKey: candidate.courierKey,
+              courierName: candidate.courierName,
+              dfodAmount: candidate.dfod,
+              codCashAmount: candidate.codCash,
+              codQrisAmount: candidate.codQris,
+              totalSettlementAmount: total,
+              normalizationVersion: 3,
+              sourceFetchedFrom: startedAt,
+              sourceFetchedTo: new Date(),
             },
-          } });
+          });
+        } else if (existing.normalizationVersion < 3) {
+          await tx.masterSetoran.update({
+            where: { id: existing.id },
+            data: {
+              courierName: candidate.courierName,
+              dfodAmount: candidate.dfod,
+              codCashAmount: candidate.codCash,
+              codQrisAmount: candidate.codQris,
+              totalSettlementAmount: total,
+              previousObligationAmount: existing.totalSettlementAmount,
+              needsReview: false,
+              proposedDfodAmount: null,
+              proposedCodCashAmount: null,
+              proposedCodQrisAmount: null,
+              proposedObligationAmount: null,
+              reviewDecision: null,
+              reviewedAt: null,
+              reviewedByUserId: null,
+              normalizationVersion: 3,
+              obligationVersion: { increment: 1 },
+              sourceFetchedTo: new Date(),
+            },
+          });
+          await tx.auditLog.create({
+            data: {
+              tenantId: context.tenantId,
+              outletId: context.outletId,
+              actorId: context.actorId,
+              action: "UPDATE",
+              entityType: "DELIVERY_SETTLEMENT_SEMANTICS_ALIGNED",
+              entityId: existing.id,
+              metadata: {
+                previous: existing.totalSettlementAmount.toString(),
+                current: total.toString(),
+              },
+            },
+          });
         } else if (total.lessThan(existing.totalSettlementAmount)) {
-          await tx.masterSetoran.update({ where: { id: existing.id }, data: {
-            previousObligationAmount: existing.totalSettlementAmount, proposedDfodAmount: candidate.dfod,
-            proposedCodCashAmount: candidate.codCash, proposedCodQrisAmount: candidate.codQris,
-            proposedObligationAmount: total, needsReview: true, reviewDecision: null,
-            reviewedAt: null, reviewedByUserId: null, sourceFetchedTo: new Date(),
-          } });
-          await tx.auditLog.create({ data: {
-            tenantId: context.tenantId, outletId: context.outletId, actorId: context.actorId,
-            action: "UPDATE", entityType: "DELIVERY_SETTLEMENT_OBLIGATION_DECREASE_REVIEW_REQUIRED",
-            entityId: existing.id, metadata: { previous: existing.totalSettlementAmount.toString(), proposed: total.toString(), delta: total.minus(existing.totalSettlementAmount).toString() },
-          } });
+          await tx.masterSetoran.update({
+            where: { id: existing.id },
+            data: {
+              previousObligationAmount: existing.totalSettlementAmount,
+              proposedDfodAmount: candidate.dfod,
+              proposedCodCashAmount: candidate.codCash,
+              proposedCodQrisAmount: candidate.codQris,
+              proposedObligationAmount: total,
+              needsReview: true,
+              reviewDecision: null,
+              reviewedAt: null,
+              reviewedByUserId: null,
+              sourceFetchedTo: new Date(),
+            },
+          });
+          await tx.auditLog.create({
+            data: {
+              tenantId: context.tenantId,
+              outletId: context.outletId,
+              actorId: context.actorId,
+              action: "UPDATE",
+              entityType: "DELIVERY_SETTLEMENT_OBLIGATION_DECREASE_REQUIRED",
+              entityId: existing.id,
+              metadata: {
+                previous: existing.totalSettlementAmount.toString(),
+                proposed: total.toString(),
+                delta: total.minus(existing.totalSettlementAmount).toString(),
+              },
+            },
+          });
         } else {
-          await tx.masterSetoran.update({ where: { id: existing.id }, data: {
-            courierName: candidate.courierName, dfodAmount: candidate.dfod, codCashAmount: candidate.codCash,
-            codQrisAmount: candidate.codQris, totalSettlementAmount: total,
-            previousObligationAmount: existing.totalSettlementAmount, needsReview: false,
-            proposedDfodAmount: null, proposedCodCashAmount: null, proposedCodQrisAmount: null,
-            proposedObligationAmount: null, obligationVersion: total.equals(existing.totalSettlementAmount) ? existing.obligationVersion : { increment: 1 },
-            sourceFetchedTo: new Date(),
-          } });
-          if (total.greaterThan(existing.totalSettlementAmount)) await tx.auditLog.create({ data: {
-            tenantId: context.tenantId, outletId: context.outletId, actorId: context.actorId,
-            action: "UPDATE", entityType: "DELIVERY_SETTLEMENT_OBLIGATION_INCREASED",
-            entityId: existing.id, metadata: { previous: existing.totalSettlementAmount.toString(), current: total.toString(), delta: total.minus(existing.totalSettlementAmount).toString() },
-          } });
+          await tx.masterSetoran.update({
+            where: { id: existing.id },
+            data: {
+              courierName: candidate.courierName,
+              dfodAmount: candidate.dfod,
+              codCashAmount: candidate.codCash,
+              codQrisAmount: candidate.codQris,
+              totalSettlementAmount: total,
+              previousObligationAmount: existing.totalSettlementAmount,
+              needsReview: false,
+              proposedDfodAmount: null,
+              proposedCodCashAmount: null,
+              proposedCodQrisAmount: null,
+              proposedObligationAmount: null,
+              obligationVersion: total.equals(existing.totalSettlementAmount)
+                ? existing.obligationVersion
+                : { increment: 1 },
+              sourceFetchedTo: new Date(),
+            },
+          });
+          if (total.greaterThan(existing.totalSettlementAmount))
+            await tx.auditLog.create({
+              data: {
+                tenantId: context.tenantId,
+                outletId: context.outletId,
+                actorId: context.actorId,
+                action: "UPDATE",
+                entityType: "DELIVERY_SETTLEMENT_OBLIGATION_INCREASED",
+                entityId: existing.id,
+                metadata: {
+                  previous: existing.totalSettlementAmount.toString(),
+                  current: total.toString(),
+                  delta: total.minus(existing.totalSettlementAmount).toString(),
+                },
+              },
+            });
         }
       }
     });

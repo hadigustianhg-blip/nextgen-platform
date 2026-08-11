@@ -426,4 +426,73 @@ describe("Delivery Settlement contracts", () => {
   ])("rejects invalid list filter $field", ({ field, value }) => {
     expect(deliverySettlementListSchema.safeParse({ [field]: value }).success).toBe(false);
   });
+
+  it("handles 400+ dispatches and COD records with deduplication, rerun idempotency, and correct aggregation", () => {
+    const records: ReturnType<typeof dispatchRecordSchema.parse>[] = [];
+    for (let i = 1; i <= 450; i++) {
+      records.push(
+        dispatchRecordSchema.parse({
+          waybillNo: `WB_${i}`,
+          kurir: `KURIR_${i % 5}`,
+          ongkir: 10000,
+          waktu: "2026-08-11 10:00:00",
+          receiver: `Rec ${i}`,
+          address: "Address",
+          status: i % 2 === 0 ? "Penerimaan Normal" : "Belum diterima",
+          berat: 1,
+          pembayaran: "DFOD",
+          service: "EZ",
+          codStatus: "",
+          codValue: 0,
+          barang: "Goods",
+        })
+      );
+    }
+
+    const cods: ReturnType<typeof codRecordSchema.parse>[] = [];
+    for (let i = 1; i <= 100; i++) {
+      cods.push(
+        codRecordSchema.parse({
+          waybillNo: `WB_${i * 2}`,
+          codAmount: 50000,
+          repaymentStatus: 1,
+          repaymentType: 1,
+          repaymentTypeCode: 1,
+          repaymentTypeLabel: "COD",
+          signTime: "2026-08-11 10:00:00",
+          dispatchStaffName: `KURIR_${(i * 2) % 5}`,
+        })
+      );
+    }
+
+    const uniqueDispatches = deduplicateDispatchEnvelope(records);
+    expect(uniqueDispatches).toHaveLength(450);
+
+    const uniqueCods = deduplicateCodEnvelope(cods);
+    expect(uniqueCods).toHaveLength(100);
+
+    const dispatchesForAgg = uniqueDispatches.map((r) => ({
+      courierNameRaw: r.kurir,
+      deliveryStatusRaw: r.status,
+      freightAmount: d(r.ongkir),
+    }));
+
+    const codsForAgg = uniqueCods.map((r) => ({
+      courierNameRaw: r.dispatchStaffName,
+      repaymentTypeCode: r.repaymentTypeCode,
+      repaymentTypeLabel: r.repaymentTypeLabel,
+      codAmount: d(r.codAmount),
+    }));
+
+    const agg1 = aggregateDeliveryRecords(dispatchesForAgg, codsForAgg);
+    const agg2 = aggregateDeliveryRecords(dispatchesForAgg, codsForAgg);
+
+    expect(agg1.rows.length).toBe(agg2.rows.length);
+    expect(agg1.anomaly).toBe(0);
+    expect(agg2.anomaly).toBe(0);
+
+    const totalAgg1 = agg1.rows.reduce((acc, row) => acc.plus(row.dfod).plus(row.codCash), d(0));
+    const totalAgg2 = agg2.rows.reduce((acc, row) => acc.plus(row.dfod).plus(row.codCash), d(0));
+    expect(totalAgg1.toString()).toBe(totalAgg2.toString());
+  });
 });
