@@ -9,6 +9,26 @@ import {
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 
+function getActiveJakartaMonthRange(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(now);
+
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new Error("TEAM_ACTIVE_MONTH_RESOLUTION_FAILED");
+  }
+
+  return {
+    start: new Date(Date.UTC(year, month - 1, 1)),
+    end: new Date(Date.UTC(year, month, 1)),
+  };
+}
+
 export async function GET() {
   try {
     const session = await getAnySession();
@@ -25,6 +45,7 @@ export async function GET() {
       );
     }
 
+    const activeMonth = getActiveJakartaMonthRange();
     const expenses = await prisma.operationalExpense.findMany({
       where: {
         tenantId: context.tenantId,
@@ -32,6 +53,10 @@ export async function GET() {
         category: "Kasbon",
         status: "VALID",
         teamName: { not: null },
+        operationalDate: {
+          gte: activeMonth.start,
+          lt: activeMonth.end,
+        },
       },
       include: {
         salaryAllocations: {
