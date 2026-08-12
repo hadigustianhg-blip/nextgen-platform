@@ -192,15 +192,52 @@ function todayJakarta() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
+function isPrismaP2002(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2002"
+  );
+}
+
+type DeliverySyncResult = Awaited<ReturnType<typeof executeSyncDeliverySettlement>>;
+const activeDeliverySyncs = new Map<string, Promise<DeliverySyncResult>>();
+
 export async function syncDeliverySettlement(
   context: Context,
   options: { operationalDate?: string; fetchSource?: SourceFetcher } = {},
+): Promise<DeliverySyncResult> {
+  const operationalDate = options.operationalDate ?? todayJakarta();
+  const lockKey = `${context.tenantId}:${context.outletId}:${operationalDate}`;
+
+  const existingPromise = activeDeliverySyncs.get(lockKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const syncPromise = (async () => {
+    try {
+      return await executeSyncDeliverySettlement(context, options, operationalDate);
+    } finally {
+      activeDeliverySyncs.delete(lockKey);
+    }
+  })();
+
+  activeDeliverySyncs.set(lockKey, syncPromise);
+  return syncPromise;
+}
+
+async function executeSyncDeliverySettlement(
+  context: Context,
+  options: { operationalDate?: string; fetchSource?: SourceFetcher } = {},
+  operationalDateParam?: string,
 ) {
   const requestId = randomUUID();
   let stage = "INITIALIZE";
   let dispatchFetch: { httpStatus: number | null; attemptCount: number; durationMs: number } | null = null;
   let codFetch: { httpStatus: number | null; attemptCount: number; durationMs: number } | null = null;
-  const operationalDate = options.operationalDate ?? todayJakarta();
+  const operationalDate = operationalDateParam ?? options.operationalDate ?? todayJakarta();
   const date = new Date(`${operationalDate}T00:00:00.000Z`);
   const startedAt = new Date();
   const run = await prisma.syncRun.create({ data: {
@@ -320,37 +357,76 @@ export async function syncDeliverySettlement(
           });
           dispatchInactive += supersededDispatches?.count ?? 0;
 
-          if (!existing) {
-            const created = await tx.rawDispatch.create({
-              data: {
-                tenantId: context.tenantId,
-                outletId: context.outletId,
-                sourceRecordKey: key,
-                firstSeenRunId: run.id,
-                ...common,
-              },
-            });
-            dispatchMap.set(key, created);
-            dispatchCreated += 1;
-          } else if (existing.sourceRecordHash === hash) {
-            await tx.rawDispatch.update({
-              where: { id: existing.id },
-              data: {
-                sourceFetchedAt: startedAt,
-                syncedAt: new Date(),
-                lastSeenRunId: run.id,
-                isActive: true,
-              },
-            });
-            dispatchUnchanged += 1;
-            duplicate += 1;
-          } else {
-            const updated = await tx.rawDispatch.update({
-              where: { id: existing.id },
-              data: common,
-            });
-            dispatchMap.set(key, updated);
-            dispatchUpdated += 1;
+          try {
+            if (!existing) {
+              const created = await tx.rawDispatch.create({
+                data: {
+                  tenantId: context.tenantId,
+                  outletId: context.outletId,
+                  sourceRecordKey: key,
+                  firstSeenRunId: run.id,
+                  ...common,
+                },
+              });
+              dispatchMap.set(key, created);
+              dispatchCreated += 1;
+            } else if (existing.sourceRecordHash === hash) {
+              await tx.rawDispatch.update({
+                where: { id: existing.id },
+                data: {
+                  sourceFetchedAt: startedAt,
+                  syncedAt: new Date(),
+                  lastSeenRunId: run.id,
+                  isActive: true,
+                },
+              });
+              dispatchUnchanged += 1;
+              duplicate += 1;
+            } else {
+              const updated = await tx.rawDispatch.update({
+                where: { id: existing.id },
+                data: common,
+              });
+              dispatchMap.set(key, updated);
+              dispatchUpdated += 1;
+            }
+          } catch (error) {
+            if (isPrismaP2002(error)) {
+              const existingDb = await tx.rawDispatch.findUnique({
+                where: {
+                  tenantId_outletId_sourceRecordKey: {
+                    tenantId: context.tenantId,
+                    outletId: context.outletId,
+                    sourceRecordKey: key,
+                  },
+                },
+              });
+              if (existingDb) {
+                dispatchMap.set(key, existingDb);
+                if (existingDb.sourceRecordHash === hash) {
+                  await tx.rawDispatch.update({
+                    where: { id: existingDb.id },
+                    data: {
+                      sourceFetchedAt: startedAt,
+                      syncedAt: new Date(),
+                      lastSeenRunId: run.id,
+                      isActive: true,
+                    },
+                  });
+                  dispatchUnchanged += 1;
+                  duplicate += 1;
+                } else {
+                  const updated = await tx.rawDispatch.update({
+                    where: { id: existingDb.id },
+                    data: common,
+                  });
+                  dispatchMap.set(key, updated);
+                  dispatchUpdated += 1;
+                }
+              }
+            } else {
+              throw error;
+            }
           }
         }
       });
@@ -403,36 +479,74 @@ export async function syncDeliverySettlement(
             courierNameRaw: record.dispatchStaffName || null,
           };
 
-          if (!existing) {
-            const created = await tx.rawCod.create({
-              data: {
-                tenantId: context.tenantId,
-                outletId: context.outletId,
-                sourceRecordKey: key,
-                firstSeenRunId: run.id,
-                ...common,
-              },
-            });
-            codMap.set(key, created);
-            codCreated += 1;
-          } else if (existing.sourceRecordHash === hash) {
-            await tx.rawCod.update({
-              where: { id: existing.id },
-              data: {
-                sourceFetchedAt: startedAt,
-                syncedAt: new Date(),
-                lastSeenRunId: run.id,
-              },
-            });
-            codUnchanged += 1;
-            duplicate += 1;
-          } else {
-            const updated = await tx.rawCod.update({
-              where: { id: existing.id },
-              data: common,
-            });
-            codMap.set(key, updated);
-            codUpdated += 1;
+          try {
+            if (!existing) {
+              const created = await tx.rawCod.create({
+                data: {
+                  tenantId: context.tenantId,
+                  outletId: context.outletId,
+                  sourceRecordKey: key,
+                  firstSeenRunId: run.id,
+                  ...common,
+                },
+              });
+              codMap.set(key, created);
+              codCreated += 1;
+            } else if (existing.sourceRecordHash === hash) {
+              await tx.rawCod.update({
+                where: { id: existing.id },
+                data: {
+                  sourceFetchedAt: startedAt,
+                  syncedAt: new Date(),
+                  lastSeenRunId: run.id,
+                },
+              });
+              codUnchanged += 1;
+              duplicate += 1;
+            } else {
+              const updated = await tx.rawCod.update({
+                where: { id: existing.id },
+                data: common,
+              });
+              codMap.set(key, updated);
+              codUpdated += 1;
+            }
+          } catch (error) {
+            if (isPrismaP2002(error)) {
+              const existingDb = await tx.rawCod.findUnique({
+                where: {
+                  tenantId_outletId_sourceRecordKey: {
+                    tenantId: context.tenantId,
+                    outletId: context.outletId,
+                    sourceRecordKey: key,
+                  },
+                },
+              });
+              if (existingDb) {
+                codMap.set(key, existingDb);
+                if (existingDb.sourceRecordHash === hash) {
+                  await tx.rawCod.update({
+                    where: { id: existingDb.id },
+                    data: {
+                      sourceFetchedAt: startedAt,
+                      syncedAt: new Date(),
+                      lastSeenRunId: run.id,
+                    },
+                  });
+                  codUnchanged += 1;
+                  duplicate += 1;
+                } else {
+                  const updated = await tx.rawCod.update({
+                    where: { id: existingDb.id },
+                    data: common,
+                  });
+                  codMap.set(key, updated);
+                  codUpdated += 1;
+                }
+              }
+            } else {
+              throw error;
+            }
           }
         }
       });

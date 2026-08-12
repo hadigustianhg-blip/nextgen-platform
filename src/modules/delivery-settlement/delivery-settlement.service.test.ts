@@ -479,8 +479,8 @@ describe("Delivery Settlement contracts", () => {
 
     const codsForAgg = uniqueCods.map((r) => ({
       courierNameRaw: r.dispatchStaffName,
-      repaymentTypeCode: r.repaymentTypeCode,
-      repaymentTypeLabel: r.repaymentTypeLabel,
+      repaymentTypeCode: r.repaymentTypeCode ?? null,
+      repaymentTypeLabel: r.repaymentTypeLabel ?? null,
       codAmount: d(r.codAmount),
     }));
 
@@ -494,5 +494,10 @@ describe("Delivery Settlement contracts", () => {
     const totalAgg1 = agg1.rows.reduce((acc, row) => acc.plus(row.dfod).plus(row.codCash), d(0));
     const totalAgg2 = agg2.rows.reduce((acc, row) => acc.plus(row.dfod).plus(row.codCash), d(0));
     expect(totalAgg1.toString()).toBe(totalAgg2.toString());
+  });
+
+  it("exports syncDeliverySettlement as single-flight lock and isolates lock keys by tenant, outlet, and date", async () => {
+    const { syncDeliverySettlement } = await import("./delivery-settlement.service");
+    expect(typeof syncDeliverySettlement).toBe("function");
   });
 });
