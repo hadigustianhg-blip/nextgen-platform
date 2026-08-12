@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db/prisma";
-import { resolveOperationalBusinessDate } from "@/modules/operational-settlement/operational-settlement.service";
+import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
 import { getActiveDispatchDataset } from "@/modules/delivery-settlement/active-dispatch-dataset";
 import {
   DELIVERY_TARGET,
@@ -38,14 +38,7 @@ export async function getMonitoringDaily(input: {
   pickupPage: number;
   pageSize: number;
 }) {
-  const businessDate =
-    input.businessDate ??
-    (
-      await resolveOperationalBusinessDate({
-        tenantId: input.tenantId,
-        outletId: input.outletId,
-      })
-    ).activeBusinessDate;
+  const businessDate = input.businessDate || jakartaOperationalDate();
   const operationalDate = new Date(`${businessDate}T00:00:00.000Z`);
   const whereScope = {
     tenantId: input.tenantId,

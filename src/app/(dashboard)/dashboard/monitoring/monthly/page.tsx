@@ -19,14 +19,7 @@ export default async function MonitoringMonthlyPage() {
     orderBy: { code: "asc" },
   });
   const initialOutletId = session.outletId ?? outlets[0]?.id ?? "";
-  const endDate = initialOutletId
-    ? (
-        await resolveOperationalBusinessDate({
-          tenantId: session.tenantId,
-          outletId: initialOutletId,
-        })
-      ).activeBusinessDate
-    : jakartaOperationalDate();
+  const endDate = jakartaOperationalDate();
 
   return (
     <AppShell session={session}>

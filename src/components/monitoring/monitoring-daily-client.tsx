@@ -80,16 +80,18 @@ const percent = (value: number) => `${number(value, 2)}%`;
 export function MonitoringDailyClient({
   outlets,
   initialOutletId,
+  initialBusinessDate = "",
   outletLocked,
   canSync,
 }: {
   outlets: Array<{ id: string; code: string; name: string }>;
   initialOutletId: string;
+  initialBusinessDate?: string;
   outletLocked: boolean;
   canSync: boolean;
 }) {
   const [outletId, setOutletId] = useState(initialOutletId);
-  const [businessDate, setBusinessDate] = useState("");
+  const [businessDate, setBusinessDate] = useState(initialBusinessDate);
   const [deliveryPage, setDeliveryPage] = useState(1);
   const [pickupPage, setPickupPage] = useState(1);
   const [refreshKey, setRefreshKey] = useState(0);

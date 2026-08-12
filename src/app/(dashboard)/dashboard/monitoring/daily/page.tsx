@@ -3,11 +3,19 @@ import { MonitoringDailyClient } from "@/components/monitoring/monitoring-daily-
 import { prisma } from "@/lib/db/prisma";
 import { requireSession } from "@/lib/auth/session";
 import { canAccessResource } from "@/lib/permissions";
+import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
 
 export const metadata = { title: "Monitoring Daily" };
 
-export default async function MonitoringDailyPage() {
+export default async function MonitoringDailyPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ date?: string; businessDate?: string }>;
+}) {
   const session = await requireSession();
+  const params = await searchParams;
+  const initialBusinessDate = params?.date || params?.businessDate || jakartaOperationalDate();
+
   const outlets = await prisma.outlet.findMany({
     where: {
       tenantId: session.tenantId,
@@ -23,6 +31,7 @@ export default async function MonitoringDailyPage() {
       <MonitoringDailyClient
         outlets={outlets}
         initialOutletId={session.outletId ?? outlets[0]?.id ?? ""}
+        initialBusinessDate={initialBusinessDate}
         outletLocked={Boolean(session.outletId)}
         canSync={canAccessResource(session.roles, "MONITORING", "MANAGE")}
       />
