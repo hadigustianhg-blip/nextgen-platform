@@ -298,13 +298,16 @@ async function executeSyncDeliverySettlement(
     });
     dispatchInactive += missingDispatches?.count ?? 0;
 
-    const existingDispatches = await prisma.rawDispatch.findMany({
-      where: {
-        tenantId: context.tenantId,
-        outletId: context.outletId,
-        operationalDate: date,
-      },
-    });
+    const dispatchKeys = uniqueDispatches.map((r) => `v2:dispatch:${r.waybillNo.trim()}`);
+    const existingDispatches = dispatchKeys.length
+      ? await prisma.rawDispatch.findMany({
+          where: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            sourceRecordKey: { in: dispatchKeys },
+          },
+        })
+      : [];
     const dispatchMap = new Map(existingDispatches.map((d) => [d.sourceRecordKey, d]));
 
     const DISPATCH_BATCH_SIZE = 50;
@@ -357,88 +360,58 @@ async function executeSyncDeliverySettlement(
           });
           dispatchInactive += supersededDispatches?.count ?? 0;
 
-          try {
-            if (!existing) {
-              const created = await tx.rawDispatch.create({
-                data: {
-                  tenantId: context.tenantId,
-                  outletId: context.outletId,
-                  sourceRecordKey: key,
-                  firstSeenRunId: run.id,
-                  ...common,
-                },
-              });
-              dispatchMap.set(key, created);
-              dispatchCreated += 1;
-            } else if (existing.sourceRecordHash === hash) {
-              await tx.rawDispatch.update({
-                where: { id: existing.id },
-                data: {
+          const isHashUnchanged = existing?.sourceRecordHash === hash;
+
+          const upserted = await tx.rawDispatch.upsert({
+            where: {
+              tenantId_outletId_sourceRecordKey: {
+                tenantId: context.tenantId,
+                outletId: context.outletId,
+                sourceRecordKey: key,
+              },
+            },
+            create: {
+              tenantId: context.tenantId,
+              outletId: context.outletId,
+              sourceRecordKey: key,
+              firstSeenRunId: run.id,
+              ...common,
+            },
+            update: isHashUnchanged
+              ? {
                   sourceFetchedAt: startedAt,
                   syncedAt: new Date(),
                   lastSeenRunId: run.id,
                   isActive: true,
-                },
-              });
-              dispatchUnchanged += 1;
-              duplicate += 1;
-            } else {
-              const updated = await tx.rawDispatch.update({
-                where: { id: existing.id },
-                data: common,
-              });
-              dispatchMap.set(key, updated);
-              dispatchUpdated += 1;
-            }
-          } catch (error) {
-            if (isPrismaP2002(error)) {
-              const existingDb = await tx.rawDispatch.findUnique({
-                where: {
-                  tenantId_outletId_sourceRecordKey: {
-                    tenantId: context.tenantId,
-                    outletId: context.outletId,
-                    sourceRecordKey: key,
-                  },
-                },
-              });
-              if (existingDb) {
-                dispatchMap.set(key, existingDb);
-                if (existingDb.sourceRecordHash === hash) {
-                  await tx.rawDispatch.update({
-                    where: { id: existingDb.id },
-                    data: {
-                      sourceFetchedAt: startedAt,
-                      syncedAt: new Date(),
-                      lastSeenRunId: run.id,
-                      isActive: true,
-                    },
-                  });
-                  dispatchUnchanged += 1;
-                  duplicate += 1;
-                } else {
-                  const updated = await tx.rawDispatch.update({
-                    where: { id: existingDb.id },
-                    data: common,
-                  });
-                  dispatchMap.set(key, updated);
-                  dispatchUpdated += 1;
+                  operationalDate: date,
                 }
-              }
-            } else {
-              throw error;
-            }
+              : common,
+          });
+
+          dispatchMap.set(key, upserted);
+
+          if (!existing) {
+            dispatchCreated += 1;
+          } else if (isHashUnchanged) {
+            dispatchUnchanged += 1;
+            duplicate += 1;
+          } else {
+            dispatchUpdated += 1;
           }
         }
       });
     }
 
-    const existingCods = await prisma.rawCod.findMany({
-      where: {
-        tenantId: context.tenantId,
-        outletId: context.outletId,
-        operationalDate: date,
-      },
-    });
+    const codKeys = uniqueCods.map((r) => codSourceKey(r.waybillNo));
+    const existingCods = codKeys.length
+      ? await prisma.rawCod.findMany({
+          where: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            sourceRecordKey: { in: codKeys },
+          },
+        })
+      : [];
     const codMap = new Map(existingCods.map((c) => [c.sourceRecordKey, c]));
 
     const COD_BATCH_SIZE = 50;
@@ -479,74 +452,41 @@ async function executeSyncDeliverySettlement(
             courierNameRaw: record.dispatchStaffName || null,
           };
 
-          try {
-            if (!existing) {
-              const created = await tx.rawCod.create({
-                data: {
-                  tenantId: context.tenantId,
-                  outletId: context.outletId,
-                  sourceRecordKey: key,
-                  firstSeenRunId: run.id,
-                  ...common,
-                },
-              });
-              codMap.set(key, created);
-              codCreated += 1;
-            } else if (existing.sourceRecordHash === hash) {
-              await tx.rawCod.update({
-                where: { id: existing.id },
-                data: {
+          const isHashUnchanged = existing?.sourceRecordHash === hash;
+
+          const upserted = await tx.rawCod.upsert({
+            where: {
+              tenantId_outletId_sourceRecordKey: {
+                tenantId: context.tenantId,
+                outletId: context.outletId,
+                sourceRecordKey: key,
+              },
+            },
+            create: {
+              tenantId: context.tenantId,
+              outletId: context.outletId,
+              sourceRecordKey: key,
+              firstSeenRunId: run.id,
+              ...common,
+            },
+            update: isHashUnchanged
+              ? {
                   sourceFetchedAt: startedAt,
                   syncedAt: new Date(),
                   lastSeenRunId: run.id,
-                },
-              });
-              codUnchanged += 1;
-              duplicate += 1;
-            } else {
-              const updated = await tx.rawCod.update({
-                where: { id: existing.id },
-                data: common,
-              });
-              codMap.set(key, updated);
-              codUpdated += 1;
-            }
-          } catch (error) {
-            if (isPrismaP2002(error)) {
-              const existingDb = await tx.rawCod.findUnique({
-                where: {
-                  tenantId_outletId_sourceRecordKey: {
-                    tenantId: context.tenantId,
-                    outletId: context.outletId,
-                    sourceRecordKey: key,
-                  },
-                },
-              });
-              if (existingDb) {
-                codMap.set(key, existingDb);
-                if (existingDb.sourceRecordHash === hash) {
-                  await tx.rawCod.update({
-                    where: { id: existingDb.id },
-                    data: {
-                      sourceFetchedAt: startedAt,
-                      syncedAt: new Date(),
-                      lastSeenRunId: run.id,
-                    },
-                  });
-                  codUnchanged += 1;
-                  duplicate += 1;
-                } else {
-                  const updated = await tx.rawCod.update({
-                    where: { id: existingDb.id },
-                    data: common,
-                  });
-                  codMap.set(key, updated);
-                  codUpdated += 1;
                 }
-              }
-            } else {
-              throw error;
-            }
+              : common,
+          });
+
+          codMap.set(key, upserted);
+
+          if (!existing) {
+            codCreated += 1;
+          } else if (isHashUnchanged) {
+            codUnchanged += 1;
+            duplicate += 1;
+          } else {
+            codUpdated += 1;
           }
         }
       });
