@@ -4,8 +4,18 @@ import type { PickupEnvelope, PickupSourceRecord } from "./pickup.types";
 import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
 import type { SettingsScope } from "@/modules/settings/settings.types";
 
-const DEFAULT_PICKUP_URL =
-  "https://jfs-middleware-v2-production.up.railway.app/jfs-pickup";
+function resolvePickupUrl(baseUrl?: string) {
+  const configured = baseUrl ?? process.env.JFS_PICKUP_URL ?? process.env.JFS_MIDDLEWARE_BASE_URL;
+  if (!configured) {
+    throw new PickupSourceError("JFS pickup source is not configured.");
+  }
+
+  const url = new URL(configured);
+  if (!baseUrl && !process.env.JFS_PICKUP_URL) {
+    url.pathname = "/jfs-pickup";
+  }
+  return url;
+}
 
 export class PickupSourceError extends Error {
   constructor(message = "Sinkronisasi pickup gagal.") {
@@ -43,7 +53,7 @@ export async function fetchPickupSource(
   }
 
   const fetcher = options.fetcher ?? fetch;
-  const url = new URL(options.baseUrl ?? process.env.JFS_PICKUP_URL ?? DEFAULT_PICKUP_URL);
+  const url = resolvePickupUrl(options.baseUrl);
   url.searchParams.set("date", operationalDate);
 
   let response: Response;

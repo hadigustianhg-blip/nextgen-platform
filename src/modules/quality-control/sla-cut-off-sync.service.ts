@@ -7,8 +7,26 @@ import {
   normalizeAgingSign,
 } from "./sla-cut-off.calculation";
 
-export const SLA_SOURCE_ENDPOINT =
-  "https://jfs-middleware-v2-production.up.railway.app/jfs-aging-sign";
+export function resolveSlaSourceEndpoint() {
+  const baseUrl = process.env.JFS_MIDDLEWARE_BASE_URL?.trim()
+    || process.env.JFS_MIDDLEWARE_URL?.trim();
+  if (!baseUrl) {
+    throw new SlaSyncError(
+      "JFS middleware URL belum dikonfigurasi. Isi JFS_MIDDLEWARE_BASE_URL.",
+      "SOURCE_UNAVAILABLE",
+      false,
+    );
+  }
+  try {
+    return new URL("/jfs-aging-sign", baseUrl);
+  } catch {
+    throw new SlaSyncError(
+      "JFS middleware URL tidak valid. Periksa JFS_MIDDLEWARE_BASE_URL.",
+      "SOURCE_UNAVAILABLE",
+      false,
+    );
+  }
+}
 
 export type SlaSyncActor =
   | { actorType: "USER"; actorId: string }
@@ -80,9 +98,10 @@ export async function fetchAgingSignSnapshot(
     }
   }
 
+  const sourceEndpoint = resolveSlaSourceEndpoint();
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const response = await fetcher(SLA_SOURCE_ENDPOINT, {
+      const response = await fetcher(sourceEndpoint, {
         headers: { Accept: "application/json" },
         cache: "no-store",
         signal: AbortSignal.timeout(30_000),
@@ -225,7 +244,7 @@ export async function runSlaSyncForOutlet(
       select: { id: true },
     });
     const data = {
-      sourceEndpoint: SLA_SOURCE_ENDPOINT,
+      sourceEndpoint: resolveSlaSourceEndpoint().href,
       sourceFetchedAt: dependencies.now(),
       sourcePayload: record as unknown as Prisma.InputJsonValue,
       syncStatus: "NORMALIZED" as const,

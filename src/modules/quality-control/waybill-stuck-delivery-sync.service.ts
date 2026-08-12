@@ -5,7 +5,6 @@ import { prisma } from "@/lib/db/prisma";
 import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
 import type { SettingsScope } from "@/modules/settings/settings.types";
 
-const DEFAULT_BASE_URL = "https://jfs-middleware-v2-production.up.railway.app";
 const BATCH_SIZE = 100;
 
 type InventoryRecord = {
@@ -33,10 +32,25 @@ type StatusRecord = {
 
 export class WaybillStuckSourceError extends Error {
   constructor(
-    public readonly code: "UNAVAILABLE" | "INVALID_RESPONSE",
+    public readonly code: "UNAVAILABLE" | "INVALID_RESPONSE" | "CONFIG_INVALID",
     public readonly retryable = false,
   ) {
-    super("Sumber Waybill Stuck Delivery tidak tersedia.");
+    super(code === "CONFIG_INVALID"
+      ? "JFS middleware URL belum dikonfigurasi atau tidak valid. Isi JFS_MIDDLEWARE_BASE_URL."
+      : "Sumber Waybill Stuck Delivery tidak tersedia.");
+  }
+}
+
+export function resolveWaybillStuckMiddlewareBaseUrl() {
+  const configured = process.env.JFS_MIDDLEWARE_BASE_URL?.trim()
+    || process.env.JFS_MIDDLEWARE_URL?.trim();
+  if (!configured) {
+    throw new WaybillStuckSourceError("CONFIG_INVALID");
+  }
+  try {
+    return new URL(configured);
+  } catch {
+    throw new WaybillStuckSourceError("CONFIG_INVALID");
   }
 }
 
@@ -154,7 +168,7 @@ export async function fetchInventoryDetail(
 
   const url = new URL(
     "/jfs-inventory-detail",
-    process.env.JFS_MIDDLEWARE_URL ?? DEFAULT_BASE_URL,
+    resolveWaybillStuckMiddlewareBaseUrl(),
   );
   for (const [key, value] of Object.entries({
     startDate: businessDate,
@@ -207,7 +221,7 @@ export async function fetchWaybillStatusBatch(
   }
 
   const response = await requestWithRetry(() =>
-    fetcher(new URL("/jfs-waybill-status-batch", process.env.JFS_MIDDLEWARE_URL ?? DEFAULT_BASE_URL), {
+    fetcher(new URL("/jfs-waybill-status-batch", resolveWaybillStuckMiddlewareBaseUrl()), {
       method: "POST",
       headers: { accept: "application/json", "content-type": "application/json" },
       body: JSON.stringify({ waybills, startDate: businessDate, endDate: businessDate }),

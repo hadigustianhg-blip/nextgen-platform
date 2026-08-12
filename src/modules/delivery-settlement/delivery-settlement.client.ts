@@ -33,11 +33,8 @@ export class DeliverySourceError extends Error {
   }
 }
 
-const DEFAULT_DELIVERY_MIDDLEWARE_BASE_URL =
-  "https://jfs-middleware-v2-production.up.railway.app";
-
 export function resolveDeliveryMiddlewareBaseUrl(
-  value = process.env.JFS_MIDDLEWARE_BASE_URL || process.env.JFS_MIDDLEWARE_URL || DEFAULT_DELIVERY_MIDDLEWARE_BASE_URL,
+  value = process.env.JFS_MIDDLEWARE_BASE_URL?.trim() || process.env.JFS_MIDDLEWARE_URL?.trim(),
 ) {
   if (!value) throw new DeliverySourceError({
     code: "SYNC_CONFIG_INVALID", endpoint: "/jfs-dispatch", target: "unconfigured",

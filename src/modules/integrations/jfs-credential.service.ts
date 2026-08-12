@@ -33,9 +33,15 @@ export interface JfsConnectionStatusView {
 
 async function callMiddlewareLogin(account: string, password: string): Promise<{ networkCode: string; name: string }> {
   const middlewareBaseUrl =
-    process.env.JFS_MIDDLEWARE_BASE_URL ||
-    process.env.JFS_MIDDLEWARE_URL ||
-    "https://jfs-middleware-v2-production.up.railway.app";
+    process.env.JFS_MIDDLEWARE_BASE_URL?.trim() ||
+    process.env.JFS_MIDDLEWARE_URL?.trim();
+  if (!middlewareBaseUrl) {
+    throw new JfsIntegrationError(
+      "JFS middleware URL belum dikonfigurasi. Isi JFS_MIDDLEWARE_BASE_URL.",
+      500,
+      "JFS_MIDDLEWARE_URL_NOT_CONFIGURED",
+    );
+  }
   const authKey =
     process.env.JFS_MIDDLEWARE_AUTH_KEY ||
     process.env.JFS_AUTH_KEY ||

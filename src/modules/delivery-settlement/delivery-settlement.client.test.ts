@@ -20,6 +20,13 @@ describe("Delivery Settlement middleware fetch", () => {
       .toThrow(DeliverySourceError);
   });
 
+  it("fails closed without a configured middleware URL", () => {
+    vi.stubEnv("JFS_MIDDLEWARE_BASE_URL", "");
+    vi.stubEnv("JFS_MIDDLEWARE_URL", "");
+    expect(() => resolveDeliveryMiddlewareBaseUrl()).toThrow(DeliverySourceError);
+    vi.unstubAllEnvs();
+  });
+
   it("accepts the actual success/data/total envelope, including valid empty data", async () => {
     const fetcher = vi.fn(async () => json({ success: true, page: 1, total: 0, data: [] }));
     const result = await fetchDeliverySource("/jfs-dispatch", "2026-07-31", { baseUrl, fetcher });

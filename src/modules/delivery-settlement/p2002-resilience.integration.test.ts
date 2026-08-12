@@ -94,43 +94,37 @@ import { syncDeliverySettlement } from "./delivery-settlement.service";
 
 describe("Delivery Settlement P2002 & Single-Flight Integration Test", () => {
   it("executes first sync, rerun sync, and concurrent sync without P2002 or duplicate errors", async () => {
+    vi.stubEnv("JFS_MIDDLEWARE_BASE_URL", "https://middleware.example.test");
+    vi.stubEnv("JFS_MIDDLEWARE_URL", "");
     const scope = { tenantId: "tenant-100", outletId: "outlet-100", actorId: "test-actor" };
     const dateStr = "2026-08-12";
 
-    const mockFetch = vi.fn(async (url: string) => {
-      if (url.includes("/jfs-dispatch")) {
+    const mockFetch = vi.fn(async (endpoint: string) => {
+      if (endpoint.includes("/jfs-dispatch")) {
         return {
-          ok: true,
-          status: 200,
-          json: async () => ({
             success: true,
             total: 2,
             data: [
               { waybillNo: "TEST_P2002_01", kurir: "KURIR_TEST", ongkir: 15000, waktu: "2026-08-12 10:00:00", receiver: "R1", address: "A1", status: "Penerimaan Normal", berat: 1, pembayaran: "DFOD", service: "EZ", codStatus: "", codValue: 0, barang: "B1" },
               { waybillNo: "TEST_P2002_02", kurir: "KURIR_TEST", ongkir: 20000, waktu: "2026-08-12 10:30:00", receiver: "R2", address: "A2", status: "Penerimaan Normal", berat: 1, pembayaran: "DFOD", service: "EZ", codStatus: "", codValue: 0, barang: "B2" },
             ],
-          }),
-        };
+          };
       }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ success: true, total: 0, data: [] }),
-      };
+      return { success: true, total: 0, data: [] };
     });
 
     // 1. FIRST RUN
     const run1 = await syncDeliverySettlement(scope, { operationalDate: dateStr, fetchSource: mockFetch as any });
     expect(run1.status).toBe("SUCCESS");
-    expect(run1.dispatchFetchedCount).toBe(2);
-    expect(run1.dispatchCreatedCount).toBe(2);
+    expect(run1.dispatch.fetched).toBe(2);
+    expect(run1.dispatch.created).toBe(2);
 
     // 2. SECOND RUN (RERUN) - Idempotent
     const run2 = await syncDeliverySettlement(scope, { operationalDate: dateStr, fetchSource: mockFetch as any });
     expect(run2.status).toBe("SUCCESS");
-    expect(run2.dispatchFetchedCount).toBe(2);
-    expect(run2.dispatchCreatedCount).toBe(0);
-    expect(run2.dispatchUnchangedCount).toBe(2);
+    expect(run2.dispatch.fetched).toBe(2);
+    expect(run2.dispatch.created).toBe(0);
+    expect(run2.dispatch.unchanged).toBe(2);
 
     // 3. CONCURRENT RUNS - Single Flight Lock
     const [c1, c2] = await Promise.all([

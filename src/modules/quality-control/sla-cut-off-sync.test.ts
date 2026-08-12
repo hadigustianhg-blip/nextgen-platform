@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchAgingSignSnapshot,
   runSlaSyncForOutlet,
@@ -46,6 +46,11 @@ const input = {
   expectedNetworkName: "SUM001A",
   actor: { actorType: "SYSTEM" as const },
 };
+
+beforeEach(() => {
+  vi.stubEnv("JFS_MIDDLEWARE_BASE_URL", "https://middleware.example.test");
+  vi.stubEnv("JFS_MIDDLEWARE_URL", "");
+});
 
 describe("shared SLA sync", () => {
   it("uses queryTime and upserts the same snapshot idempotently", async () => {
@@ -117,5 +122,12 @@ describe("shared SLA sync", () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ success: true, data: [] }), { status: 200 }));
     await expect(fetchAgingSignSnapshot(fetcher, vi.fn(async () => undefined))).rejects.toBeInstanceOf(SlaSyncError);
     expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed without a configured middleware URL", async () => {
+    vi.stubEnv("JFS_MIDDLEWARE_BASE_URL", "");
+    const fetcher = vi.fn();
+    await expect(fetchAgingSignSnapshot(fetcher)).rejects.toMatchObject({ retryable: false });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

@@ -38,7 +38,10 @@ export async function executeTrustedMultiOutletScraper(
   const decryptedAccount = decryptCredential<{ account: string }>(credential.accountEncrypted).account;
   const decryptedPassword = decryptCredential<{ password: string }>(credential.passwordEncrypted).password;
 
-  const baseUrl = process.env.JFS_MIDDLEWARE_BASE_URL || "https://jfs-middleware-v2-production.up.railway.app";
+  const baseUrl = process.env.JFS_MIDDLEWARE_BASE_URL;
+  if (!baseUrl) {
+    throw new Error("JFS_MIDDLEWARE_BASE_URL is not configured");
+  }
   const authKey = process.env.JFS_MIDDLEWARE_AUTH_KEY || "";
 
   // Dynamic route selection: support both clean path and /jfs- prefixed path

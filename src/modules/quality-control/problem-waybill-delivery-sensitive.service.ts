@@ -3,14 +3,14 @@ import { prisma } from "@/lib/db/prisma";
 import { selectLatestDispatchRecords } from "@/modules/delivery-settlement/dispatch-deduplication";
 import { isBelumDiterima } from "./problem-waybill-delivery.service";
 
-const DEFAULT_BASE_URL = "https://jfs-middleware-v2-production.up.railway.app";
-
 export class SensitiveDetailError extends Error {
   constructor(
-    public readonly code: "NOT_FOUND" | "STATUS_CHANGED" | "UNAVAILABLE" | "INVALID_RESPONSE",
+    public readonly code: "NOT_FOUND" | "STATUS_CHANGED" | "UNAVAILABLE" | "INVALID_RESPONSE" | "CONFIG_INVALID",
     public readonly retryable = false,
   ) {
-    super("Detail waybill tidak dapat diambil.");
+    super(code === "CONFIG_INVALID"
+      ? "JFS middleware URL belum dikonfigurasi atau tidak valid. Isi JFS_MIDDLEWARE_BASE_URL."
+      : "Detail waybill tidak dapat diambil.");
   }
 }
 
@@ -57,7 +57,16 @@ export async function fetchSensitiveDetail(
     baseUrl?: string;
   } = {},
 ) {
-  const url = new URL("/jfs-sensitive", options.baseUrl ?? process.env.JFS_MIDDLEWARE_URL ?? DEFAULT_BASE_URL);
+  const baseUrl = options.baseUrl?.trim()
+    || process.env.JFS_MIDDLEWARE_BASE_URL?.trim()
+    || process.env.JFS_MIDDLEWARE_URL?.trim();
+  if (!baseUrl) throw new SensitiveDetailError("CONFIG_INVALID");
+  let url: URL;
+  try {
+    url = new URL("/jfs-sensitive", baseUrl);
+  } catch {
+    throw new SensitiveDetailError("CONFIG_INVALID");
+  }
   url.searchParams.set("waybillNo", waybill);
   const wait = options.wait ?? ((milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   for (let attempt = 1; attempt <= 2; attempt += 1) {

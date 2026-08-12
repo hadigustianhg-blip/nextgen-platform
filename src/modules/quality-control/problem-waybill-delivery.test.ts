@@ -52,6 +52,8 @@ beforeEach(() => {
       updatedAt: new Date("2026-07-29T12:00:00.000Z"),
     },
   ]);
+  vi.stubEnv("JFS_MIDDLEWARE_BASE_URL", "https://middleware.example.test");
+  vi.stubEnv("JFS_MIDDLEWARE_URL", "");
 });
 
 describe("Problem Waybill Delivery list", () => {
@@ -147,6 +149,14 @@ describe("Problem Waybill Delivery list", () => {
 });
 
 describe("Problem Waybill sensitive detail", () => {
+  it("fails closed without a configured middleware URL", async () => {
+    vi.stubEnv("JFS_MIDDLEWARE_BASE_URL", "");
+    const fetcher = vi.fn();
+    await expect(fetchSensitiveDetail("WB000001", { fetcher }))
+      .rejects.toMatchObject({ code: "CONFIG_INVALID" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("maps only audited fields and returns unavailable fields as null", () => {
     expect(normalizeSensitiveDetail({
       waybillNo: "WB000001", receiverName: "Receiver",

@@ -114,6 +114,8 @@ beforeEach(() => {
   memory.inventory.clear();
   memory.statuses.clear();
   memory.audits.length = 0;
+  vi.stubEnv("JFS_MIDDLEWARE_BASE_URL", "https://middleware.example.test");
+  vi.stubEnv("JFS_MIDDLEWARE_URL", "");
 });
 
 describe("Waybill Stuck source and sync", () => {
@@ -133,6 +135,14 @@ describe("Waybill Stuck source and sync", () => {
       return new Response(JSON.stringify({ success: true, data: [inventoryRecord("WB000001")] }), { status: 200 });
     });
     expect(await fetchInventoryDetail("2026-07-30", fetcher)).toHaveLength(1);
+  });
+
+  it("fails closed without a configured middleware URL", async () => {
+    vi.stubEnv("JFS_MIDDLEWARE_BASE_URL", "");
+    const fetcher = vi.fn();
+    await expect(fetchInventoryDetail("2026-07-30", fetcher))
+      .rejects.toMatchObject({ code: "CONFIG_INVALID" });
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("enforces maximum status batch size 100", async () => {
