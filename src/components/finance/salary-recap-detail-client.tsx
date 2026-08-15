@@ -843,27 +843,60 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
         </button>}
       </>}/>
     {endClosingOpen && <div
-      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
-      <ModalCard className="max-w-md space-y-4">
+      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm transition-opacity">
+      <ModalCard className="w-full max-w-[500px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl space-y-5">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold text-slate-900">Konfirmasi End Closing</h3>
-          <button type="button" onClick={() => setEndClosingOpen(false)} className="text-slate-400 hover:text-slate-600">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+              <CheckCircle2 size={22}/>
+            </div>
+            <div>
+              <h3 className="text-lg font-extrabold text-slate-900">Konfirmasi End Closing</h3>
+              <p className="text-xs text-slate-500">Finalisasi periode payroll &amp; kewajiban kasbon</p>
+            </div>
+          </div>
+          <button type="button"
+            onClick={() => setEndClosingOpen(false)}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition">
             <X size={18}/>
           </button>
         </div>
-        <p className="text-sm text-slate-700">
-          End Closing periode <strong>{recap.periodStart.slice(0, 10)} — {recap.periodEnd.slice(0, 10)}</strong>?
-        </p>
-        <p className="text-sm text-slate-600">
-          Salary dan kasbon yang termasuk dalam closing ini akan dianggap telah diselesaikan dan tidak lagi ditampilkan sebagai transaksi aktif. Riwayat Salary Recap tetap tersimpan.
-        </p>
-        <div className="flex justify-end gap-3 pt-2">
+
+        <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3.5 text-sm">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Periode Salary</p>
+          <p className="mt-1 font-bold text-slate-900">
+            {formatDocumentDate(recap.periodStart)} — {formatDocumentDate(recap.periodEnd)}
+          </p>
+        </div>
+
+        <div className="space-y-3 text-sm">
+          <div className="rounded-xl border border-amber-200/80 bg-amber-50/80 p-3.5 text-amber-900">
+            <p className="font-semibold">
+              Setelah End Closing, salary pada periode ini dianggap telah selesai dibayarkan.
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-blue-200/80 bg-blue-50/80 p-3.5 text-blue-900 leading-relaxed text-xs">
+            <p className="font-semibold text-blue-950 mb-1">Ketentuan Kasbon:</p>
+            <p>
+              Kasbon yang telah terpotong penuh tidak lagi ditampilkan sebagai kewajiban aktif. Jika kasbon baru terpotong sebagian, sisa kasbon tetap menjadi kewajiban pada periode berikutnya.
+            </p>
+          </div>
+
+          <p className="text-xs text-slate-500 italic">
+            * Riwayat Salary Recap tetap tersimpan dan dapat dilihat kembali.
+          </p>
+        </div>
+
+        <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-3 pt-3 border-t border-slate-100">
           <button type="button" disabled={endClosingLoading}
             onClick={() => setEndClosingOpen(false)}
-            className={nextgenNeutralButtonClass}>Batal</button>
+            className={`${nextgenNeutralButtonClass} w-full sm:w-auto justify-center`}>
+            Batal
+          </button>
           <button type="button" disabled={endClosingLoading}
             onClick={() => void executeEndClosing()}
-            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+            className="inline-flex h-10 w-full sm:w-auto items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 font-bold text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:opacity-50 text-sm">
             {endClosingLoading ? <LoaderCircle className="animate-spin" size={16}/> : <CheckCircle2 size={16}/>}
             End Closing
           </button>
