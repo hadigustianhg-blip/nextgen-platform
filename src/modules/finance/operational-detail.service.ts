@@ -1,4 +1,6 @@
 import "server-only";
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db/prisma";
 import { listOperationalSettlement } from "@/modules/operational-settlement";
 
 type Scope = { tenantId: string; outletId: string };
@@ -43,7 +45,52 @@ async function getValidManualTransactions(input: OperationalDetailInput) {
       page += 1;
     } while (page <= totalPages);
   }
-  return rows;
+
+  const expenseIds = rows
+    .filter((row) => (row.category ?? "").normalize("NFKC").trim().toLocaleLowerCase("id-ID") === "kasbon")
+    .map((row) => row.id);
+
+  if (expenseIds.length === 0) return rows;
+
+  const allocations = await prisma.salaryKasbonAllocation.findMany({
+    where: {
+      tenantId: input.tenantId,
+      outletId: input.outletId,
+      operationalExpenseId: { in: expenseIds },
+      status: { in: ["DRAFT", "FINALIZED"] },
+      closingEmployee: {
+        salaryClosing: {
+          status: { in: ["PROCESSED", "PAID"] },
+        },
+      },
+    },
+    select: { operationalExpenseId: true, amount: true },
+  });
+
+  const paidMap = new Map<string, number>();
+  for (const a of allocations) {
+    const current = paidMap.get(a.operationalExpenseId) ?? 0;
+    paidMap.set(a.operationalExpenseId, current + Number(a.amount));
+  }
+
+  const filtered: SettlementRow[] = [];
+  for (const row of rows) {
+    const isKasbon = (row.category ?? "").normalize("NFKC").trim().toLocaleLowerCase("id-ID") === "kasbon";
+    if (!isKasbon) {
+      filtered.push(row);
+      continue;
+    }
+    const paid = paidMap.get(row.id) ?? 0;
+    const remaining = Math.max(0, Number(row.amount) - paid);
+    if (remaining > 0) {
+      filtered.push({
+        ...row,
+        amount: String(remaining),
+      });
+    }
+  }
+
+  return filtered;
 }
 
 export async function getOperationalDetailSummary(

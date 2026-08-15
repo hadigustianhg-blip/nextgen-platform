@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
+  CheckCircle2,
   Download,
   Eye,
   FileDown,
@@ -752,6 +753,39 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
     }
   }
 
+  const [endClosingOpen, setEndClosingOpen] = useState(false);
+  const [endClosingLoading, setEndClosingLoading] = useState(false);
+
+  async function executeEndClosing() {
+    if (endClosingLoading) return;
+    setEndClosingLoading(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/finance/salary/recaps/${closingId}/end-closing`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+        },
+      );
+      const result = await response.json();
+      if (!response.ok) throw new Error(
+        result.error?.message || "End Closing gagal dieksekusi.",
+      );
+      setEndClosingOpen(false);
+      setRecap((current) => current ? {
+        ...current,
+        status: "PAID",
+        canCancelRecap: false,
+        cancelBlockReason: "Salary Recap sudah End Closing / PAID.",
+      } : current);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "End Closing gagal dieksekusi.");
+    } finally {
+      setEndClosingLoading(false);
+    }
+  }
+
   if (loading) {
     return <div className="grid min-h-64 place-items-center">
       <LoaderCircle className="animate-spin text-blue-600"/>
@@ -785,7 +819,20 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
       actions={<>
         <Link href="/dashboard/finance/salary-recap"
           className={nextgenNeutralButtonClass}>Kembali</Link>
-        {recap.canCancelRecap && <button type="button"
+        {recap.status === "PROCESSED" && (
+          <button type="button"
+            disabled={endClosingLoading}
+            onClick={() => setEndClosingOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+            <CheckCircle2 size={16}/>End Closing
+          </button>
+        )}
+        {recap.status === "PAID" && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800 border border-emerald-300">
+            <CheckCircle2 size={14}/>SELESAI / PAID
+          </span>
+        )}
+        {recap.canCancelRecap && recap.status !== "PAID" && <button type="button"
           disabled={cancelLoading}
           onClick={() => {
             setCancelReason("");
@@ -795,6 +842,34 @@ export function SalaryRecapDetailClient({ closingId }: { closingId: string }) {
           <Undo2 size={16}/>Batalkan Rekap
         </button>}
       </>}/>
+    {endClosingOpen && <div
+      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
+      <ModalCard className="max-w-md space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-900">Konfirmasi End Closing</h3>
+          <button type="button" onClick={() => setEndClosingOpen(false)} className="text-slate-400 hover:text-slate-600">
+            <X size={18}/>
+          </button>
+        </div>
+        <p className="text-sm text-slate-700">
+          End Closing periode <strong>{recap.periodStart.slice(0, 10)} — {recap.periodEnd.slice(0, 10)}</strong>?
+        </p>
+        <p className="text-sm text-slate-600">
+          Salary dan kasbon yang termasuk dalam closing ini akan dianggap telah diselesaikan dan tidak lagi ditampilkan sebagai transaksi aktif. Riwayat Salary Recap tetap tersimpan.
+        </p>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" disabled={endClosingLoading}
+            onClick={() => setEndClosingOpen(false)}
+            className={nextgenNeutralButtonClass}>Batal</button>
+          <button type="button" disabled={endClosingLoading}
+            onClick={() => void executeEndClosing()}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+            {endClosingLoading ? <LoaderCircle className="animate-spin" size={16}/> : <CheckCircle2 size={16}/>}
+            End Closing
+          </button>
+        </div>
+      </ModalCard>
+    </div>}
     {error && <div role="alert"
       className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
       {error}

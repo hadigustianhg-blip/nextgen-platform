@@ -138,3 +138,121 @@ export async function cancelSalaryRecap(
     timeout: 30_000,
   });
 }
+
+export async function endSalaryRecapClosing(
+  context: SalaryContext,
+  closingId: string,
+) {
+  return prisma.$transaction(async (tx) => {
+    const [locked] = await tx.$queryRaw<LockedSalaryClosing[]>(Prisma.sql`
+      SELECT id, "closingNumber", status::text AS status
+      FROM "SalaryClosing"
+      WHERE id::text = ${closingId}
+        AND "tenantId"::text = ${context.tenantId}
+        AND "outletId"::text = ${context.outletId}
+      FOR UPDATE
+    `);
+    if (!locked) throw new SalaryError("SALARY_CLOSING_NOT_FOUND", 404);
+
+    if (locked.status === "PAID") {
+      const audit = await tx.salaryAudit.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          salaryClosingId: locked.id,
+          entityType: "SALARY_RECAP_ENDED_CLOSING",
+        },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true, actorId: true },
+      });
+      return {
+        id: locked.id,
+        closingNumber: locked.closingNumber,
+        status: "PAID" as const,
+        endedAt: audit?.createdAt ?? null,
+        endedByUserId: audit?.actorId ?? null,
+        alreadyEnded: true,
+      };
+    }
+
+    if (locked.status !== "PROCESSED") {
+      throw new SalaryError("SALARY_RECAP_END_CLOSING_NOT_ALLOWED", 409);
+    }
+
+    const endedAt = new Date();
+
+    const updatedClosing = await tx.salaryClosing.updateMany({
+      where: {
+        id: locked.id,
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        status: "PROCESSED",
+      },
+      data: {
+        status: "PAID",
+      },
+    });
+
+    if (updatedClosing.count !== 1) {
+      throw new SalaryError("SALARY_RECAP_END_CLOSING_NOT_ALLOWED", 409);
+    }
+
+    await tx.salaryClosingEmployee.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryClosingId: locked.id,
+      },
+      data: { status: "PAID" },
+    });
+
+    await tx.salaryKasbonAllocation.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        closingEmployee: { salaryClosingId: locked.id },
+        status: { in: ["DRAFT", "FINALIZED"] },
+      },
+      data: {
+        status: "FINALIZED",
+        finalizedAt: endedAt,
+      },
+    });
+
+    const metadata = {
+      closingId: locked.id,
+      closingNumber: locked.closingNumber,
+      actorId: context.actorId,
+      previousStatus: "PROCESSED",
+      finalStatus: "PAID",
+      endedAt: endedAt.toISOString(),
+    };
+
+    await tx.salaryAudit.create({
+      data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryClosingId: locked.id,
+        actorId: context.actorId,
+        action: "UPDATE",
+        entityType: "SALARY_RECAP_ENDED_CLOSING",
+        entityId: locked.id,
+        metadata,
+      },
+    });
+
+    return {
+      id: locked.id,
+      closingNumber: locked.closingNumber,
+      status: "PAID" as const,
+      endedAt,
+      endedByUserId: context.actorId,
+      alreadyEnded: false,
+    };
+  }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    maxWait: 10_000,
+    timeout: 30_000,
+  });
+}
+

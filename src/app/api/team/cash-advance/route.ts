@@ -76,28 +76,36 @@ export async function GET() {
     let totalRemaining = 0;
     let activeCount = 0;
 
-    const items = myExpenses.map((e) => {
+    const items: Array<{
+      id: string;
+      date: string;
+      category: string;
+      description: string | null;
+      amount: number;
+      paidAmount: number;
+      remainingAmount: number;
+      status: string;
+    }> = [];
+
+    for (const e of myExpenses) {
       const amount = Math.round(Number(e.amount ?? 0));
       const paidAmount = Math.round(
         e.salaryAllocations.reduce((sum, a) => sum + Number(a.amount ?? 0), 0),
       );
       const remainingAmount = Math.max(0, amount - paidAmount);
 
+      if (remainingAmount <= 0) {
+        continue;
+      }
+
       totalAmount += amount;
       totalPaid += paidAmount;
       totalRemaining += remainingAmount;
-      if (remainingAmount > 0) activeCount += 1;
+      activeCount += 1;
 
-      let status = "AKTIF";
-      if (remainingAmount === 0) {
-        status = "LUNAS";
-      } else if (paidAmount > 0) {
-        status = "SEBAGIAN";
-      } else {
-        status = "AKTIF";
-      }
+      const status = paidAmount > 0 ? "SEBAGIAN" : "AKTIF";
 
-      return {
+      items.push({
         id: e.id,
         date: e.operationalDate.toISOString().slice(0, 10),
         category: e.cashAdvanceCategory ?? "Kasbon Operasional",
@@ -106,8 +114,8 @@ export async function GET() {
         paidAmount,
         remainingAmount,
         status,
-      };
-    });
+      });
+    }
 
     return teamJson(
       {

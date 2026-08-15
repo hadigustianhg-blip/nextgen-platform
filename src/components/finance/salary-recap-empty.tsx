@@ -143,7 +143,17 @@ export function SalaryRecapEmpty() {
               <td className="px-3 py-3">{rupiah(total.addition)}</td>
               <td className="px-3 py-3">{rupiah(total.deduction)}</td>
               <td className="px-3 py-3 font-semibold">{rupiah(total.net)}</td>
-              <td className="px-3 py-3">{recap.status === "PAID" ? "Dibayar" : "Masuk Rekap"}</td>
+              <td className="px-3 py-3">
+                {recap.status === "PAID" ? (
+                  <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
+                    SELESAI / PAID
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-bold text-blue-800">
+                    Masuk Rekap
+                  </span>
+                )}
+              </td>
               <td className="px-3 py-3">{recap.processedAt?.slice(0, 10) || "—"}</td>
               <td className="px-3 py-3"><div className="flex flex-wrap gap-2">
                 <Link href={`/dashboard/finance/salary-recap/${recap.id}`}
