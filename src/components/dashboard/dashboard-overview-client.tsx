@@ -122,11 +122,11 @@ function DashboardChart({
     return number(parsed);
   };
   return (
-    <div className={compact ? "h-44 w-full" : "h-64 w-full lg:h-72"}>
+    <div className={compact ? "h-44 w-full" : "h-64 w-full lg:h-[19rem]"}>
       <ResponsiveContainer width="100%" height="100%">
         {variant === "bar" ? (
           <BarChart data={rows} margin={{ top: 12, right: 12, left: 0, bottom: 2 }} barGap={4}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--nextgen-border)" />
+            <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="var(--nextgen-border)" />
             <XAxis dataKey="date" tickFormatter={labelDate} tick={{ fontSize: 11, fill: "var(--nextgen-text-secondary)" }} />
             <YAxis tickFormatter={(value) => kind === "money" ? `${Math.round(Number(value) / 1000)}k` : number(value)} tick={{ fontSize: 11, fill: "var(--nextgen-text-muted)" }} />
             <Tooltip formatter={(value, name) => [format(value), name]} labelFormatter={(value) => fullDate(String(value))} cursor={{ fill: "var(--nextgen-primary-soft)" }} />
@@ -140,7 +140,7 @@ function DashboardChart({
           </BarChart>
         ) : (
           <LineChart data={rows} margin={{ top: 12, right: 16, left: 4, bottom: 2 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--nextgen-border)" />
+            <CartesianGrid strokeDasharray="4 6" vertical={false} stroke="var(--nextgen-border)" />
             <XAxis dataKey="date" tickFormatter={labelDate} tick={{ fontSize: 11, fill: "var(--nextgen-text-secondary)" }} />
             <YAxis tickFormatter={(value) => kind === "money" ? `${Math.round(Number(value) / 1000)}k` : number(value)} tick={{ fontSize: 11, fill: "var(--nextgen-text-muted)" }} />
             <Tooltip formatter={(value, name) => [format(value), name]} labelFormatter={(value) => fullDate(String(value))} />
@@ -178,7 +178,7 @@ function Donut({
   ];
   const total = data.reduce((sum, item) => sum + item.value, 0);
   return (
-    <div className="relative h-44 w-full">
+    <div className="relative h-44 w-full rounded-2xl bg-slate-50/70 ring-1 ring-inset ring-[var(--nextgen-border)]">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie data={data} dataKey="value" nameKey="name" innerRadius={52} outerRadius={70} paddingAngle={2} stroke="none" isAnimationActive={!reducedMotion} animationDuration={750} animationEasing="ease-out" />
@@ -190,7 +190,7 @@ function Donut({
         </PieChart>
       </ResponsiveContainer>
       <div className="pointer-events-none absolute inset-0 grid place-items-center">
-        <span className="text-2xl font-extrabold text-slate-900">{center}</span>
+        <span className="rounded-full bg-[var(--nextgen-card)] px-3 py-1.5 text-xl font-black tracking-tight text-slate-900 shadow-sm ring-1 ring-[var(--nextgen-border)]">{center}</span>
       </div>
     </div>
   );
@@ -224,10 +224,10 @@ function DashboardMetricCard({
 }) {
   return (
     <AppCard
-      className="dashboard-metric-card flex h-auto min-h-28 min-w-0 flex-col border-[var(--nextgen-border)] p-4 shadow-none transition duration-300 motion-safe:hover:-translate-y-0.5 motion-safe:hover:shadow-md motion-reduce:transform-none motion-reduce:transition-none"
+      className="dashboard-metric-card flex h-auto min-h-28 min-w-0 flex-col border-[var(--nextgen-border)] p-4 shadow-none transition duration-300 motion-safe:hover:-translate-y-0.5 motion-safe:hover:border-blue-200 motion-safe:hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)] motion-reduce:transform-none motion-reduce:transition-none"
       style={{ "--dashboard-delay": `${Math.min(index, 8) * 45}ms` } as CSSProperties}
     >
-      <span className={`grid size-10 place-items-center rounded-xl ${metricToneClasses[tone]}`} aria-hidden="true">
+      <span className={`grid size-10 place-items-center rounded-[13px] ring-1 ring-inset ring-black/[0.03] ${metricToneClasses[tone]}`} aria-hidden="true">
         <Icon size={19} strokeWidth={2} />
       </span>
       <p className="mt-3 text-xs font-semibold text-slate-500">{label}</p>
@@ -280,19 +280,19 @@ function SectionFrame({
   className?: string;
 }) {
   return (
-    <AppCard className={`section-frame h-full min-h-0 min-w-0 overflow-visible border-[var(--nextgen-border)] p-5 shadow-sm transition duration-300 motion-safe:hover:-translate-y-px motion-safe:hover:shadow-md motion-reduce:transform-none motion-reduce:transition-none lg:p-6 ${className}`}>
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+    <AppCard className={`section-frame h-full min-h-0 min-w-0 overflow-visible border-[var(--nextgen-border)] p-5 shadow-[0_10px_35px_rgba(15,23,42,0.045)] transition duration-300 motion-safe:hover:-translate-y-px motion-safe:hover:border-slate-300 motion-safe:hover:shadow-[0_16px_42px_rgba(15,23,42,0.075)] motion-reduce:transform-none motion-reduce:transition-none lg:p-6 ${className}`}>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-4 border-b border-[var(--nextgen-border)] pb-4">
         <div className="flex min-w-0 items-start gap-3">
-          <span className={`grid size-10 shrink-0 place-items-center rounded-xl ${sectionToneClasses[tone]}`} aria-hidden="true">
+          <span className={`grid size-10 shrink-0 place-items-center rounded-[13px] ring-1 ring-inset ring-black/[0.03] ${sectionToneClasses[tone]}`} aria-hidden="true">
             <Icon size={20} strokeWidth={2} />
           </span>
           <div className="min-w-0">
-            <h2 className="text-base font-extrabold text-[var(--nextgen-text-primary)] lg:text-lg">{title}</h2>
+            <h2 className="text-base font-black tracking-tight text-[var(--nextgen-text-primary)] lg:text-lg">{title}</h2>
             <p className="mt-1 text-xs text-[var(--nextgen-text-secondary)] lg:text-sm">{description}</p>
           </div>
         </div>
         <div className="text-right">
-          <Link href={href} className="inline-flex items-center gap-1 rounded-md text-sm font-bold text-[var(--nextgen-primary)] outline-none hover:text-[var(--nextgen-primary-hover)] focus-visible:ring-2 focus-visible:ring-blue-200">
+          <Link href={href} className="inline-flex h-8 items-center gap-1 rounded-lg border border-blue-100 bg-[var(--nextgen-primary-soft)] px-2.5 text-xs font-bold text-[var(--nextgen-primary)] outline-none transition hover:border-blue-200 hover:bg-blue-100/70 hover:text-[var(--nextgen-primary-hover)] focus-visible:ring-2 focus-visible:ring-blue-200">
             Lihat Detail <ArrowUpRight size={16} aria-hidden="true" />
           </Link>
           {section.status === "success" && section.updatedAt && (
@@ -328,15 +328,15 @@ function MonitoringKpi({
 }) {
   return (
     <div
-      className="dashboard-metric-card flex min-w-0 items-center gap-3 bg-[var(--nextgen-card)] px-4 py-4 sm:px-5"
+      className="dashboard-metric-card group flex min-w-0 items-center gap-3 bg-[var(--nextgen-card)] px-4 py-4 transition-colors hover:bg-slate-50/70 sm:px-5"
       style={{ "--dashboard-delay": `${index * 45}ms` } as CSSProperties}
     >
-      <span className={`grid size-11 shrink-0 place-items-center rounded-xl ${metricToneClasses[tone]}`} aria-hidden="true">
+      <span className={`grid size-11 shrink-0 place-items-center rounded-[14px] ring-1 ring-inset ring-black/[0.03] transition-transform motion-safe:group-hover:scale-105 ${metricToneClasses[tone]}`} aria-hidden="true">
         <Icon size={21} strokeWidth={2} />
       </span>
       <div className="min-w-0">
-        <p className="truncate text-[11px] font-semibold text-slate-500">{label}</p>
-        <p className="mt-1 truncate text-xl font-extrabold tracking-tight text-[var(--nextgen-text-primary)]">{value}</p>
+        <p className="truncate text-[11px] font-bold uppercase tracking-[0.08em] text-slate-500">{label}</p>
+        <p className="mt-1 truncate text-xl font-black tracking-tight text-[var(--nextgen-text-primary)]">{value}</p>
         <p className="mt-1 truncate text-[11px] text-slate-400">{note}</p>
       </div>
     </div>
@@ -442,31 +442,37 @@ export function DashboardOverviewClient({
   const stuckWithinTarget = stuck?.waybillStuckMaximum != null && stuck.totalInventory <= stuck.waybillStuckMaximum;
 
   return (
-    <div className="mx-auto min-w-0 max-w-[1800px] space-y-6 overflow-x-clip">
-      <header className="nextgen-dashboard-pattern overflow-hidden rounded-2xl px-1 py-2 sm:px-2 sm:py-3">
+    <div className="dashboard-workspace mx-auto min-w-0 max-w-[1800px] space-y-6 overflow-x-clip">
+      <header className="nextgen-dashboard-pattern overflow-hidden rounded-[20px] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-4 shadow-[0_12px_38px_rgba(15,23,42,0.045)] sm:p-5 lg:p-6">
         <div className="relative z-10 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <p className="text-xs font-bold text-[var(--nextgen-primary)]">Operational Executive Dashboard</p>
-          <h1 className="mt-1 text-2xl font-black tracking-tight text-[var(--nextgen-text-primary)] sm:whitespace-nowrap sm:text-3xl">Dashboard Operasional</h1>
-          <p className="mt-1.5 text-sm text-[var(--nextgen-text-secondary)]">Mirror read-only seluruh operasional {outletCode ?? "outlet aktif"}.</p>
+        <div className="min-w-0">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="h-px w-7 bg-[var(--nextgen-primary)]" aria-hidden="true" />
+            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--nextgen-primary)]">Operational Executive Dashboard</p>
+          </div>
+          <h1 className="text-2xl font-black tracking-[-0.025em] text-[var(--nextgen-text-primary)] sm:whitespace-nowrap sm:text-3xl">Dashboard Operasional</h1>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--nextgen-text-secondary)]">Mirror read-only seluruh operasional <strong className="font-bold text-slate-700">{outletCode ?? "outlet aktif"}</strong>.</p>
         </div>
-        <div className="flex flex-col items-start gap-2 xl:items-end">
-          <div className="dashboard-toolbar flex w-full flex-wrap items-center gap-2 xl:w-auto">
-            <div className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] px-3 py-1.5 shadow-sm sm:w-auto sm:flex-none">
+        <div className="flex min-w-0 flex-col items-start gap-2 xl:items-end">
+          <div className="dashboard-toolbar flex w-full flex-wrap items-center gap-2 rounded-2xl border border-[var(--nextgen-border)] bg-slate-50/75 p-1.5 shadow-inner xl:w-auto">
+            <div className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] px-3 py-1 shadow-sm sm:w-auto sm:flex-none">
               <CalendarDays size={16} className="shrink-0 text-slate-500" aria-hidden="true" />
               <input aria-label="Tanggal Awal" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className={`${nextgenControlClass} dashboard-date-input min-w-0 border-0 bg-transparent px-1 shadow-none focus:ring-0`} />
               <span className="text-slate-300">–</span>
               <input aria-label="Tanggal Akhir" type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className={`${nextgenControlClass} dashboard-date-input min-w-0 border-0 bg-transparent px-1 shadow-none focus:ring-0`} />
             </div>
-            <button type="button" onClick={() => applyPeriod({ startDate: jakartaToday(), endDate: jakartaToday() })} className={nextgenButtonClass + " border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] text-slate-700"}>Hari Ini</button>
-            <button type="button" onClick={() => applyPeriod(monthRange(jakartaToday()))} className={nextgenButtonClass + " border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] text-slate-700"}>Bulan Ini</button>
-            <button type="button" aria-label="Bulan Sebelumnya" onClick={() => applyPeriod(shiftMonth(startDate, -1))} className={nextgenButtonClass + " border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] px-3 text-slate-700"}><ChevronLeft size={17} aria-hidden="true" /></button>
-            <button type="button" aria-label="Bulan Berikutnya" onClick={() => applyPeriod(shiftMonth(startDate, 1))} className={nextgenButtonClass + " border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] px-3 text-slate-700"}><ChevronRight size={17} aria-hidden="true" /></button>
-            <button type="button" disabled={loading || !validRange} onClick={() => setRefreshKey((value) => value + 1)} className={nextgenButtonClass + " bg-[var(--nextgen-primary)] text-white hover:bg-[var(--nextgen-primary-hover)]"}>
+            <button type="button" onClick={() => applyPeriod({ startDate: jakartaToday(), endDate: jakartaToday() })} className={nextgenButtonClass + " border border-transparent bg-transparent text-slate-600 hover:border-[var(--nextgen-border)] hover:bg-[var(--nextgen-card)]"}>Hari Ini</button>
+            <button type="button" onClick={() => applyPeriod(monthRange(jakartaToday()))} className={nextgenButtonClass + " border border-transparent bg-transparent text-slate-600 hover:border-[var(--nextgen-border)] hover:bg-[var(--nextgen-card)]"}>Bulan Ini</button>
+            <div className="flex overflow-hidden rounded-xl border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] shadow-sm">
+            <button type="button" aria-label="Bulan Sebelumnya" onClick={() => applyPeriod(shiftMonth(startDate, -1))} className={nextgenButtonClass + " rounded-none border-0 bg-transparent px-3 text-slate-600 hover:bg-slate-50"}><ChevronLeft size={17} aria-hidden="true" /></button>
+            <span className="my-2 w-px bg-[var(--nextgen-border)]" aria-hidden="true" />
+            <button type="button" aria-label="Bulan Berikutnya" onClick={() => applyPeriod(shiftMonth(startDate, 1))} className={nextgenButtonClass + " rounded-none border-0 bg-transparent px-3 text-slate-600 hover:bg-slate-50"}><ChevronRight size={17} aria-hidden="true" /></button>
+            </div>
+            <button type="button" disabled={loading || !validRange} onClick={() => setRefreshKey((value) => value + 1)} className={nextgenButtonClass + " min-w-[104px] bg-[var(--nextgen-primary)] text-white shadow-[0_8px_20px_rgba(37,99,235,0.18)] hover:bg-[var(--nextgen-primary-hover)]"}>
               <RefreshCw size={17} className={loading ? "animate-spin" : ""} aria-hidden="true" /> Refresh
             </button>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+          <div className="flex flex-wrap items-center gap-2 px-1 text-[11px] text-slate-500">
             <span>{fullDate(startDate)} – {fullDate(endDate)}</span>
             {result && <><span>·</span><span>Terakhir diperbarui <strong className="text-slate-700">{new Intl.DateTimeFormat("id-ID", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Jakarta" }).format(new Date(result.updatedAt))}</strong></span></>}
           </div>
@@ -479,7 +485,7 @@ export function DashboardOverviewClient({
       {loading && !result ? <SkeletonDashboard /> : result && (
         <div key={presentationKey} className={loading ? "dashboard-content space-y-6 opacity-70 transition" : "dashboard-content space-y-6 transition"} aria-busy={loading}>
           {monitoring && (
-            <AppCard className="overflow-hidden border-[var(--nextgen-border)] p-0 shadow-sm">
+            <AppCard className="overflow-hidden rounded-[18px] border-[var(--nextgen-border)] p-0 shadow-[0_10px_35px_rgba(15,23,42,0.045)]">
               <div className="dashboard-kpi-strip grid gap-px bg-[var(--nextgen-border)] sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                 <MonitoringKpi label="Achievement Delivery" value={percent(monitoring.summary.achievement)} note={`Target ${percent(monitoring.target)}`} icon={Gauge} tone="emerald" index={0} />
                 <MonitoringKpi label="Total TTD" value={number(monitoring.summary.totalTtd)} note="Total tanda tangan" icon={CircleCheckBig} tone="blue" index={1} />
@@ -514,34 +520,39 @@ export function DashboardOverviewClient({
           <div className="dashboard-analytics-grid grid min-w-0 items-stretch gap-5 md:grid-cols-2">
             <SectionFrame title="Monitoring Performance" description="Mirror Monitoring Daily dan Monthly." href="/dashboard/monitoring/monthly" section={result.monitoring} icon={BarChart3} tone="blue" className="dashboard-monitoring-panel md:col-span-2">
               {monitoring && <>
-                <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Metrik Monitoring Performance">
-                  {Object.entries(monitoringCharts).map(([key, chart]) => <button key={key} type="button" role="tab" aria-selected={monitoringChart === key} onClick={() => setMonitoringChart(key)} className={`rounded-lg px-3 py-2 text-xs font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-blue-200 ${monitoringChart === key ? "bg-[var(--nextgen-primary)] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{chart.label}</button>)}
+                <div className="mb-5 inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-[var(--nextgen-border)] bg-slate-50/80 p-1" role="tablist" aria-label="Metrik Monitoring Performance">
+                  {Object.entries(monitoringCharts).map(([key, chart]) => <button key={key} type="button" role="tab" aria-selected={monitoringChart === key} onClick={() => setMonitoringChart(key)} className={`rounded-lg px-3 py-2 text-xs font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-blue-200 ${monitoringChart === key ? "bg-[var(--nextgen-card)] text-[var(--nextgen-primary)] shadow-sm ring-1 ring-[var(--nextgen-border)]" : "text-slate-500 hover:bg-[var(--nextgen-card)] hover:text-slate-700"}`}>{chart.label}</button>)}
                 </div>
-                <DashboardChart rows={monitoringRows} series={activeMonitoringChart.series} kind={activeMonitoringChart.kind} target={"target" in activeMonitoringChart ? activeMonitoringChart.target : undefined} variant="bar" reducedMotion={reducedMotion} />
+                <div className="rounded-2xl border border-[var(--nextgen-border)] bg-slate-50/35 px-2 pb-2 pt-3 sm:px-3">
+                  <DashboardChart rows={monitoringRows} series={activeMonitoringChart.series} kind={activeMonitoringChart.kind} target={"target" in activeMonitoringChart ? activeMonitoringChart.target : undefined} variant="bar" reducedMotion={reducedMotion} />
+                </div>
               </>}
             </SectionFrame>
 
             <SectionFrame title="SLA Cut Off" description="Rata-rata dan tren SLA harian." href="/dashboard/quality-control/sla-cut-off" section={result.sla} icon={Gauge} tone="emerald">
-              {sla && <div className="space-y-3">
-                <div className="grid items-center gap-3 sm:grid-cols-[minmax(110px,0.8fr)_minmax(150px,1.2fr)] xl:grid-cols-1">
-                  <div><p className="text-xs font-semibold text-slate-500">Average SLA</p><p className="mt-2 text-3xl font-black text-slate-950">{percent(sla.averageSla)}</p><p className="mt-2 text-xs text-[var(--nextgen-success)]">Target {percent(sla.target)}</p></div>
+              {sla && <div className="space-y-4">
+                <div className="grid items-center gap-4 rounded-2xl border border-emerald-100/80 bg-gradient-to-br from-emerald-50/80 via-white to-white p-4 sm:grid-cols-[minmax(110px,0.8fr)_minmax(150px,1.2fr)] xl:grid-cols-1">
+                  <div><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-700">Average SLA</p><p className="mt-2 text-4xl font-black tracking-tight text-slate-950">{percent(sla.averageSla)}</p><p className="mt-3 inline-flex rounded-full bg-emerald-100/80 px-2.5 py-1 text-xs font-bold text-emerald-800">Target {percent(sla.target)}</p></div>
                   <Donut value={Math.min(100, sla.averageSla)} remaining={Math.max(0, 100 - sla.averageSla)} valueLabel="Achieved" remainingLabel="Remaining" center={percent(sla.averageSla)} reducedMotion={reducedMotion} />
                 </div>
-                <DashboardChart rows={sla.daily} kind="percent" target={sla.target} variant="bar" compact reducedMotion={reducedMotion} series={[{ key: "sla", label: "SLA Harian", color: "var(--nextgen-primary)" }]} />
+                <div className="rounded-2xl border border-[var(--nextgen-border)] bg-slate-50/35 px-2 pb-2 pt-3">
+                  <DashboardChart rows={sla.daily} kind="percent" target={sla.target} variant="bar" compact reducedMotion={reducedMotion} series={[{ key: "sla", label: "SLA Harian", color: "var(--nextgen-primary)" }]} />
+                </div>
               </div>}
             </SectionFrame>
 
             <SectionFrame title="Problem Waybill Stuck" description="Waybill stuck hari ini." href="/dashboard/quality-control/waybill-stuck-delivery" section={result.stuckDelivery} icon={PackageSearch} tone="amber">
-              {stuck && <div className="flex min-h-64 flex-col justify-between rounded-2xl border border-[var(--nextgen-border)] bg-slate-50/60 p-5">
+              {stuck && <div className="relative flex min-h-64 flex-col justify-between overflow-hidden rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50/80 via-white to-white p-5">
+                <span className="pointer-events-none absolute -right-12 -top-12 size-32 rounded-full bg-amber-100/55 blur-2xl" aria-hidden="true" />
                 <div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold text-[var(--nextgen-text-secondary)]">Total Stuck Hari Ini</p>
-                    <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900">
+                  <div className="relative flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-amber-800">Total Stuck Hari Ini</p>
+                    <span className="rounded-full border border-amber-200/80 bg-white/80 px-2.5 py-1 text-[11px] font-bold text-amber-900 shadow-sm">
                       Data per {fullDate(stuck.todayDate ?? startDate)}
                     </span>
                   </div>
-                  <p className="mt-2 text-4xl font-black tracking-tight text-[var(--nextgen-text-primary)]">{number(stuck.totalStuckToday ?? stuck.totalInventory)}</p>
-                  <p className={`mt-2 text-xs ${stuck.waybillStuckMaximum == null ? "text-slate-500" : stuckWithinTarget ? "text-[var(--nextgen-success)]" : "text-[var(--nextgen-danger)]"}`}>
+                  <p className="relative mt-3 text-5xl font-black tracking-tight text-[var(--nextgen-text-primary)]">{number(stuck.totalStuckToday ?? stuck.totalInventory)}</p>
+                  <p className={`relative mt-3 text-xs font-semibold ${stuck.waybillStuckMaximum == null ? "text-slate-500" : stuckWithinTarget ? "text-[var(--nextgen-success)]" : "text-[var(--nextgen-danger)]"}`}>
                     {stuck.waybillStuckMaximum == null
                       ? "Target belum diatur"
                       : stuckWithinTarget
@@ -552,7 +563,7 @@ export function DashboardOverviewClient({
                 {(stuck.totalStuckToday ?? stuck.totalInventory) === 0 ? (
                   <EmptyState kind="monitoring" label="Tidak ada waybill stuck hari ini" className="ml-auto w-32" />
                 ) : (
-                  <span className="ml-auto grid size-20 place-items-center rounded-2xl bg-[var(--nextgen-warning-soft)] text-[var(--nextgen-warning)]" aria-hidden="true"><PackageSearch size={42} strokeWidth={1.6} /></span>
+                  <span className="relative ml-auto grid size-20 place-items-center rounded-2xl border border-amber-200/70 bg-white/75 text-[var(--nextgen-warning)] shadow-sm" aria-hidden="true"><PackageSearch size={42} strokeWidth={1.6} /></span>
                 )}
               </div>}
             </SectionFrame>
