@@ -190,7 +190,7 @@ function Donut({
         </PieChart>
       </ResponsiveContainer>
       <div className="pointer-events-none absolute inset-0 grid place-items-center">
-        <span className="rounded-full bg-[var(--nextgen-card)] px-3 py-1.5 text-xl font-black tracking-tight text-slate-900 shadow-sm ring-1 ring-[var(--nextgen-border)]">{center}</span>
+        <span className="rounded-full bg-[var(--nextgen-card)] px-3 py-1.5 text-xl font-bold tracking-tight text-slate-900 shadow-sm ring-1 ring-[var(--nextgen-border)]">{center}</span>
       </div>
     </div>
   );
@@ -287,7 +287,7 @@ function SectionFrame({
             <Icon size={20} strokeWidth={2} />
           </span>
           <div className="min-w-0">
-            <h2 className="text-base font-black tracking-tight text-[var(--nextgen-text-primary)] lg:text-lg">{title}</h2>
+            <h2 className="text-base font-bold tracking-tight text-[var(--nextgen-text-primary)] lg:text-lg">{title}</h2>
             <p className="mt-1 text-xs text-[var(--nextgen-text-secondary)] lg:text-sm">{description}</p>
           </div>
         </div>
@@ -333,13 +333,13 @@ function MonitoringKpi({
     >
       <span className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-[var(--nextgen-primary)] opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
       <div className="flex items-start justify-between gap-3">
-        <p className="min-w-0 pt-1 text-[10px] font-black uppercase tracking-[0.11em] text-slate-500">{label}</p>
+        <p className="min-w-0 pt-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-500">{label}</p>
         <span className={`grid size-9 shrink-0 place-items-center rounded-xl ring-1 ring-inset ring-black/[0.03] transition-transform motion-safe:group-hover:scale-105 ${metricToneClasses[tone]}`} aria-hidden="true">
           <Icon size={17} strokeWidth={2} />
         </span>
       </div>
       <div className="mt-auto min-w-0 pt-3">
-        <p className="truncate text-2xl font-black tracking-[-0.025em] text-[var(--nextgen-text-primary)]">{value}</p>
+        <p className="truncate text-2xl font-bold tracking-[-0.025em] text-[var(--nextgen-text-primary)]">{value}</p>
         <p className="mt-1.5 truncate text-[11px] font-medium text-slate-400">{note}</p>
       </div>
     </div>
@@ -452,9 +452,9 @@ export function DashboardOverviewClient({
         <div className="min-w-0">
           <div className="mb-2 flex items-center gap-2">
             <span className="h-px w-7 bg-[var(--nextgen-primary)]" aria-hidden="true" />
-            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--nextgen-primary)]">Operational Executive Dashboard</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--nextgen-primary)]">Operational Executive Dashboard</p>
           </div>
-          <h1 className="text-2xl font-black tracking-[-0.03em] text-[var(--nextgen-text-primary)] sm:whitespace-nowrap sm:text-[28px]">Dashboard Operasional</h1>
+          <h1 className="text-2xl font-bold tracking-[-0.03em] text-[var(--nextgen-text-primary)] sm:whitespace-nowrap sm:text-[28px]">Dashboard Operasional</h1>
           <p className="mt-1.5 max-w-xl text-sm leading-5 text-[var(--nextgen-text-secondary)]">Mirror read-only seluruh operasional <strong className="font-bold text-slate-700">{outletCode ?? "outlet aktif"}</strong>.</p>
         </div>
         <div className="flex min-w-0 flex-col items-start gap-2 xl:items-end">
@@ -536,7 +536,7 @@ export function DashboardOverviewClient({
             <SectionFrame title="SLA Cut Off" description="Rata-rata dan tren SLA harian." href="/dashboard/quality-control/sla-cut-off" section={result.sla} icon={Gauge} tone="emerald">
               {sla && <div className="space-y-4">
                 <div className="grid items-center gap-4 rounded-2xl border border-emerald-100/80 bg-gradient-to-br from-emerald-50/80 via-white to-white p-4 sm:grid-cols-[minmax(110px,0.8fr)_minmax(150px,1.2fr)] xl:grid-cols-1">
-                  <div><p className="text-[11px] font-bold uppercase tracking-[0.14em] text-emerald-700">Average SLA</p><p className="mt-2 text-4xl font-black tracking-tight text-slate-950">{percent(sla.averageSla)}</p><p className="mt-3 inline-flex rounded-full bg-emerald-100/80 px-2.5 py-1 text-xs font-bold text-emerald-800">Target {percent(sla.target)}</p></div>
+                  <div><p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">Average SLA</p><p className="mt-2 text-4xl font-bold tracking-tight text-slate-950">{percent(sla.averageSla)}</p><p className="mt-3 inline-flex rounded-full bg-emerald-100/80 px-2.5 py-1 text-xs font-semibold text-emerald-800">Target {percent(sla.target)}</p></div>
                   <Donut value={Math.min(100, sla.averageSla)} remaining={Math.max(0, 100 - sla.averageSla)} valueLabel="Achieved" remainingLabel="Remaining" center={percent(sla.averageSla)} reducedMotion={reducedMotion} />
                 </div>
                 <div className="rounded-2xl border border-[var(--nextgen-border)] bg-slate-50/35 px-2 pb-2 pt-3">
@@ -555,7 +555,7 @@ export function DashboardOverviewClient({
                       Data per {fullDate(stuck.todayDate ?? startDate)}
                     </span>
                   </div>
-                  <p className="relative mt-3 text-5xl font-black tracking-[-0.04em] text-[var(--nextgen-text-primary)]">{number(stuck.totalStuckToday ?? stuck.totalInventory)}</p>
+                  <p className="relative mt-3 text-5xl font-bold tracking-[-0.04em] text-[var(--nextgen-text-primary)]">{number(stuck.totalStuckToday ?? stuck.totalInventory)}</p>
                   <p className={`relative mt-3 text-xs font-semibold ${stuck.waybillStuckMaximum == null ? "text-slate-500" : stuckWithinTarget ? "text-[var(--nextgen-success)]" : "text-[var(--nextgen-danger)]"}`}>
                     {stuck.waybillStuckMaximum == null
                       ? "Target belum diatur"

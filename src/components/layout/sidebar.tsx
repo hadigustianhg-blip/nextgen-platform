@@ -204,7 +204,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
         <div className="relative flex h-[88px] items-center border-b border-white/[0.08] px-5">
           <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-white/[0.08] ring-1 ring-inset ring-white/10 shadow-lg shadow-slate-950/20"><NextgenBrand variant="mark" className="size-10 shrink-0" priority /></span>
           <div className={`ml-3 min-w-0 ${labelClass}`}>
-            <div className="text-[15px] font-black tracking-[0.18em]">NEXTGEN</div>
+            <div className="text-[15px] font-bold tracking-[0.18em]">NEXTGEN</div>
             <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-200/75">Operations System</div>
           </div>
           <button
@@ -218,7 +218,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
         </div>
 
         <nav
-          className="mt-5 relative flex-1 space-y-1 overflow-y-auto px-3.5 pb-4 [scrollbar-color:rgba(148,163,184,0.35)_transparent] [scrollbar-width:thin]"
+          className="mt-5 relative flex-1 space-y-1 overflow-y-auto px-3.5 pb-4 pt-5 [scrollbar-color:rgba(148,163,184,0.35)_transparent] [scrollbar-width:thin]"
           aria-label="Navigasi utama"
         >
           {navigation.slice(0, 1).map((item) => {
@@ -552,7 +552,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
           aria-label={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
-          className="absolute -right-3 top-24 hidden size-7 place-items-center rounded-full border border-blue-100 bg-white text-[var(--nextgen-primary)] shadow-lg shadow-slate-950/10 outline-none transition hover:scale-105 hover:bg-blue-50 focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transform-none lg:grid"
+          className="absolute -right-3 top-[92px] hidden size-7 place-items-center rounded-full border border-blue-100 bg-white text-[var(--nextgen-primary)] shadow-lg shadow-slate-950/10 outline-none transition hover:scale-105 hover:bg-blue-50 focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transform-none lg:grid"
         >
           <ChevronLeft
             size={15}
