@@ -21,7 +21,7 @@ import {
 
 type HeaderSession = Pick<
   SessionContext,
-  "userName" | "roles" | "outletCode" | "tenantName"
+  "userName" | "avatarUrl" | "roles" | "outletCode" | "tenantName"
 >;
 
 type PendingNotificationItem = {
@@ -142,14 +142,14 @@ export function AppHeader({ session }: { session: HeaderSession }) {
   return (
     <header
       ref={headerRef}
-      className="sticky top-0 z-20 flex min-h-[72px] w-full items-center border-b border-[var(--nextgen-border)] bg-[var(--nextgen-card)] px-4 md:px-6 lg:px-8"
+      className="sticky top-0 z-20 mx-3 mt-3 flex min-h-[72px] w-[calc(100%-1.5rem)] items-center rounded-[var(--nextgen-radius-workspace)] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)]/95 px-4 pl-16 shadow-[0_12px_34px_rgba(15,23,42,0.06)] backdrop-blur-xl md:px-6 lg:mx-0 lg:mt-0 lg:w-full lg:px-6"
     >
       <div className="flex w-full items-center justify-between gap-3">
-        <div className="relative min-w-0 flex-1 md:max-w-xl">
-          <div className="relative flex items-center">
+        <div className="relative min-w-0 flex-1 md:max-w-xl lg:max-w-[500px]">
+          <div className="group relative flex items-center">
             <Search
               size={18}
-              className="pointer-events-none absolute left-3.5 text-[var(--nextgen-text-secondary)]"
+              className="pointer-events-none absolute left-3.5 text-[var(--nextgen-text-secondary)] transition-colors group-focus-within:text-[var(--nextgen-primary)]"
               aria-hidden="true"
             />
             <input
@@ -168,7 +168,7 @@ export function AppHeader({ session }: { session: HeaderSession }) {
               }}
               onFocus={() => setSearchOpen(true)}
               onKeyDown={handleSearchKeyDown}
-              className="h-10 w-full rounded-[11px] border border-[var(--nextgen-border)] bg-[var(--nextgen-background)] pl-10 pr-4 text-xs font-medium text-[var(--nextgen-text-primary)] placeholder-[var(--nextgen-text-secondary)] outline-none transition focus:border-[var(--nextgen-primary)] focus:ring-2 focus:ring-blue-500/10"
+              className="h-10 w-full rounded-[var(--nextgen-radius-control)] border border-slate-200 bg-slate-50/80 pl-10 pr-4 text-xs font-medium text-[var(--nextgen-text-primary)] shadow-inner shadow-slate-950/[0.015] placeholder-[var(--nextgen-text-secondary)] outline-none transition focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-500/[0.07]"
             />
           </div>
 
@@ -177,7 +177,7 @@ export function AppHeader({ session }: { session: HeaderSession }) {
               id="header-search-results"
               role="listbox"
               aria-label="Hasil pencarian menu"
-              className="absolute left-0 right-0 top-[calc(100%+6px)] max-h-72 overflow-y-auto rounded-[13px] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-1.5 shadow-[0_16px_38px_rgba(15,23,42,0.14)] z-50"
+              className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 max-h-72 overflow-y-auto rounded-[var(--nextgen-radius-inner)] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-1.5 shadow-[0_16px_38px_rgba(15,23,42,0.14)]"
             >
               {results.length > 0 ? (
                 results.map((item, index) => {
@@ -191,7 +191,7 @@ export function AppHeader({ session }: { session: HeaderSession }) {
                       aria-selected={isActive}
                       onClick={() => navigateTo(item.href)}
                       onMouseEnter={() => setActiveIndex(index)}
-                      className={`flex w-full items-center justify-between rounded-[10px] px-3 py-2.5 text-left text-xs font-medium outline-none transition ${
+                        className={`flex w-full items-center justify-between rounded-[var(--nextgen-radius-compact)] px-3 py-2.5 text-left text-xs font-medium outline-none transition ${
                         isActive
                           ? "bg-blue-50 text-[var(--nextgen-primary)]"
                           : "text-[var(--nextgen-text-primary)] hover:bg-slate-50"
@@ -213,10 +213,10 @@ export function AppHeader({ session }: { session: HeaderSession }) {
 
         <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3 lg:gap-4">
           <div
-            className="flex h-10 items-center gap-2 rounded-[11px] border border-[var(--nextgen-border)] bg-[var(--nextgen-background)] px-3 text-xs"
+            className="flex h-10 items-center gap-2.5 rounded-[var(--nextgen-radius-control)] border border-blue-100 bg-blue-50/65 px-3 text-xs shadow-sm shadow-blue-950/[0.02]"
             title="Outlet aktif bersifat read-only"
           >
-            <Store size={16} className="text-[var(--nextgen-text-secondary)]" aria-hidden="true" />
+            <span className="grid size-6 place-items-center rounded-lg bg-white text-[var(--nextgen-primary)] shadow-sm ring-1 ring-blue-100"><Store size={13} aria-hidden="true" /></span>
             <div className="min-w-0 leading-tight">
               <span className="block text-[10px] font-medium text-[var(--nextgen-text-secondary)]">Outlet Aktif</span>
               <span className="block max-w-28 truncate font-semibold text-[var(--nextgen-text-primary)] sm:max-w-36 md:max-w-44">
@@ -236,7 +236,7 @@ export function AppHeader({ session }: { session: HeaderSession }) {
                 setProfileOpen(false);
                 closeSearch();
               }}
-              className="relative grid size-10 place-items-center rounded-[11px] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] text-[var(--nextgen-text-secondary)] outline-none transition hover:bg-slate-50 hover:text-[var(--nextgen-primary)] focus-visible:ring-2 focus-visible:ring-blue-300"
+              className="relative grid size-10 place-items-center rounded-[var(--nextgen-radius-control)] border border-[var(--nextgen-border)] bg-white text-[var(--nextgen-text-secondary)] shadow-sm shadow-slate-950/[0.025] outline-none transition hover:-translate-y-px hover:border-blue-200 hover:bg-blue-50/60 hover:text-[var(--nextgen-primary)] focus-visible:ring-2 focus-visible:ring-blue-300 motion-reduce:transform-none"
             >
               <Bell size={18} aria-hidden="true" />
               {pendingNotifications.length > 0 && (
@@ -249,7 +249,7 @@ export function AppHeader({ session }: { session: HeaderSession }) {
               <div
                 role="dialog"
                 aria-label="Notifikasi"
-                className="absolute right-0 top-[calc(100%+8px)] w-72 rounded-[13px] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-3 shadow-[0_16px_38px_rgba(15,23,42,0.14)] z-50"
+                className="absolute right-0 top-[calc(100%+8px)] z-50 w-72 rounded-[var(--nextgen-radius-inner)] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-3 shadow-[0_16px_38px_rgba(15,23,42,0.14)]"
               >
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <p className="text-xs font-semibold text-[var(--nextgen-text-primary)]">Notifikasi</p>
@@ -299,9 +299,9 @@ export function AppHeader({ session }: { session: HeaderSession }) {
                 setNotificationOpen(false);
                 closeSearch();
               }}
-              className="flex h-10 items-center gap-2 rounded-[11px] outline-none transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-300 lg:px-1.5"
+              className="flex h-11 items-center gap-2.5 rounded-[var(--nextgen-radius-control)] border border-transparent px-1 outline-none transition hover:border-[var(--nextgen-border)] hover:bg-slate-50/80 focus-visible:ring-2 focus-visible:ring-blue-300 lg:pl-1 lg:pr-2"
             >
-              <UserAvatar name={session.userName} className="size-9 rounded-lg" />
+              <UserAvatar name={session.userName} src={session.avatarUrl} className="size-9 rounded-[10px] ring-2 ring-white shadow-sm" />
               <span className="hidden max-w-36 min-w-0 text-left lg:block">
                 <span className="block truncate text-xs font-semibold leading-4 text-[var(--nextgen-text-primary)]">
                   {session.userName}
@@ -312,7 +312,7 @@ export function AppHeader({ session }: { session: HeaderSession }) {
               </span>
               <ChevronDown
                 size={16}
-                className="hidden text-[var(--nextgen-text-secondary)] lg:block"
+                className={`hidden text-[var(--nextgen-text-secondary)] transition-transform lg:block ${profileOpen ? "rotate-180" : ""}`}
                 aria-hidden="true"
               />
             </button>
@@ -321,7 +321,7 @@ export function AppHeader({ session }: { session: HeaderSession }) {
               <div
                 role="menu"
                 aria-label="Menu profil"
-                className="absolute right-0 top-[calc(100%+8px)] w-60 rounded-[13px] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-1.5 shadow-[0_16px_38px_rgba(15,23,42,0.14)] z-50"
+                className="absolute right-0 top-[calc(100%+8px)] z-50 w-60 rounded-[var(--nextgen-radius-inner)] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-1.5 shadow-[0_16px_38px_rgba(15,23,42,0.14)]"
               >
                 <div className="border-b border-[var(--nextgen-border)] px-3 py-2.5 lg:hidden">
                   <p className="truncate text-sm font-semibold text-[var(--nextgen-text-primary)]">

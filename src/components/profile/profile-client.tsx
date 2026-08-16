@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, KeyRound, Save, ShieldCheck } from "lucide-react";
+import { Camera, Eye, EyeOff, KeyRound, Save, ShieldCheck, Upload } from "lucide-react";
 import { AppCard, PageHeader, UserAvatar, nextgenButtonClass, nextgenControlClass } from "@/components/ui";
 
 export type OwnProfileView = {
@@ -15,6 +15,8 @@ export type OwnProfileView = {
   outlet: { id: string; code: string; name: string } | null;
   roles: Array<{ code: string; name: string }>;
   avatarUrl: string;
+  avatarUpdatedAt: string | null;
+  avatarUploadAvailable: boolean;
 };
 
 type ApiResult = { success?: boolean; data?: OwnProfileView; error?: { code?: string; fieldErrors?: Record<string, string[]> } };
@@ -26,6 +28,12 @@ const errorMessages: Record<string, string> = {
   UNAUTHORIZED: "Session berakhir. Silakan login kembali.",
   FORBIDDEN: "Anda tidak memiliki izin untuk mengubah profil.",
   PROFILE_REQUEST_FAILED: "Profil gagal diperbarui. Silakan coba kembali.",
+  AVATAR_TYPE_INVALID: "Gunakan file JPEG, PNG, atau WebP.",
+  AVATAR_SIZE_INVALID: "Ukuran foto harus maksimal 5 MB.",
+  AVATAR_DIMENSIONS_INVALID: "Dimensi foto maksimal 4096 × 4096 piksel.",
+  AVATAR_ANIMATED_NOT_ALLOWED: "Foto animasi tidak didukung.",
+  AVATAR_IMAGE_INVALID: "File tidak dapat dikenali sebagai gambar yang valid.",
+  AVATAR_STORAGE_NOT_CONFIGURED: "Penyimpanan avatar belum dikonfigurasi.",
 };
 
 async function profileRequest(url: string, init: RequestInit) {
@@ -88,6 +96,59 @@ export function ProfileClient({ initialProfile }: { initialProfile: OwnProfileVi
   const [showConfirm, setShowConfirm] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
   const [passwordError, setPasswordError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarMessage, setAvatarMessage] = useState("");
+  const [avatarError, setAvatarError] = useState("");
+
+  useEffect(() => () => {
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+  }, [avatarPreview]);
+
+  function selectAvatar(file: File | undefined) {
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    setAvatarMessage("");
+    setAvatarError("");
+    if (!file) {
+      setAvatarFile(null);
+      setAvatarPreview(null);
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setAvatarFile(null);
+      setAvatarPreview(null);
+      setAvatarError(file.size > 5 * 1024 * 1024 ? errorMessages.AVATAR_SIZE_INVALID : errorMessages.AVATAR_TYPE_INVALID);
+      return;
+    }
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+  }
+
+  async function uploadAvatar() {
+    if (!avatarFile || uploadingAvatar) return;
+    setUploadingAvatar(true); setAvatarError(""); setAvatarMessage("");
+    try {
+      const form = new FormData();
+      form.set("avatar", avatarFile);
+      const response = await fetch("/api/profile/avatar", { method: "POST", body: form });
+      const result = await response.json().catch(() => null) as ApiResult | null;
+      if (!response.ok || !result?.success || !result.data) {
+        throw new Error(errorMessages[result?.error?.code ?? ""] ?? "Foto profil gagal disimpan.");
+      }
+      setProfile(result.data);
+      setAvatarFile(null);
+      setAvatarPreview(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setAvatarMessage("Foto profil berhasil diperbarui.");
+      router.refresh();
+    } catch (error) {
+      setAvatarError(error instanceof Error ? error.message : "Foto profil gagal disimpan.");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
 
   async function saveName() {
     if (savingName) return;
@@ -140,13 +201,26 @@ export function ProfileClient({ initialProfile }: { initialProfile: OwnProfileVi
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
         <AppCard className="p-5 sm:p-6">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-            <UserAvatar name={profile.name} src={profile.avatarUrl} className="size-24 rounded-2xl" />
+            <div className="relative shrink-0">
+              <UserAvatar name={profile.name} src={avatarPreview ?? profile.avatarUrl} className="size-24 rounded-2xl" />
+              <span className="absolute -bottom-2 -right-2 grid size-8 place-items-center rounded-full bg-blue-600 text-white ring-4 ring-white" aria-hidden="true"><Camera size={15} /></span>
+            </div>
             <div className="min-w-0">
               <h2 className="truncate text-xl font-bold text-slate-950">{profile.name}</h2>
-              <p className="mt-1 text-sm text-slate-500">Avatar default · read-only</p>
+              <p className="mt-1 text-sm text-slate-500">JPEG, PNG, atau WebP · maksimal 5 MB</p>
+              <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => selectAvatar(event.target.files?.[0])} />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" disabled={!profile.avatarUploadAvailable || uploadingAvatar} onClick={() => fileInputRef.current?.click()} className={`${nextgenButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>
+                  <Camera size={16} aria-hidden="true" /> Ganti Foto
+                </button>
+                {avatarFile && <button type="button" disabled={uploadingAvatar} onClick={() => void uploadAvatar()} className={`${nextgenButtonClass} bg-blue-600 text-white hover:bg-blue-700`}><Upload size={16} aria-hidden="true" /> {uploadingAvatar ? "Mengunggah..." : "Simpan Foto"}</button>}
+              </div>
+              {!profile.avatarUploadAvailable && <p className="mt-2 text-xs text-amber-700">Penyimpanan avatar belum dikonfigurasi.</p>}
               <span className="mt-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">{profile.status === "ACTIVE" ? "Aktif" : profile.status}</span>
             </div>
           </div>
+          {avatarMessage && <p className="mt-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700" role="status">{avatarMessage}</p>}
+          {avatarError && <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700" role="alert">{avatarError}</p>}
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <label className="text-sm font-semibold text-slate-700 sm:col-span-2">Nama Lengkap
               <input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} className={`${nextgenControlClass} mt-1.5 w-full`} />

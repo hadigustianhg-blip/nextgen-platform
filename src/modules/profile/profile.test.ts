@@ -26,7 +26,8 @@ describe("own profile contract", () => {
     expect(source).toContain("id: session.userId");
     expect(source).toContain("tenantId: session.tenantId");
     expect(source).toContain("outletId: session.outletId");
-    expect(source).toContain('avatarUrl: "/avatars/default-user.svg"');
+    expect(source).toContain("avatarUrl: resolveAvatarUrl(profile.avatarStorageKey)");
+    expect(source).toContain("avatarUploadAvailable: isAvatarStorageConfigured()");
     expect(source).toContain("tenant: { select: { name: true } }");
     expect(source).toContain('entityType: "USER_PROFILE_UPDATED"');
     expect(source).toContain('entityType: "USER_PROFILE_PASSWORD_UPDATED"');

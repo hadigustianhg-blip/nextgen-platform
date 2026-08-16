@@ -27,6 +27,11 @@
   --nextgen-danger-soft: #fef2f2;
   --nextgen-purple: #7c3aed;
   --nextgen-purple-soft: #f5f3ff;
+  --nextgen-radius-workspace: 24px;
+  --nextgen-radius-panel: 20px;
+  --nextgen-radius-inner: 16px;
+  --nextgen-radius-control: 12px;
+  --nextgen-radius-compact: 10px;
 }
 
 * {
@@ -41,8 +46,18 @@ body {
   margin: 0;
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-nextgen), Inter, Arial, Helvetica, sans-serif;
+  font-weight: 400;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
 
 button,
