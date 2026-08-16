@@ -142,7 +142,7 @@ export function AppHeader({ session }: { session: HeaderSession }) {
   return (
     <header
       ref={headerRef}
-      className="sticky top-0 z-20 flex min-h-[72px] w-full items-center border-b border-[var(--nextgen-border)] bg-[var(--nextgen-card)]/95 px-4 shadow-[0_1px_0_rgba(15,23,42,0.02),0_8px_30px_rgba(15,23,42,0.025)] backdrop-blur-xl md:px-6 lg:rounded-tl-[var(--nextgen-radius-workspace)] lg:px-7"
+      className="sticky top-0 z-20 mx-3 mt-3 flex min-h-[72px] w-[calc(100%-1.5rem)] items-center rounded-[var(--nextgen-radius-workspace)] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)]/95 px-4 pl-16 shadow-[0_12px_34px_rgba(15,23,42,0.06)] backdrop-blur-xl md:px-6 lg:mx-0 lg:mt-0 lg:w-full lg:px-6"
     >
       <div className="flex w-full items-center justify-between gap-3">
         <div className="relative min-w-0 flex-1 md:max-w-xl lg:max-w-[500px]">
@@ -168,9 +168,8 @@ export function AppHeader({ session }: { session: HeaderSession }) {
               }}
               onFocus={() => setSearchOpen(true)}
               onKeyDown={handleSearchKeyDown}
-              className="h-10 w-full rounded-[var(--nextgen-radius-control)] border border-slate-200 bg-slate-50/80 pl-10 pr-14 text-xs font-medium text-[var(--nextgen-text-primary)] shadow-inner shadow-slate-950/[0.015] placeholder-[var(--nextgen-text-secondary)] outline-none transition focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-500/[0.07]"
+              className="h-10 w-full rounded-[var(--nextgen-radius-control)] border border-slate-200 bg-slate-50/80 pl-10 pr-4 text-xs font-medium text-[var(--nextgen-text-primary)] shadow-inner shadow-slate-950/[0.015] placeholder-[var(--nextgen-text-secondary)] outline-none transition focus:border-blue-300 focus:bg-white focus:ring-4 focus:ring-blue-500/[0.07]"
             />
-            <span className="pointer-events-none absolute right-3 hidden rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-bold text-slate-400 shadow-sm sm:block">MENU</span>
           </div>
 
           {searchOpen && (

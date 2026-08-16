@@ -194,14 +194,14 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
       )}
       <aside
         className={[
-          "fixed inset-y-0 left-0 z-40 flex flex-col overflow-hidden border-r border-white/[0.08] bg-[#0b1739] text-white shadow-[12px_0_40px_rgba(2,6,23,0.12)] transition-[width,transform] duration-300 ease-out before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-64 before:bg-gradient-to-b before:from-blue-500/[0.12] before:to-transparent",
+          "fixed inset-y-0 left-0 z-40 flex flex-col overflow-visible bg-[#0b1739] text-white shadow-[0_18px_50px_rgba(2,6,23,0.18)] transition-[width,transform] duration-300 ease-out before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-64 before:rounded-t-[var(--nextgen-radius-workspace)] before:bg-gradient-to-b before:from-blue-500/[0.12] before:to-transparent lg:inset-y-3 lg:left-3 lg:rounded-[var(--nextgen-radius-workspace)] lg:border lg:border-white/[0.08]",
           collapsed ? "lg:w-[88px]" : "lg:w-[272px]",
           mobileOpen
             ? "w-[280px] translate-x-0"
             : "w-[280px] -translate-x-full lg:translate-x-0",
         ].join(" ")}
       >
-        <div className="relative flex h-[88px] items-center border-b border-white/[0.08] px-5">
+        <div className="relative flex h-[88px] items-center rounded-t-[var(--nextgen-radius-workspace)] border-b border-white/[0.08] px-5">
           <span className="grid size-12 shrink-0 place-items-center rounded-[var(--nextgen-radius-inner)] bg-white/[0.08] ring-1 ring-inset ring-white/10 shadow-lg shadow-slate-950/20"><NextgenBrand variant="mark" className="size-10 shrink-0" priority /></span>
           <div className={`ml-3 min-w-0 ${labelClass}`}>
             <div className="text-[15px] font-bold tracking-[0.18em]">NEXTGEN</div>
@@ -533,7 +533,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
         <form
           action="/api/auth/logout"
           method="post"
-          className="relative border-t border-white/[0.08] bg-slate-950/10 p-3.5"
+          className="relative rounded-b-[var(--nextgen-radius-workspace)] border-t border-white/[0.08] bg-slate-950/10 p-3.5"
         >
           <button
             type="submit"
@@ -552,7 +552,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
           aria-label={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
-          className="absolute right-3 top-[92px] hidden size-8 place-items-center rounded-full border border-white/15 bg-white text-[var(--nextgen-primary)] shadow-lg shadow-slate-950/20 outline-none transition hover:scale-105 hover:bg-blue-50 focus-visible:ring-2 focus-visible:ring-blue-300 motion-reduce:transform-none lg:grid"
+          className="absolute -right-4 top-[92px] z-50 hidden size-8 place-items-center rounded-full border border-blue-100 bg-white text-[var(--nextgen-primary)] shadow-lg shadow-slate-950/20 outline-none transition hover:scale-105 hover:bg-blue-50 focus-visible:ring-2 focus-visible:ring-blue-300 motion-reduce:transform-none lg:grid"
         >
           <ChevronLeft
             size={15}
@@ -564,7 +564,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
         aria-hidden="true"
         className={[
           "hidden shrink-0 transition-[width] duration-300 ease-out lg:block",
-          collapsed ? "lg:w-[88px]" : "lg:w-[272px]",
+          collapsed ? "lg:w-[100px]" : "lg:w-[284px]",
         ].join(" ")}
       />
     </>

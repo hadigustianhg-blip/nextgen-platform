@@ -445,10 +445,10 @@ export function DashboardOverviewClient({
   const stuckWithinTarget = stuck?.waybillStuckMaximum != null && stuck.totalInventory <= stuck.waybillStuckMaximum;
 
   return (
-    <div className="dashboard-workspace mx-auto min-w-0 max-w-[1800px] space-y-5 overflow-x-clip">
-      <header className="nextgen-dashboard-pattern relative overflow-hidden rounded-[var(--nextgen-radius-workspace)] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-4 shadow-[0_14px_44px_rgba(15,23,42,0.055)] sm:p-5">
+    <div className="dashboard-workspace mx-auto min-w-0 max-w-[1800px] space-y-5 overflow-x-clip rounded-[var(--nextgen-radius-workspace)] bg-white/35 p-1 sm:p-1.5">
+      <header className="nextgen-dashboard-pattern relative overflow-hidden rounded-[calc(var(--nextgen-radius-workspace)+2px)] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-5 shadow-[0_16px_48px_rgba(15,23,42,0.065)] sm:p-6">
         <span className="absolute inset-y-0 left-0 w-1 bg-[var(--nextgen-primary)]" aria-hidden="true" />
-        <div className="relative z-10 flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
+        <div className="relative z-10 flex flex-col gap-5 min-[1400px]:flex-row min-[1400px]:items-center min-[1400px]:justify-between">
         <div className="min-w-0">
           <div className="mb-2 flex items-center gap-2">
             <span className="h-px w-7 bg-[var(--nextgen-primary)]" aria-hidden="true" />
@@ -457,7 +457,7 @@ export function DashboardOverviewClient({
           <h1 className="text-2xl font-bold tracking-[-0.03em] text-[var(--nextgen-text-primary)] sm:whitespace-nowrap sm:text-[28px]">Dashboard Operasional</h1>
           <p className="mt-1.5 max-w-xl text-sm leading-5 text-[var(--nextgen-text-secondary)]">Mirror read-only seluruh operasional <strong className="font-bold text-slate-700">{outletCode ?? "outlet aktif"}</strong>.</p>
         </div>
-        <div className="flex min-w-0 flex-col items-start gap-2 2xl:items-end">
+        <div className="flex min-w-0 flex-col items-start gap-2 min-[1400px]:items-end">
           <div className="dashboard-toolbar flex w-full flex-wrap items-center gap-2 rounded-[var(--nextgen-radius-inner)] border border-[var(--nextgen-border)] bg-slate-50/80 p-1.5 shadow-inner shadow-slate-950/[0.02] xl:w-auto xl:flex-nowrap">
             <div className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 rounded-xl border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] px-3 py-1 shadow-sm sm:w-auto sm:min-w-[340px] sm:flex-none">
               <CalendarDays size={16} className="shrink-0 text-slate-500" aria-hidden="true" />
@@ -524,8 +524,8 @@ export function DashboardOverviewClient({
           <div className="dashboard-analytics-grid grid min-w-0 items-stretch gap-5 md:grid-cols-2">
             <SectionFrame title="Monitoring Performance" description="Mirror Monitoring Daily dan Monthly." href="/dashboard/monitoring/monthly" section={result.monitoring} icon={BarChart3} tone="blue" className="dashboard-monitoring-panel md:col-span-2">
               {monitoring && <>
-                <div className="mb-4 inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-[var(--nextgen-border)] bg-slate-100/75 p-1" role="tablist" aria-label="Metrik Monitoring Performance">
-                  {Object.entries(monitoringCharts).map(([key, chart]) => <button key={key} type="button" role="tab" aria-selected={monitoringChart === key} onClick={() => setMonitoringChart(key)} className={`rounded-lg px-3 py-2 text-xs font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-blue-200 ${monitoringChart === key ? "bg-[var(--nextgen-card)] text-[var(--nextgen-primary)] shadow-sm ring-1 ring-[var(--nextgen-border)]" : "text-slate-500 hover:bg-[var(--nextgen-card)] hover:text-slate-700"}`}>{chart.label}</button>)}
+                <div className="mb-4 inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-[var(--nextgen-border)] bg-slate-100/75 p-1 sm:flex-nowrap" role="tablist" aria-label="Metrik Monitoring Performance">
+                  {Object.entries(monitoringCharts).map(([key, chart]) => <button key={key} type="button" role="tab" aria-selected={monitoringChart === key} onClick={() => setMonitoringChart(key)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-blue-200 ${monitoringChart === key ? "bg-[var(--nextgen-card)] text-[var(--nextgen-primary)] shadow-sm ring-1 ring-[var(--nextgen-border)]" : "text-slate-500 hover:bg-[var(--nextgen-card)] hover:text-slate-700"}`}>{chart.label}</button>)}
                 </div>
                 <div className="rounded-[var(--nextgen-radius-inner)] border border-[var(--nextgen-border)] bg-gradient-to-b from-slate-50/80 to-white px-2 pb-2 pt-3 shadow-inner shadow-slate-950/[0.015] sm:px-3">
                   <DashboardChart rows={monitoringRows} series={activeMonitoringChart.series} kind={activeMonitoringChart.kind} target={"target" in activeMonitoringChart ? activeMonitoringChart.target : undefined} variant="bar" reducedMotion={reducedMotion} />
