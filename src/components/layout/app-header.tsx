@@ -142,10 +142,10 @@ export function AppHeader({ session }: { session: HeaderSession }) {
   return (
     <header
       ref={headerRef}
-      className="sticky top-0 z-20 flex min-h-[72px] w-full items-center border-b border-[var(--nextgen-border)] bg-[var(--nextgen-card)]/95 px-4 shadow-[0_1px_0_rgba(15,23,42,0.02),0_8px_30px_rgba(15,23,42,0.025)] backdrop-blur-xl md:px-6 lg:px-7"
+      className="sticky top-0 z-20 flex min-h-[72px] w-full items-center border-b border-[var(--nextgen-border)] bg-[var(--nextgen-card)]/95 px-4 shadow-[0_1px_0_rgba(15,23,42,0.02),0_8px_30px_rgba(15,23,42,0.025)] backdrop-blur-xl md:px-6 lg:rounded-tl-[var(--nextgen-radius-workspace)] lg:px-7"
     >
       <div className="flex w-full items-center justify-between gap-3">
-        <div className="relative min-w-0 flex-1 md:max-w-xl">
+        <div className="relative min-w-0 flex-1 md:max-w-xl lg:max-w-[500px]">
           <div className="group relative flex items-center">
             <Search
               size={18}

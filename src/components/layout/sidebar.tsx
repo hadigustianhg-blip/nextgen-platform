@@ -552,7 +552,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
           aria-label={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
-          className="absolute -right-3 top-[92px] hidden size-7 place-items-center rounded-full border border-blue-100 bg-white text-[var(--nextgen-primary)] shadow-lg shadow-slate-950/10 outline-none transition hover:scale-105 hover:bg-blue-50 focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transform-none lg:grid"
+          className="absolute right-3 top-[92px] hidden size-8 place-items-center rounded-full border border-white/15 bg-white text-[var(--nextgen-primary)] shadow-lg shadow-slate-950/20 outline-none transition hover:scale-105 hover:bg-blue-50 focus-visible:ring-2 focus-visible:ring-blue-300 motion-reduce:transform-none lg:grid"
         >
           <ChevronLeft
             size={15}

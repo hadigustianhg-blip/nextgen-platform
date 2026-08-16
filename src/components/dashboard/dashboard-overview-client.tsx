@@ -448,7 +448,7 @@ export function DashboardOverviewClient({
     <div className="dashboard-workspace mx-auto min-w-0 max-w-[1800px] space-y-5 overflow-x-clip">
       <header className="nextgen-dashboard-pattern relative overflow-hidden rounded-[var(--nextgen-radius-workspace)] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-4 shadow-[0_14px_44px_rgba(15,23,42,0.055)] sm:p-5">
         <span className="absolute inset-y-0 left-0 w-1 bg-[var(--nextgen-primary)]" aria-hidden="true" />
-        <div className="relative z-10 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="relative z-10 flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
         <div className="min-w-0">
           <div className="mb-2 flex items-center gap-2">
             <span className="h-px w-7 bg-[var(--nextgen-primary)]" aria-hidden="true" />
@@ -457,13 +457,13 @@ export function DashboardOverviewClient({
           <h1 className="text-2xl font-bold tracking-[-0.03em] text-[var(--nextgen-text-primary)] sm:whitespace-nowrap sm:text-[28px]">Dashboard Operasional</h1>
           <p className="mt-1.5 max-w-xl text-sm leading-5 text-[var(--nextgen-text-secondary)]">Mirror read-only seluruh operasional <strong className="font-bold text-slate-700">{outletCode ?? "outlet aktif"}</strong>.</p>
         </div>
-        <div className="flex min-w-0 flex-col items-start gap-2 xl:items-end">
-          <div className="dashboard-toolbar flex w-full flex-wrap items-center gap-1.5 rounded-[var(--nextgen-radius-inner)] border border-[var(--nextgen-border)] bg-slate-50/80 p-1.5 shadow-inner shadow-slate-950/[0.02] xl:w-auto">
-            <div className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] px-3 py-1 shadow-sm sm:w-auto sm:flex-none">
+        <div className="flex min-w-0 flex-col items-start gap-2 2xl:items-end">
+          <div className="dashboard-toolbar flex w-full flex-wrap items-center gap-2 rounded-[var(--nextgen-radius-inner)] border border-[var(--nextgen-border)] bg-slate-50/80 p-1.5 shadow-inner shadow-slate-950/[0.02] xl:w-auto xl:flex-nowrap">
+            <div className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 rounded-xl border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] px-3 py-1 shadow-sm sm:w-auto sm:min-w-[340px] sm:flex-none">
               <CalendarDays size={16} className="shrink-0 text-slate-500" aria-hidden="true" />
-              <input aria-label="Tanggal Awal" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className={`${nextgenControlClass} dashboard-date-input min-w-0 border-0 bg-transparent px-1 shadow-none focus:ring-0`} />
-              <span className="text-slate-300">–</span>
-              <input aria-label="Tanggal Akhir" type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className={`${nextgenControlClass} dashboard-date-input min-w-0 border-0 bg-transparent px-1 shadow-none focus:ring-0`} />
+              <input aria-label="Tanggal Awal" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className={`${nextgenControlClass} dashboard-date-input min-w-0 whitespace-nowrap border-0 bg-transparent px-1 font-medium leading-none shadow-none focus:ring-0`} />
+              <span className="px-0.5 text-center text-slate-300">–</span>
+              <input aria-label="Tanggal Akhir" type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className={`${nextgenControlClass} dashboard-date-input min-w-0 whitespace-nowrap border-0 bg-transparent px-1 font-medium leading-none shadow-none focus:ring-0`} />
             </div>
             <button type="button" onClick={() => applyPeriod({ startDate: jakartaToday(), endDate: jakartaToday() })} className={nextgenButtonClass + " border border-transparent bg-transparent text-slate-600 hover:border-[var(--nextgen-border)] hover:bg-[var(--nextgen-card)]"}>Hari Ini</button>
             <button type="button" onClick={() => applyPeriod(monthRange(jakartaToday()))} className={nextgenButtonClass + " border border-transparent bg-transparent text-slate-600 hover:border-[var(--nextgen-border)] hover:bg-[var(--nextgen-card)]"}>Bulan Ini</button>
@@ -633,7 +633,13 @@ export function DashboardOverviewClient({
         }
 
         .dashboard-date-input {
-          width: 7.625rem;
+          width: 8.75rem;
+        }
+
+        @media (max-width: 639px) {
+          .dashboard-date-input {
+            width: 100%;
+          }
         }
 
         @media (min-width: 640px) and (max-width: 1023px) {
