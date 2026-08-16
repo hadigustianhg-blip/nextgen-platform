@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
+import { resolveAvatarUrl } from "@/modules/profile/avatar-storage";
 import { getSessionCookieName } from "./constants";
 
 export interface SessionContext {
@@ -10,6 +11,7 @@ export interface SessionContext {
   tenantName: string;
   userId: string;
   userName: string;
+  avatarUrl?: string;
   email: string;
   outletId: string | null;
   outletCode: string | null;
@@ -82,6 +84,7 @@ async function resolveSession(): Promise<SessionContext | null> {
       user: {
         select: {
           name: true,
+          avatarStorageKey: true,
           email: true,
           status: true,
           roles: { select: { role: { select: { code: true } } } },
@@ -105,6 +108,7 @@ async function resolveSession(): Promise<SessionContext | null> {
     tenantName: session.tenant.name.trim() || "Tenant",
     userId: session.userId,
     userName: session.user.name,
+    avatarUrl: resolveAvatarUrl(session.user.avatarStorageKey),
     email: session.user.email,
     outletId: session.outletId,
     outletCode: session.outlet?.code ?? null,

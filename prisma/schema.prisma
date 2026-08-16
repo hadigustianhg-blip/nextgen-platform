@@ -401,6 +401,8 @@ model User {
   passwordHash                        String
   status                              UserStatus                  @default(ACTIVE)
   lastLoginAt                         DateTime?
+  avatarStorageKey                    String?
+  avatarUpdatedAt                     DateTime?
   createdAt                           DateTime                    @default(now())
   updatedAt                           DateTime                    @updatedAt
   tenant                              Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)

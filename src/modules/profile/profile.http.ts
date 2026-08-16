@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ProfileError } from "./profile.service";
+import { ProfileError } from "./profile.error";
 
 export function profileErrorResponse(error: unknown) {
   if (error instanceof ProfileError) {

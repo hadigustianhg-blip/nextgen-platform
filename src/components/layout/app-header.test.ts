@@ -66,6 +66,7 @@ describe("premium global app header", () => {
   it("uses the existing avatar and logout flow", async () => {
     const source = await readFile(new URL("./app-header.tsx", import.meta.url), "utf8");
     expect(source).toContain("<UserAvatar");
+    expect(source).toContain("src={session.avatarUrl}");
     expect(source).toContain('action="/api/auth/logout"');
     expect(source).toContain('method="post"');
     expect(source).toContain("session.userName");

@@ -21,7 +21,7 @@ import {
 
 type HeaderSession = Pick<
   SessionContext,
-  "userName" | "roles" | "outletCode" | "tenantName"
+  "userName" | "avatarUrl" | "roles" | "outletCode" | "tenantName"
 >;
 
 type PendingNotificationItem = {
@@ -301,7 +301,7 @@ export function AppHeader({ session }: { session: HeaderSession }) {
               }}
               className="flex h-11 items-center gap-2.5 rounded-[var(--nextgen-radius-control)] border border-transparent px-1 outline-none transition hover:border-[var(--nextgen-border)] hover:bg-slate-50/80 focus-visible:ring-2 focus-visible:ring-blue-300 lg:pl-1 lg:pr-2"
             >
-              <UserAvatar name={session.userName} className="size-9 rounded-[10px] ring-2 ring-white shadow-sm" />
+              <UserAvatar name={session.userName} src={session.avatarUrl} className="size-9 rounded-[10px] ring-2 ring-white shadow-sm" />
               <span className="hidden max-w-36 min-w-0 text-left lg:block">
                 <span className="block truncate text-xs font-semibold leading-4 text-[var(--nextgen-text-primary)]">
                   {session.userName}
