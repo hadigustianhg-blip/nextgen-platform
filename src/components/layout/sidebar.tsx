@@ -170,7 +170,8 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
   const itemLayout = collapsed ? "lg:justify-center lg:gap-0" : "";
   const childLayout = collapsed
     ? "lg:ml-0 lg:justify-center lg:px-3"
-    : "lg:ml-5";
+    : "lg:ml-3";
+  const submenuLayout = collapsed ? "lg:ml-0 lg:border-l-0 lg:pl-0" : "";
 
   return (
     <>
@@ -179,7 +180,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
         aria-label="Buka navigasi"
         aria-expanded={mobileOpen}
         onClick={() => setMobileOpen(true)}
-        className="fixed left-4 top-4 z-30 rounded-xl border border-slate-200 bg-white p-2.5 text-slate-700 shadow-sm outline-none transition focus-visible:ring-2 focus-visible:ring-blue-500 lg:hidden"
+        className="fixed left-4 top-4 z-30 rounded-xl border border-blue-100 bg-white p-2.5 text-[var(--nextgen-primary)] shadow-lg shadow-slate-950/10 outline-none transition focus-visible:ring-2 focus-visible:ring-blue-500 lg:hidden"
       >
         <Menu size={20} />
       </button>
@@ -193,18 +194,18 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
       )}
       <aside
         className={[
-          "fixed inset-y-0 left-0 z-40 flex flex-col bg-[#0b1739] text-white transition-[width,transform] duration-300 ease-out",
-          collapsed ? "lg:w-[86px]" : "lg:w-[264px]",
+          "fixed inset-y-0 left-0 z-40 flex flex-col overflow-hidden border-r border-white/[0.08] bg-[#0b1739] text-white shadow-[12px_0_40px_rgba(2,6,23,0.12)] transition-[width,transform] duration-300 ease-out before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-64 before:bg-gradient-to-b before:from-blue-500/[0.12] before:to-transparent",
+          collapsed ? "lg:w-[88px]" : "lg:w-[272px]",
           mobileOpen
             ? "w-[280px] translate-x-0"
             : "w-[280px] -translate-x-full lg:translate-x-0",
         ].join(" ")}
       >
-        <div className="flex h-20 items-center border-b border-white/10 px-5">
-          <NextgenBrand variant="mark" className="size-10 shrink-0" priority />
+        <div className="relative flex h-[88px] items-center border-b border-white/[0.08] px-5">
+          <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-white/[0.08] ring-1 ring-inset ring-white/10 shadow-lg shadow-slate-950/20"><NextgenBrand variant="mark" className="size-10 shrink-0" priority /></span>
           <div className={`ml-3 min-w-0 ${labelClass}`}>
-            <div className="font-extrabold tracking-[0.16em]">NEXTGEN</div>
-            <div className="text-[11px] text-blue-200">Operations System</div>
+            <div className="text-[15px] font-black tracking-[0.18em]">NEXTGEN</div>
+            <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-200/75">Operations System</div>
           </div>
           <button
             type="button"
@@ -217,7 +218,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
         </div>
 
         <nav
-          className="mt-5 flex-1 space-y-1 overflow-y-auto px-3"
+          className="mt-5 relative flex-1 space-y-1 overflow-y-auto px-3.5 pb-4 [scrollbar-color:rgba(148,163,184,0.35)_transparent] [scrollbar-width:thin]"
           aria-label="Navigasi utama"
         >
           {navigation.slice(0, 1).map((item) => {
@@ -232,14 +233,14 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
                   closeMobile();
                 }}
                 className={[
-                  "flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-300",
+                  "group flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold outline-none transition-all focus-visible:ring-2 focus-visible:ring-blue-300",
                   active
-                    ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30"
+                    ? "bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-950/30 ring-1 ring-inset ring-white/15"
                     : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
                   itemLayout,
                 ].join(" ")}
               >
-                <item.icon size={19} className="shrink-0" />
+                <span className={`grid size-8 shrink-0 place-items-center rounded-[10px] transition ${active ? "bg-white/15" : "bg-white/[0.055] group-hover:bg-white/10"}`}><item.icon size={18} /></span>
                 <span className={labelClass}>{item.label}</span>
               </Link>
             );
@@ -253,11 +254,11 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
               aria-controls="monitoring-submenu"
               onClick={() => toggleGroup("monitoring")}
               className={[
-                "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300",
+                "group flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-300 outline-none transition-all hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300 aria-expanded:bg-white/[0.065] aria-expanded:text-white",
                 itemLayout,
               ].join(" ")}
             >
-              <BarChart3 size={19} className="shrink-0" />
+              <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-white/[0.055] transition group-hover:bg-white/10"><BarChart3 size={18} /></span>
               <span className={labelClass}>Monitoring</span>
               <ChevronDown
                 size={15}
@@ -265,7 +266,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
               />
             </button>
             {monitoringVisible && (
-              <div id="monitoring-submenu">
+              <div id="monitoring-submenu" className={`ml-7 border-l border-blue-300/20 py-1 pl-1.5 ${submenuLayout}`}>
                 <SidebarChild
                   href="/dashboard/monitoring/daily"
                   label="Monitoring Daily"
@@ -298,11 +299,11 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
               aria-controls="settlement-submenu"
               onClick={() => toggleGroup("settlement")}
               className={[
-                "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300",
+                "group flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-300 outline-none transition-all hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300 aria-expanded:bg-white/[0.065] aria-expanded:text-white",
                 itemLayout,
               ].join(" ")}
             >
-              <WalletCards size={19} className="shrink-0" />
+              <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-white/[0.055] transition group-hover:bg-white/10"><WalletCards size={18} /></span>
               <span className={labelClass}>Settlement Center</span>
               <ChevronDown
                 size={15}
@@ -310,7 +311,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
               />
             </button>
             {settlementVisible && (
-              <div id="settlement-submenu">
+              <div id="settlement-submenu" className={`ml-7 border-l border-blue-300/20 py-1 pl-1.5 ${submenuLayout}`}>
                 <SidebarChild
                   href="/dashboard/settlement/pickup"
                   label="Pickup Settlement"
@@ -355,11 +356,11 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
               aria-controls="payment-submenu"
               onClick={() => toggleGroup("payment")}
               className={[
-                "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300",
+                "group flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-300 outline-none transition-all hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300 aria-expanded:bg-white/[0.065] aria-expanded:text-white",
                 itemLayout,
               ].join(" ")}
             >
-              <CreditCard size={19} className="shrink-0" />
+              <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-white/[0.055] transition group-hover:bg-white/10"><CreditCard size={18} /></span>
               <span className={labelClass}>Payment</span>
               <ChevronDown
                 size={15}
@@ -367,7 +368,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
               />
             </button>
             {paymentVisible && (
-              <div id="payment-submenu">
+              <div id="payment-submenu" className={`ml-7 border-l border-blue-300/20 py-1 pl-1.5 ${submenuLayout}`}>
                 <SidebarChild
                   href="/dashboard/payment/settlement"
                   label="Payment Settlement"
@@ -406,12 +407,12 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
             <button type="button" title={collapsed ? "Quality Control" : undefined}
               aria-expanded={qualityControlVisible} aria-controls="quality-control-submenu"
               onClick={() => toggleGroup("quality-control")}
-              className={["flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300", itemLayout].join(" ")}>
-              <ShieldCheck size={19} className="shrink-0" />
+              className={["group flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-300 outline-none transition-all hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300 aria-expanded:bg-white/[0.065] aria-expanded:text-white", itemLayout].join(" ")}>
+              <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-white/[0.055] transition group-hover:bg-white/10"><ShieldCheck size={18} /></span>
               <span className={labelClass}>Quality Control</span>
               <ChevronDown size={15} className={`${labelClass} ml-auto transition-transform ${qualityControlVisible ? "rotate-180" : ""}`} />
             </button>
-            {qualityControlVisible && <div id="quality-control-submenu">
+            {qualityControlVisible && <div id="quality-control-submenu" className={`ml-7 border-l border-blue-300/20 py-1 pl-1.5 ${submenuLayout}`}>
               <SidebarChild href="/dashboard/quality-control/sla-cut-off" label="SLA Cut Off"
                 active={pathname.startsWith("/dashboard/quality-control/sla-cut-off")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
@@ -435,12 +436,12 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
             <button type="button" title={collapsed ? "Finance & HR" : undefined}
               aria-expanded={financeVisible} aria-controls="finance-submenu"
               onClick={() => toggleGroup("finance")}
-              className={["flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300", itemLayout].join(" ")}>
-              <UsersRound size={19} className="shrink-0" />
+              className={["group flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-300 outline-none transition-all hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300 aria-expanded:bg-white/[0.065] aria-expanded:text-white", itemLayout].join(" ")}>
+              <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-white/[0.055] transition group-hover:bg-white/10"><UsersRound size={18} /></span>
               <span className={labelClass}>Finance & HR</span>
               <ChevronDown size={15} className={`${labelClass} ml-auto transition-transform ${financeVisible ? "rotate-180" : ""}`} />
             </button>
-            {financeVisible && <div id="finance-submenu">
+            {financeVisible && <div id="finance-submenu" className={`ml-7 border-l border-blue-300/20 py-1 pl-1.5 ${submenuLayout}`}>
               {canReadAttendance && <SidebarChild href="/dashboard/hr/attendance" label="Absensi"
                 active={pathname.startsWith("/dashboard/hr/attendance")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
@@ -480,12 +481,12 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
             <button type="button" title={collapsed ? "Pengaturan" : undefined}
               aria-expanded={settingsVisible} aria-controls="settings-submenu"
               onClick={() => toggleGroup("settings")}
-              className={["flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300", itemLayout].join(" ")}>
-              <Settings size={19} className="shrink-0" />
+              className={["group flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-300 outline-none transition-all hover:bg-white/[0.07] hover:text-white focus-visible:ring-2 focus-visible:ring-blue-300 aria-expanded:bg-white/[0.065] aria-expanded:text-white", itemLayout].join(" ")}>
+              <span className="grid size-8 shrink-0 place-items-center rounded-[10px] bg-white/[0.055] transition group-hover:bg-white/10"><Settings size={18} /></span>
               <span className={labelClass}>Pengaturan</span>
               <ChevronDown size={15} className={`${labelClass} ml-auto transition-transform ${settingsVisible ? "rotate-180" : ""}`} />
             </button>
-            {settingsVisible && <div id="settings-submenu">
+            {settingsVisible && <div id="settings-submenu" className={`ml-7 border-l border-blue-300/20 py-1 pl-1.5 ${submenuLayout}`}>
               {[
                 ["Profil Bisnis", "/dashboard/settings/business-profile"],
                 ["User & Hak Akses", "/dashboard/settings/users"],
@@ -532,13 +533,13 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
         <form
           action="/api/auth/logout"
           method="post"
-          className="border-t border-white/10 p-3"
+          className="relative border-t border-white/[0.08] bg-slate-950/10 p-3.5"
         >
           <button
             type="submit"
             title={collapsed ? "Logout" : undefined}
             className={[
-              "flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium text-slate-300 outline-none transition-colors hover:bg-red-500/10 hover:text-red-200 focus-visible:ring-2 focus-visible:ring-red-300",
+              "flex h-11 w-full items-center gap-3 rounded-xl border border-transparent px-3 text-sm font-semibold text-slate-300 outline-none transition-all hover:border-red-300/10 hover:bg-red-500/10 hover:text-red-200 focus-visible:ring-2 focus-visible:ring-red-300",
               itemLayout,
             ].join(" ")}
           >
@@ -551,7 +552,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
           aria-label={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
-          className="absolute -right-3 top-24 hidden size-7 place-items-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-md outline-none transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 lg:grid"
+          className="absolute -right-3 top-24 hidden size-7 place-items-center rounded-full border border-blue-100 bg-white text-[var(--nextgen-primary)] shadow-lg shadow-slate-950/10 outline-none transition hover:scale-105 hover:bg-blue-50 focus-visible:ring-2 focus-visible:ring-blue-500 motion-reduce:transform-none lg:grid"
         >
           <ChevronLeft
             size={15}
@@ -563,7 +564,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
         aria-hidden="true"
         className={[
           "hidden shrink-0 transition-[width] duration-300 ease-out lg:block",
-          collapsed ? "lg:w-[86px]" : "lg:w-[264px]",
+          collapsed ? "lg:w-[88px]" : "lg:w-[272px]",
         ].join(" ")}
       />
     </>
@@ -595,14 +596,14 @@ function SidebarChild({
       title={collapsed ? label : undefined}
       onClick={onNavigate}
       className={[
-        "mt-1 flex h-10 items-center gap-3 rounded-xl px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-300",
+        "group mt-1 flex h-9 items-center gap-2.5 rounded-[10px] px-2.5 text-[13px] font-medium outline-none transition-all focus-visible:ring-2 focus-visible:ring-blue-300",
         active
-          ? "bg-blue-500 text-white shadow-lg shadow-blue-950/30"
-          : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
+          ? "bg-blue-500/95 text-white shadow-md shadow-blue-950/20 ring-1 ring-inset ring-white/10"
+          : "text-slate-300/90 hover:translate-x-0.5 hover:bg-white/[0.065] hover:text-white motion-reduce:transform-none",
         layoutClass,
       ].join(" ")}
     >
-      <span className="shrink-0">{icon}</span>
+      <span className={`grid size-6 shrink-0 place-items-center rounded-md transition ${active ? "bg-white/15" : "text-blue-200/80 group-hover:text-white"}`}>{icon}</span>
       <span className={labelClass}>{label}</span>
     </Link>
   );
