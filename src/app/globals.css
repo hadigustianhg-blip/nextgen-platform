@@ -27,6 +27,11 @@
   --nextgen-danger-soft: #fef2f2;
   --nextgen-purple: #7c3aed;
   --nextgen-purple-soft: #f5f3ff;
+  --nextgen-radius-workspace: 24px;
+  --nextgen-radius-panel: 20px;
+  --nextgen-radius-inner: 16px;
+  --nextgen-radius-control: 12px;
+  --nextgen-radius-compact: 10px;
 }
 
 * {

@@ -178,7 +178,7 @@ function Donut({
   ];
   const total = data.reduce((sum, item) => sum + item.value, 0);
   return (
-    <div className="relative h-44 w-full rounded-2xl bg-slate-50/70 ring-1 ring-inset ring-[var(--nextgen-border)]">
+    <div className="relative h-44 w-full rounded-[var(--nextgen-radius-inner)] bg-slate-50/70 ring-1 ring-inset ring-[var(--nextgen-border)]">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie data={data} dataKey="value" nameKey="name" innerRadius={52} outerRadius={70} paddingAngle={2} stroke="none" isAnimationActive={!reducedMotion} animationDuration={750} animationEasing="ease-out" />
@@ -224,10 +224,10 @@ function DashboardMetricCard({
 }) {
   return (
     <AppCard
-      className="dashboard-metric-card flex h-auto min-h-28 min-w-0 flex-col border-[var(--nextgen-border)] p-4 shadow-none transition duration-300 motion-safe:hover:-translate-y-0.5 motion-safe:hover:border-blue-200 motion-safe:hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)] motion-reduce:transform-none motion-reduce:transition-none"
+      className="dashboard-metric-card flex h-auto min-h-28 min-w-0 flex-col rounded-[var(--nextgen-radius-inner)] border-[var(--nextgen-border)] p-4 shadow-none transition duration-300 motion-safe:hover:-translate-y-0.5 motion-safe:hover:border-blue-200 motion-safe:hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)] motion-reduce:transform-none motion-reduce:transition-none"
       style={{ "--dashboard-delay": `${Math.min(index, 8) * 45}ms` } as CSSProperties}
     >
-      <span className={`grid size-10 place-items-center rounded-[13px] ring-1 ring-inset ring-black/[0.03] ${metricToneClasses[tone]}`} aria-hidden="true">
+      <span className={`grid size-10 place-items-center rounded-[var(--nextgen-radius-control)] ring-1 ring-inset ring-black/[0.03] ${metricToneClasses[tone]}`} aria-hidden="true">
         <Icon size={19} strokeWidth={2} />
       </span>
       <p className="mt-3 text-xs font-semibold text-slate-500">{label}</p>
@@ -280,10 +280,10 @@ function SectionFrame({
   className?: string;
 }) {
   return (
-    <AppCard className={`section-frame h-full min-h-0 min-w-0 overflow-visible rounded-[20px] border-[var(--nextgen-border)] p-4 shadow-[0_10px_35px_rgba(15,23,42,0.045)] transition duration-300 motion-safe:hover:-translate-y-px motion-safe:hover:border-slate-300 motion-safe:hover:shadow-[0_16px_42px_rgba(15,23,42,0.075)] motion-reduce:transform-none motion-reduce:transition-none sm:p-5 ${className}`}>
+    <AppCard className={`section-frame h-full min-h-0 min-w-0 overflow-visible rounded-[var(--nextgen-radius-panel)] border-[var(--nextgen-border)] p-4 shadow-[0_10px_35px_rgba(15,23,42,0.045)] transition duration-300 motion-safe:hover:-translate-y-px motion-safe:hover:border-slate-300 motion-safe:hover:shadow-[0_16px_42px_rgba(15,23,42,0.075)] motion-reduce:transform-none motion-reduce:transition-none sm:p-5 ${className}`}>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4 border-b border-[var(--nextgen-border)] pb-4">
         <div className="flex min-w-0 items-start gap-3">
-          <span className={`grid size-10 shrink-0 place-items-center rounded-[13px] ring-1 ring-inset ring-black/[0.03] ${sectionToneClasses[tone]}`} aria-hidden="true">
+          <span className={`grid size-10 shrink-0 place-items-center rounded-[var(--nextgen-radius-control)] ring-1 ring-inset ring-black/[0.03] ${sectionToneClasses[tone]}`} aria-hidden="true">
             <Icon size={20} strokeWidth={2} />
           </span>
           <div className="min-w-0">
@@ -328,13 +328,13 @@ function MonitoringKpi({
 }) {
   return (
     <div
-      className="dashboard-metric-card group relative flex min-h-[132px] min-w-0 flex-col overflow-hidden rounded-2xl border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)] transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_14px_34px_rgba(15,23,42,0.07)] motion-reduce:transform-none"
+      className="dashboard-metric-card group relative flex min-h-[132px] min-w-0 flex-col overflow-hidden rounded-[var(--nextgen-radius-inner)] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-4 shadow-[0_8px_24px_rgba(15,23,42,0.035)] transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-[0_14px_34px_rgba(15,23,42,0.07)] motion-reduce:transform-none"
       style={{ "--dashboard-delay": `${index * 45}ms` } as CSSProperties}
     >
       <span className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-[var(--nextgen-primary)] opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
       <div className="flex items-start justify-between gap-3">
         <p className="min-w-0 pt-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-500">{label}</p>
-        <span className={`grid size-9 shrink-0 place-items-center rounded-xl ring-1 ring-inset ring-black/[0.03] transition-transform motion-safe:group-hover:scale-105 ${metricToneClasses[tone]}`} aria-hidden="true">
+        <span className={`grid size-9 shrink-0 place-items-center rounded-[var(--nextgen-radius-control)] ring-1 ring-inset ring-black/[0.03] transition-transform motion-safe:group-hover:scale-105 ${metricToneClasses[tone]}`} aria-hidden="true">
           <Icon size={17} strokeWidth={2} />
         </span>
       </div>
@@ -446,7 +446,7 @@ export function DashboardOverviewClient({
 
   return (
     <div className="dashboard-workspace mx-auto min-w-0 max-w-[1800px] space-y-5 overflow-x-clip">
-      <header className="nextgen-dashboard-pattern relative overflow-hidden rounded-[22px] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-4 shadow-[0_14px_44px_rgba(15,23,42,0.055)] sm:p-5">
+      <header className="nextgen-dashboard-pattern relative overflow-hidden rounded-[var(--nextgen-radius-workspace)] border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] p-4 shadow-[0_14px_44px_rgba(15,23,42,0.055)] sm:p-5">
         <span className="absolute inset-y-0 left-0 w-1 bg-[var(--nextgen-primary)]" aria-hidden="true" />
         <div className="relative z-10 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
@@ -458,7 +458,7 @@ export function DashboardOverviewClient({
           <p className="mt-1.5 max-w-xl text-sm leading-5 text-[var(--nextgen-text-secondary)]">Mirror read-only seluruh operasional <strong className="font-bold text-slate-700">{outletCode ?? "outlet aktif"}</strong>.</p>
         </div>
         <div className="flex min-w-0 flex-col items-start gap-2 xl:items-end">
-          <div className="dashboard-toolbar flex w-full flex-wrap items-center gap-1.5 rounded-2xl border border-[var(--nextgen-border)] bg-slate-50/80 p-1.5 shadow-inner shadow-slate-950/[0.02] xl:w-auto">
+          <div className="dashboard-toolbar flex w-full flex-wrap items-center gap-1.5 rounded-[var(--nextgen-radius-inner)] border border-[var(--nextgen-border)] bg-slate-50/80 p-1.5 shadow-inner shadow-slate-950/[0.02] xl:w-auto">
             <div className="flex w-full min-w-0 items-center gap-2 rounded-xl border border-[var(--nextgen-border)] bg-[var(--nextgen-card)] px-3 py-1 shadow-sm sm:w-auto sm:flex-none">
               <CalendarDays size={16} className="shrink-0 text-slate-500" aria-hidden="true" />
               <input aria-label="Tanggal Awal" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className={`${nextgenControlClass} dashboard-date-input min-w-0 border-0 bg-transparent px-1 shadow-none focus:ring-0`} />
@@ -527,7 +527,7 @@ export function DashboardOverviewClient({
                 <div className="mb-4 inline-flex max-w-full flex-wrap gap-1 rounded-xl border border-[var(--nextgen-border)] bg-slate-100/75 p-1" role="tablist" aria-label="Metrik Monitoring Performance">
                   {Object.entries(monitoringCharts).map(([key, chart]) => <button key={key} type="button" role="tab" aria-selected={monitoringChart === key} onClick={() => setMonitoringChart(key)} className={`rounded-lg px-3 py-2 text-xs font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-blue-200 ${monitoringChart === key ? "bg-[var(--nextgen-card)] text-[var(--nextgen-primary)] shadow-sm ring-1 ring-[var(--nextgen-border)]" : "text-slate-500 hover:bg-[var(--nextgen-card)] hover:text-slate-700"}`}>{chart.label}</button>)}
                 </div>
-                <div className="rounded-2xl border border-[var(--nextgen-border)] bg-gradient-to-b from-slate-50/80 to-white px-2 pb-2 pt-3 shadow-inner shadow-slate-950/[0.015] sm:px-3">
+                <div className="rounded-[var(--nextgen-radius-inner)] border border-[var(--nextgen-border)] bg-gradient-to-b from-slate-50/80 to-white px-2 pb-2 pt-3 shadow-inner shadow-slate-950/[0.015] sm:px-3">
                   <DashboardChart rows={monitoringRows} series={activeMonitoringChart.series} kind={activeMonitoringChart.kind} target={"target" in activeMonitoringChart ? activeMonitoringChart.target : undefined} variant="bar" reducedMotion={reducedMotion} />
                 </div>
               </>}
@@ -535,18 +535,18 @@ export function DashboardOverviewClient({
 
             <SectionFrame title="SLA Cut Off" description="Rata-rata dan tren SLA harian." href="/dashboard/quality-control/sla-cut-off" section={result.sla} icon={Gauge} tone="emerald">
               {sla && <div className="space-y-4">
-                <div className="grid items-center gap-4 rounded-2xl border border-emerald-100/80 bg-gradient-to-br from-emerald-50/80 via-white to-white p-4 sm:grid-cols-[minmax(110px,0.8fr)_minmax(150px,1.2fr)] xl:grid-cols-1">
+                <div className="grid items-center gap-4 rounded-[var(--nextgen-radius-inner)] border border-emerald-100/80 bg-gradient-to-br from-emerald-50/80 via-white to-white p-4 sm:grid-cols-[minmax(110px,0.8fr)_minmax(150px,1.2fr)] xl:grid-cols-1">
                   <div><p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">Average SLA</p><p className="mt-2 text-4xl font-bold tracking-tight text-slate-950">{percent(sla.averageSla)}</p><p className="mt-3 inline-flex rounded-full bg-emerald-100/80 px-2.5 py-1 text-xs font-semibold text-emerald-800">Target {percent(sla.target)}</p></div>
                   <Donut value={Math.min(100, sla.averageSla)} remaining={Math.max(0, 100 - sla.averageSla)} valueLabel="Achieved" remainingLabel="Remaining" center={percent(sla.averageSla)} reducedMotion={reducedMotion} />
                 </div>
-                <div className="rounded-2xl border border-[var(--nextgen-border)] bg-slate-50/35 px-2 pb-2 pt-3">
+                <div className="rounded-[var(--nextgen-radius-inner)] border border-[var(--nextgen-border)] bg-slate-50/35 px-2 pb-2 pt-3">
                   <DashboardChart rows={sla.daily} kind="percent" target={sla.target} variant="bar" compact reducedMotion={reducedMotion} series={[{ key: "sla", label: "SLA Harian", color: "var(--nextgen-primary)" }]} />
                 </div>
               </div>}
             </SectionFrame>
 
             <SectionFrame title="Problem Waybill Stuck" description="Waybill stuck hari ini." href="/dashboard/quality-control/waybill-stuck-delivery" section={result.stuckDelivery} icon={PackageSearch} tone="amber">
-              {stuck && <div className="relative flex min-h-0 flex-col justify-between overflow-hidden rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50/80 via-white to-white p-4">
+              {stuck && <div className="relative flex min-h-0 flex-col justify-between overflow-hidden rounded-[var(--nextgen-radius-inner)] border border-amber-100 bg-gradient-to-br from-amber-50/80 via-white to-white p-4">
                 <span className="pointer-events-none absolute -right-12 -top-12 size-32 rounded-full bg-amber-100/55 blur-2xl" aria-hidden="true" />
                 <div>
                   <div className="relative flex flex-wrap items-center justify-between gap-2">

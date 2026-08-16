@@ -202,7 +202,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
         ].join(" ")}
       >
         <div className="relative flex h-[88px] items-center border-b border-white/[0.08] px-5">
-          <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-white/[0.08] ring-1 ring-inset ring-white/10 shadow-lg shadow-slate-950/20"><NextgenBrand variant="mark" className="size-10 shrink-0" priority /></span>
+          <span className="grid size-12 shrink-0 place-items-center rounded-[var(--nextgen-radius-inner)] bg-white/[0.08] ring-1 ring-inset ring-white/10 shadow-lg shadow-slate-950/20"><NextgenBrand variant="mark" className="size-10 shrink-0" priority /></span>
           <div className={`ml-3 min-w-0 ${labelClass}`}>
             <div className="text-[15px] font-bold tracking-[0.18em]">NEXTGEN</div>
             <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-200/75">Operations System</div>
@@ -233,14 +233,14 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
                   closeMobile();
                 }}
                 className={[
-                  "group flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold outline-none transition-all focus-visible:ring-2 focus-visible:ring-blue-300",
+                  "group flex h-11 items-center gap-3 rounded-[var(--nextgen-radius-control)] px-3 text-sm font-semibold outline-none transition-all focus-visible:ring-2 focus-visible:ring-blue-300",
                   active
                     ? "bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-950/30 ring-1 ring-inset ring-white/15"
                     : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
                   itemLayout,
                 ].join(" ")}
               >
-                <span className={`grid size-8 shrink-0 place-items-center rounded-[10px] transition ${active ? "bg-white/15" : "bg-white/[0.055] group-hover:bg-white/10"}`}><item.icon size={18} /></span>
+                <span className={`grid size-8 shrink-0 place-items-center rounded-[var(--nextgen-radius-control)] transition ${active ? "bg-white/15" : "bg-white/[0.055] group-hover:bg-white/10"}`}><item.icon size={18} /></span>
                 <span className={labelClass}>{item.label}</span>
               </Link>
             );
