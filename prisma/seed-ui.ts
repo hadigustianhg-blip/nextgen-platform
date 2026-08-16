@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import argon2 from "argon2";
 import { Prisma, PrismaClient } from "@prisma/client";
+import {
+  assertCourierPaymentInvariant,
+  assertInvoiceInvariant,
+  assertSalaryInvariant,
+  buildMasterSetoranAmounts,
+} from "./seed-ui.helpers";
 
 const prisma = new PrismaClient();
 const TENANT_SLUG = "tenant-development";
@@ -44,6 +50,55 @@ const dateOnly = (date: Date) => new Date(`${date.toISOString().slice(0, 10)}T00
 const daysAgo = (anchor: Date, count: number) => dateOnly(new Date(anchor.getTime() - count * DAY_MS));
 const atJakartaHour = (date: Date, hour: number, minute = 0) =>
   new Date(`${date.toISOString().slice(0, 10)}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+07:00`);
+
+async function recoverInterruptedOperationalPhase(input: {
+  tenantId: string;
+  outletId: string;
+}) {
+  const scope = { tenantId: input.tenantId, outletId: input.outletId };
+  const [partialPickups, partialDispatches, partialCodRecords, generatedSetoranCount] = await Promise.all([
+    prisma.rawPickup.findMany({
+      where: { ...scope, sourceEndpoint: "DEVUI_SYNTHETIC", sourceRecordKey: { startsWith: `${MARKER}:pickup:` } },
+      select: { id: true, firstSeenRunId: true, lastSeenRunId: true, masterPickup: { select: { id: true } } },
+    }),
+    prisma.rawDispatch.findMany({
+      where: { ...scope, sourceEndpoint: "DEVUI_SYNTHETIC", sourceRecordKey: { startsWith: `${MARKER}:dispatch:` } },
+      select: { id: true, firstSeenRunId: true, lastSeenRunId: true },
+    }),
+    prisma.rawCod.findMany({
+      where: { ...scope, sourceEndpoint: "DEVUI_SYNTHETIC", sourceRecordKey: { startsWith: `${MARKER}:cod:` } },
+      select: { id: true, firstSeenRunId: true, lastSeenRunId: true },
+    }),
+    prisma.masterSetoran.count({ where: { ...scope, courierKey: { startsWith: `${MARKER}_` } } }),
+  ]);
+  if (partialPickups.length === 0 || generatedSetoranCount > 0) return;
+
+  const rawPickupIds = partialPickups.map((row) => row.id);
+  const masterPickupIds = partialPickups.flatMap((row) => row.masterPickup ? [row.masterPickup.id] : []);
+  const syncRunIds = [...new Set([
+    ...partialPickups.flatMap((row) => [row.firstSeenRunId, row.lastSeenRunId]),
+    ...partialDispatches.flatMap((row) => [row.firstSeenRunId, row.lastSeenRunId]),
+    ...partialCodRecords.flatMap((row) => [row.firstSeenRunId, row.lastSeenRunId]),
+  ])];
+
+  const [paymentCount, revisionCount, invoiceItemCount] = await Promise.all([
+    prisma.pickupPayment.count({ where: { ...scope, masterPickupId: { in: masterPickupIds } } }),
+    prisma.pickupSettlementRevision.count({ where: { ...scope, masterPickupId: { in: masterPickupIds } } }),
+    prisma.invoiceItem.count({ where: { ...scope, masterPickupId: { in: masterPickupIds } } }),
+  ]);
+  if (paymentCount + revisionCount + invoiceItemCount > 0) {
+    throw new Error("DEV UI recovery refused: interrupted pickup rows have downstream records; no cleanup was performed.");
+  }
+
+  await prisma.$transaction([
+    prisma.masterPickup.deleteMany({ where: { ...scope, id: { in: masterPickupIds } } }),
+    prisma.rawPickup.deleteMany({ where: { ...scope, id: { in: rawPickupIds }, sourceEndpoint: "DEVUI_SYNTHETIC" } }),
+    prisma.rawDispatch.deleteMany({ where: { ...scope, id: { in: partialDispatches.map((row) => row.id) }, sourceEndpoint: "DEVUI_SYNTHETIC" } }),
+    prisma.rawCod.deleteMany({ where: { ...scope, id: { in: partialCodRecords.map((row) => row.id) }, sourceEndpoint: "DEVUI_SYNTHETIC" } }),
+    prisma.syncRun.deleteMany({ where: { ...scope, id: { in: syncRunIds } } }),
+  ]);
+  console.info(`Recovered interrupted ${MARKER} operational phase for ${TENANT_SLUG}/${OUTLET_CODE}.`);
+}
 
 async function main() {
   guardDevelopmentOnly();
@@ -250,11 +305,11 @@ async function main() {
 
     for (let courierIndex = 0; courierIndex < 7; courierIndex += 1) {
       const obligation = 450_000 + (courierIndex * 75_000) + (day % 5) * 25_000;
+      const amounts = buildMasterSetoranAmounts(obligation);
       setoran.push({
         id: id(`setoran:${dateKey}:${courierIndex}`), tenantId: tenant.id, outletId: outlet.id,
         operationalDate: businessDate, courierKey: `${MARKER}_COURIER_${courierIndex}`, courierName: people[courierIndex]![0],
-        dfodAmount: Math.floor(obligation * 0.55), codCashAmount: Math.floor(obligation * 0.35), codQrisAmount: Math.floor(obligation * 0.10),
-        totalSettlementAmount: obligation, needsReview: day % 11 === 0 && courierIndex === 0,
+        ...amounts, needsReview: day % 11 === 0 && courierIndex === 0,
         syncStatus: "NORMALIZED", sourceFetchedFrom: atJakartaHour(businessDate, 8), sourceFetchedTo: atJakartaHour(businessDate, 20),
       });
     }
@@ -304,16 +359,24 @@ async function main() {
     }
   }
 
-  await prisma.syncRun.createMany({ data: syncRuns, skipDuplicates: true });
-  await prisma.rawPickup.createMany({ data: pickups, skipDuplicates: true });
-  await prisma.masterPickup.createMany({ data: masters, skipDuplicates: true });
-  await prisma.rawDispatch.createMany({ data: dispatches, skipDuplicates: true });
-  await prisma.rawCod.createMany({ data: codRecords, skipDuplicates: true });
-  await prisma.masterSetoran.createMany({ data: setoran, skipDuplicates: true });
-  await prisma.rawSlaCutOff.createMany({ data: slaRows, skipDuplicates: true });
-  await prisma.rawInventoryDetail.createMany({ data: inventoryRows, skipDuplicates: true });
-  await prisma.rawWaybillStatus.createMany({ data: statusRows, skipDuplicates: true });
-  await prisma.rawPickupSchedule.createMany({ data: schedules, skipDuplicates: true });
+  await recoverInterruptedOperationalPhase({
+    tenantId: tenant.id,
+    outletId: outlet.id,
+  });
+  // Keep the high-volume operational phase atomic without holding one transaction
+  // across identity, attendance, finance, invoice, and salary generation.
+  await prisma.$transaction([
+    prisma.syncRun.createMany({ data: syncRuns, skipDuplicates: true }),
+    prisma.rawPickup.createMany({ data: pickups, skipDuplicates: true }),
+    prisma.masterPickup.createMany({ data: masters, skipDuplicates: true }),
+    prisma.rawDispatch.createMany({ data: dispatches, skipDuplicates: true }),
+    prisma.rawCod.createMany({ data: codRecords, skipDuplicates: true }),
+    prisma.masterSetoran.createMany({ data: setoran, skipDuplicates: true }),
+    prisma.rawSlaCutOff.createMany({ data: slaRows, skipDuplicates: true }),
+    prisma.rawInventoryDetail.createMany({ data: inventoryRows, skipDuplicates: true }),
+    prisma.rawWaybillStatus.createMany({ data: statusRows, skipDuplicates: true }),
+    prisma.rawPickupSchedule.createMany({ data: schedules, skipDuplicates: true }),
+  ]);
 
   const settlementRevisions: Prisma.PickupSettlementRevisionCreateManyInput[] = [];
   const pickupPayments: Prisma.PickupPaymentCreateManyInput[] = [];
@@ -359,6 +422,7 @@ async function main() {
     const paidRatio = index % 6 === 0 ? 0.65 : index % 7 === 0 ? 1.08 : 1;
     const paid = Math.round(Number(item.totalSettlementAmount) * paidRatio);
     const transfer = index % 3 === 0 ? Math.round(paid * 0.55) : 0;
+    assertCourierPaymentInvariant({ cashAmount: paid - transfer, transferAmountSnapshot: transfer, paidAmountSnapshot: paid });
     courierPayments.push({
       id: paymentId, tenantId: tenant.id, outletId: outlet.id, masterSetoranId: item.id!,
       transactionKey, revision: 1, recordStatus: index % 31 === 0 ? "VOID" : "VALID",
@@ -546,15 +610,19 @@ async function main() {
     for (let index = 0; index < 11; index += 1) {
       const closingEmployeeId = id(`salary-closing-employee:${monthKey}:${index}`);
       const base = 3_000_000 + index * 125_000;
+      const addition = 300_000;
+      const deduction = (index % 3) * 100_000;
+      const netSalary = base + addition - deduction;
+      assertSalaryInvariant({ systemIncomeTotal: base, manualAdditionTotal: addition, manualDeductionTotal: deduction, netSalary });
       await prisma.salaryClosingEmployee.upsert({
-        where: { id: closingEmployeeId }, update: { netSalary: base + 300_000 - (index % 3) * 100_000 },
+        where: { id: closingEmployeeId }, update: { netSalary },
         create: {
           id: closingEmployeeId, tenantId: tenant.id, outletId: outlet.id, salaryClosingId: closingId,
           employeeId: id(`employee:${index}`), employeeNameSnapshot: people[index]![0], divisionSnapshot: people[index]![1],
           whatsappSnapshot: `+62800000${String(index + 1).padStart(4, "0")}`,
           salaryProfileId: id(`salary-profile:${index < 7 ? 0 : 1}`), salaryProfileCodeSnapshot: index < 7 ? "DEVUI-COURIER" : "DEVUI-STAFF",
-          salaryProfileVersionSnapshot: 1, systemIncomeTotal: base, manualAdditionTotal: 300_000,
-          manualDeductionTotal: (index % 3) * 100_000, netSalary: base + 300_000 - (index % 3) * 100_000,
+          salaryProfileVersionSnapshot: 1, systemIncomeTotal: base, manualAdditionTotal: addition,
+          manualDeductionTotal: deduction, netSalary,
           status: monthOffset === 0 ? "DRAFT" : "PROCESSED", workDayCount: 22 - index % 4,
           sourcePickupCount: 20 + index, sourceDispatchCount: 80 + index * 3, calculationWarningCount: index % 7 === 0 ? 1 : 0,
           generatedAt: atJakartaHour(periodEnd, 19),
@@ -580,6 +648,9 @@ async function main() {
     const invoiceDate = daysAgo(anchor, 55 - index * 2);
     const selected = invoicePickups.slice(index * 2, index * 2 + 2);
     const subtotal = selected.reduce((sum, item) => sum + Number(item.freightAmount), 0);
+    const discountTotal = index % 4 === 0 ? Math.min(10_000, subtotal) : 0;
+    const grandTotal = subtotal - discountTotal;
+    assertInvoiceInvariant({ subtotal, discountTotal, grandTotal });
     await prisma.invoice.upsert({
       where: { id: invoiceId }, update: { status },
       create: {
@@ -590,7 +661,7 @@ async function main() {
         recipientPhone: "+6280000000301", recipientCity: "Kota Uji", paymentContactPhone: "+6280000000302",
         transferBankName: "Bank Contoh Indonesia", transferAccountNumber: "000000000001", transferAccountHolder: "NEXTGEN DEVELOPMENT",
         invoiceDate, dueDate: new Date(invoiceDate.getTime() + 14 * DAY_MS), periodStart: new Date(invoiceDate.getTime() - 7 * DAY_MS), periodEnd: invoiceDate,
-        subtotal, discountTotal: index % 4 === 0 ? 10_000 : 0, grandTotal: Math.max(0, subtotal - (index % 4 === 0 ? 10_000 : 0)), status,
+        subtotal, discountTotal, grandTotal, status,
         notes: `${MARKER} invoice synthetic untuk pengujian UI.`, issuedAt: status === "DRAFT" ? null : atJakartaHour(invoiceDate, 10),
         sentAt: ["SENT", "PAID", "PARTIALLY_PAID"].includes(status) ? atJakartaHour(invoiceDate, 11) : null,
         paidAt: status === "PAID" ? atJakartaHour(new Date(invoiceDate.getTime() + 5 * DAY_MS), 14) : null, createdByUserId: owner.id,
