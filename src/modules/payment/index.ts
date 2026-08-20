@@ -4,6 +4,7 @@ export * from "./cash-flow.validation";
 export * from "./pickup-payment.authorization";
 export * from "./pickup-payment.service";
 export * from "./pickup-payment.validation";
+export * from "./pickup-transfer-proof";
 export * from "./payment-settlement.authorization";
 export * from "./payment-settlement.service";
 export * from "./payment-settlement.validation";
