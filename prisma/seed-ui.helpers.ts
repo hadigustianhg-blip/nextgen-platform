@@ -80,3 +80,45 @@ export function assertSalaryInvariant(input: {
   }
   assertEqual("Salary net total", net, income.plus(addition).minus(deduction));
 }
+
+export type PickupPaymentSeedScenario = {
+  sequence: number;
+  waybill: string;
+  customer: string;
+  freightAmount: number;
+  paidAmount: number;
+  method: "CASH" | "TRANSFER" | null;
+  settlementRaw: "Tunai";
+};
+
+export function buildPickupPaymentSeedScenarios(): PickupPaymentSeedScenario[] {
+  const scenarios: PickupPaymentSeedScenario[] = [
+    [1, 35_000, 0, null],
+    [2, 71_000, 0, null],
+    [3, 125_000, 0, null],
+    [4, 250_000, 0, null],
+    [5, 71_000, 35_000, "CASH"],
+    [6, 125_000, 35_000, "TRANSFER"],
+    [7, 250_000, 125_000, "CASH"],
+    [8, 35_000, 35_000, "CASH"],
+    [9, 71_000, 71_000, "TRANSFER"],
+    [10, 125_000, 0, null],
+  ].map(([sequence, freightAmount, paidAmount, method]) => ({
+    sequence: sequence as number,
+    waybill: `DEVUI-PICKPAY-${String(sequence).padStart(3, "0")}`,
+    customer: `DEV PICKUP CUSTOMER ${String(sequence).padStart(2, "0")}`,
+    freightAmount: freightAmount as number,
+    paidAmount: paidAmount as number,
+    method: method as PickupPaymentSeedScenario["method"],
+    settlementRaw: "Tunai" as const,
+  }));
+  for (const scenario of scenarios) {
+    if (scenario.paidAmount < 0 || scenario.paidAmount > scenario.freightAmount) {
+      throw new Error(`Pickup Payment seed invariant failed for ${scenario.waybill}.`);
+    }
+    if ((scenario.paidAmount === 0) !== (scenario.method === null)) {
+      throw new Error(`Pickup Payment history invariant failed for ${scenario.waybill}.`);
+    }
+  }
+  return scenarios;
+}
