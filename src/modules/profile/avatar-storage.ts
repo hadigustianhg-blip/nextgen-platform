@@ -35,9 +35,18 @@ export function isAvatarStorageConfigured() {
   return readAvatarStorageConfig() !== null;
 }
 
+export const isSharedImageStorageConfigured = isAvatarStorageConfigured;
+
 export function resolveAvatarUrl(storageKey: string | null | undefined) {
   const config = readAvatarStorageConfig();
   if (!storageKey || !config) return DEFAULT_AVATAR_URL;
+  const baseUrl = config.publicBaseUrl.endsWith("/") ? config.publicBaseUrl : `${config.publicBaseUrl}/`;
+  return new URL(storageKey.split("/").map(encodeURIComponent).join("/"), baseUrl).toString();
+}
+
+export function resolveStoredImageUrl(storageKey: string | null | undefined) {
+  const config = readAvatarStorageConfig();
+  if (!storageKey || !config) return null;
   const baseUrl = config.publicBaseUrl.endsWith("/") ? config.publicBaseUrl : `${config.publicBaseUrl}/`;
   return new URL(storageKey.split("/").map(encodeURIComponent).join("/"), baseUrl).toString();
 }
@@ -60,6 +69,10 @@ function requireAvatarStorageConfig() {
 }
 
 export async function putAvatar(storageKey: string, body: Uint8Array) {
+  return putStoredImage(storageKey, body);
+}
+
+export async function putStoredImage(storageKey: string, body: Uint8Array) {
   const config = requireAvatarStorageConfig();
   await storageClient(config).send(new PutObjectCommand({
     Bucket: config.bucket,
@@ -71,6 +84,10 @@ export async function putAvatar(storageKey: string, body: Uint8Array) {
 }
 
 export async function deleteAvatar(storageKey: string) {
+  return deleteStoredImage(storageKey);
+}
+
+export async function deleteStoredImage(storageKey: string) {
   const config = requireAvatarStorageConfig();
   await storageClient(config).send(new DeleteObjectCommand({
     Bucket: config.bucket,

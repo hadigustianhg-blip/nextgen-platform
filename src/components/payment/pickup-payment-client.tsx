@@ -35,6 +35,7 @@ type HistoryItem = {
   note: string | null;
   status: string;
   createdBy: string;
+  transferProofUrl: string | null;
 };
 type Detail = {
   id: string;
@@ -121,6 +122,10 @@ export function PickupPaymentClient({
   const [bulkNote, setBulkNote] = useState("");
   const [bulkError, setBulkError] = useState("");
   const [notice, setNotice] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "TRANSFER">("CASH");
+  const [transferProof, setTransferProof] = useState<File | null>(null);
+  const [transferProofPreview, setTransferProofPreview] = useState("");
+  const [saving, setSaving] = useState(false);
   const query = useMemo(
     () =>
       new URLSearchParams({
@@ -155,25 +160,50 @@ export function PickupPaymentClient({
       setMode(nextMode);
       setEditing(null);
       setError("");
+      setPaymentMethod("CASH");
+      clearTransferProof();
     }
+  }
+  function clearTransferProof() {
+    setTransferProof(null);
+    setTransferProofPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return "";
+    });
+  }
+  function selectTransferProof(file: File | null) {
+    clearTransferProof();
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setError("Bukti transfer harus JPG, PNG, atau WebP dengan ukuran maksimal 5 MB.");
+      return;
+    }
+    setError("");
+    setTransferProof(file);
+    setTransferProofPreview(URL.createObjectURL(file));
+  }
+  function paymentPayload(form: HTMLFormElement, confirmOverpayment: boolean) {
+    const payload = new FormData(form);
+    if (!editing) payload.set("masterPickupId", selected!.id);
+    payload.set("requestKey", crypto.randomUUID());
+    payload.set("confirmOverpayment", String(confirmOverpayment));
+    if (paymentMethod === "TRANSFER" && transferProof) payload.set("transferProof", transferProof);
+    return payload;
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected) return;
-    const body = Object.fromEntries(new FormData(event.currentTarget));
+    if (paymentMethod === "TRANSFER" && !transferProof && !editing?.transferProofUrl) {
+      setError("Bukti transfer wajib diunggah untuk pembayaran Transfer.");
+      return;
+    }
     const endpoint = editing
       ? `/api/pickup-payment/${editing.id}`
       : "/api/pickup-payment";
-    const response = await fetch(endpoint, {
-      method: editing ? "PATCH" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...body,
-        ...(editing ? {} : { masterPickupId: selected.id }),
-        requestKey: crypto.randomUUID(),
-        confirmOverpayment: false,
-      }),
-    });
+    const form = event.currentTarget;
+    setSaving(true);
+    setError("");
+    const response = await fetch(endpoint, { method: editing ? "PATCH" : "POST", body: paymentPayload(form, false) });
     if (
       response.status === 409 &&
       window.confirm(
@@ -182,29 +212,28 @@ export function PickupPaymentClient({
     ) {
       const retry = await fetch(endpoint, {
         method: editing ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...body,
-          ...(editing ? {} : { masterPickupId: selected.id }),
-          requestKey: crypto.randomUUID(),
-          confirmOverpayment: true,
-        }),
+        body: paymentPayload(form, true),
       });
       if (retry.ok) {
         setMode(null);
         setSelected(null);
         setEditing(null);
+        clearTransferProof();
+        setSaving(false);
         await load();
         return;
       }
     }
     if (!response.ok) {
       setError("Pembayaran gagal disimpan.");
+      setSaving(false);
       return;
     }
     setMode(null);
     setSelected(null);
     setEditing(null);
+    clearTransferProof();
+    setSaving(false);
     await load();
   }
   async function voidPayment(id: string) {
@@ -569,7 +598,7 @@ export function PickupPaymentClient({
       )}
       {selected && mode && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4">
-          <ModalCard className="max-w-2xl p-6">
+          <ModalCard className="max-h-[92vh] max-w-2xl overflow-y-auto p-6">
             <div className="flex justify-between">
               <h2 className="text-xl font-black">
                 {mode === "pay"
@@ -583,6 +612,7 @@ export function PickupPaymentClient({
                   setMode(null);
                   setSelected(null);
                   setEditing(null);
+                  clearTransferProof();
                 }}
               >
                 <X />
@@ -631,7 +661,13 @@ export function PickupPaymentClient({
                 />
                 <select
                   name="method"
-                  defaultValue={editing?.method ?? "CASH"}
+                  value={paymentMethod}
+                  onChange={(event) => {
+                    const method = event.target.value as "CASH" | "TRANSFER";
+                    setPaymentMethod(method);
+                    if (method === "CASH") clearTransferProof();
+                  }}
+                  disabled={saving}
                   className={nextgenControlClass}
                 >
                   <option value="CASH">Cash</option>
@@ -659,6 +695,25 @@ export function PickupPaymentClient({
                   className={nextgenControlClass}
                   placeholder="Bank (wajib untuk transfer)"
                 />
+                {paymentMethod === "TRANSFER" && (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                    <label className="block text-sm font-semibold text-slate-700" htmlFor="pickup-transfer-proof">Bukti Transfer</label>
+                    <input
+                      id="pickup-transfer-proof"
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      required={!editing?.transferProofUrl}
+                      disabled={saving}
+                      onChange={(event) => selectTransferProof(event.target.files?.[0] ?? null)}
+                      className="mt-2 block w-full text-sm text-slate-600 file:mr-3 file:rounded-xl file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:font-semibold file:text-white"
+                    />
+                    {(transferProofPreview || editing?.transferProofUrl) && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={transferProofPreview || editing?.transferProofUrl || ""} alt="Preview bukti transfer" className="mt-3 max-h-64 w-full rounded-xl border border-slate-200 bg-white object-contain" />
+                    )}
+                    <p className="mt-2 text-xs text-slate-500">JPG, PNG, atau WebP · maksimal 5 MB</p>
+                  </div>
+                )}
                 <textarea
                   name="note"
                   defaultValue={editing?.note ?? ""}
@@ -667,9 +722,10 @@ export function PickupPaymentClient({
                 />
                 {error && <p className="text-sm text-red-600">{error}</p>}
                 <button
+                  disabled={saving}
                   className={`${nextgenButtonClass} bg-blue-600 text-white hover:bg-blue-700`}
                 >
-                  Simpan Pembayaran
+                  {saving ? "Menyimpan…" : "Simpan Pembayaran"}
                 </button>
               </form>
             ) : (
@@ -692,11 +748,16 @@ export function PickupPaymentClient({
                         {item.reference || "Tanpa reference"} · {item.status} ·{" "}
                         {item.createdBy}
                       </p>
+                      {item.transferProofUrl && (
+                        <a href={item.transferProofUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-bold text-blue-600">Lihat Bukti Transfer</a>
+                      )}
                       {canManage && item.status === "VALID" && (
                         <div className="mt-2 flex gap-3">
                           <button
                             onClick={() => {
                               setEditing(item);
+                              setPaymentMethod(item.method === "TRANSFER" ? "TRANSFER" : "CASH");
+                              clearTransferProof();
                               setMode("pay");
                             }}
                             className="text-xs font-bold text-blue-600"

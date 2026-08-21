@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
 import { createAutomaticCashMovement, voidAutomaticCashMovements } from "./cash-flow.service";
+import { resolveStoredImageUrl } from "@/modules/profile/avatar-storage";
 
 type Scope = { tenantId: string; outletId: string };
 type Context = Scope & { actorId: string };
@@ -139,6 +140,9 @@ export async function getPickupPaymentDetail(scope: Scope, masterPickupId: strin
       id: payment.id, paymentDate: payment.paymentDate, method: isCash(payment.paymentMethodRaw) ? "CASH" : "TRANSFER",
       amount: payment.receivedAmount.toString(), reference: payment.reference, bank: payment.transferAccount,
       note: payment.note, status: payment.recordStatus, createdBy: payment.createdBy.name,
+      transferProofUrl: payment.transferProofStorageKey?.startsWith("pickup-transfer/")
+        ? resolveStoredImageUrl(payment.transferProofStorageKey)
+        : null,
     })),
   };
 }
@@ -146,6 +150,7 @@ export async function getPickupPaymentDetail(scope: Scope, masterPickupId: strin
 type PaymentInput = {
   requestKey: string; masterPickupId: string; paymentDate: string; method: "CASH" | "TRANSFER";
   amount: string | number; reference?: string; bank?: string; note?: string; confirmOverpayment?: boolean;
+  paymentId?: string; transferProofStorageKey?: string | null;
 };
 
 async function validatePayment(
@@ -170,6 +175,7 @@ async function validatePayment(
 }
 
 export async function createPickupPayment(context: Context, input: PaymentInput) {
+  if (input.method === "TRANSFER" && !input.transferProofStorageKey) throw new Error("TRANSFER_PROOF_REQUIRED");
   return prisma.$transaction(async (tx) => {
     const replay = await tx.pickupPayment.findUnique({
       where: { transactionKey_revision: { transactionKey: input.requestKey, revision: 1 } },
@@ -181,9 +187,12 @@ export async function createPickupPayment(context: Context, input: PaymentInput)
     if (!calculated) return null;
     if (calculated.resultingOutstanding.isNegative() && !input.confirmOverpayment) throw new Error("OVERPAYMENT_CONFIRMATION_REQUIRED");
     const payment = await tx.pickupPayment.create({ data: {
+      ...(input.paymentId ? { id: input.paymentId } : {}),
       tenantId: context.tenantId, outletId: context.outletId, masterPickupId: input.masterPickupId,
       transactionKey: input.requestKey, revision: 1, paymentDate: dateValue(input.paymentDate),
       receivedAmount: amount, paymentMethodRaw: input.method, transferAccount: input.method === "TRANSFER" ? input.bank : null,
+      transferProofStorageKey: input.method === "TRANSFER" ? input.transferProofStorageKey : null,
+      transferProofUpdatedAt: input.method === "TRANSFER" ? new Date() : null,
       reference: input.reference || null, note: input.note || null,
       createdByUserId: context.actorId, updatedByUserId: context.actorId,
     } });
@@ -202,6 +211,7 @@ export async function createPickupPayment(context: Context, input: PaymentInput)
 }
 
 export async function updatePickupPayment(context: Context, id: string, input: Omit<PaymentInput, "masterPickupId">) {
+  if (input.method === "TRANSFER" && !input.transferProofStorageKey) throw new Error("TRANSFER_PROOF_REQUIRED");
   return prisma.$transaction(async (tx) => {
     const old = await tx.pickupPayment.findFirst({ where: { id, ...prismaScope(context), recordStatus: "VALID" } });
     if (!old) return null;
@@ -213,10 +223,13 @@ export async function updatePickupPayment(context: Context, id: string, input: O
     await tx.pickupPayment.update({ where: { id }, data: { recordStatus: "SUPERSEDED", updatedByUserId: context.actorId } });
     await voidAutomaticCashMovements(tx, context, "PickupPayment", id);
     const payment = await tx.pickupPayment.create({ data: {
+      ...(input.paymentId ? { id: input.paymentId } : {}),
       tenantId: context.tenantId, outletId: context.outletId, masterPickupId: old.masterPickupId,
       transactionKey: old.transactionKey, revision: old.revision + 1, supersedesPaymentId: old.id,
       paymentDate: dateValue(input.paymentDate), receivedAmount: amount, paymentMethodRaw: input.method,
       transferAccount: input.method === "TRANSFER" ? input.bank : null, reference: input.reference || null,
+      transferProofStorageKey: input.method === "TRANSFER" ? input.transferProofStorageKey : null,
+      transferProofUpdatedAt: input.method === "TRANSFER" ? new Date() : null,
       note: input.note || null, createdByUserId: context.actorId, updatedByUserId: context.actorId,
     } });
     await createAutomaticCashMovement(tx, {

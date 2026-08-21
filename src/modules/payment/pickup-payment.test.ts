@@ -147,7 +147,7 @@ describe("Pickup Payment transaction and cash flow", () => {
   it("creates transfer as BANK movement", async () => {
     await createPickupPayment(context, {
       ...input, requestKey: "30000000-0000-4000-8000-000000000002",
-      method: "TRANSFER", bank: "BCA",
+      method: "TRANSFER", bank: "BCA", transferProofStorageKey: "pickup-transfer/tenant/outlet/payment/proof.webp",
     });
     expect(state.movements[0].channel).toBe("BANK");
   });

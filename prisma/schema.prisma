@@ -1035,6 +1035,8 @@ model PickupPayment {
   receivedAmount      Decimal               @db.Decimal(18, 2)
   paymentMethodRaw    String
   transferAccount     String?
+  transferProofStorageKey String?
+  transferProofUpdatedAt  DateTime?             @db.Timestamptz(3)
   reference           String?
   note                String?
   voidedAt            DateTime?             @db.Timestamptz(3)

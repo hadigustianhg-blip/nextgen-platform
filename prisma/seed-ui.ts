@@ -6,6 +6,7 @@ import {
   assertInvoiceInvariant,
   assertSalaryInvariant,
   buildMasterSetoranAmounts,
+  buildPickupPaymentSeedScenarios,
 } from "./seed-ui.helpers";
 
 const prisma = new PrismaClient();
@@ -413,6 +414,59 @@ async function main() {
   await prisma.pickupSettlementRevision.createMany({ data: settlementRevisions, skipDuplicates: true });
   await prisma.pickupPayment.createMany({ data: pickupPayments, skipDuplicates: true });
 
+  const pickupPaymentScenarios = buildPickupPaymentSeedScenarios();
+  const pickupPaymentRawRows: Prisma.RawPickupCreateManyInput[] = [];
+  const pickupPaymentMasterRows: Prisma.MasterPickupCreateManyInput[] = [];
+  const pickupPaymentRevisionRows: Prisma.PickupSettlementRevisionCreateManyInput[] = [];
+  const pickupPaymentHistoryRows: Prisma.PickupPaymentCreateManyInput[] = [];
+  for (const scenario of pickupPaymentScenarios) {
+    const pickupDate = daysAgo(anchor, 11 - scenario.sequence);
+    const rawPickupId = id(`pickup-payment-raw:${scenario.waybill}`);
+    const masterPickupId = id(`pickup-payment-master:${scenario.waybill}`);
+    const runId = id(`sync:${pickupDate.toISOString().slice(0, 10)}`);
+    const payload = { marker: MARKER, scenario: "PICKUP_PAYMENT", waybillNo: scenario.waybill, synthetic: true };
+    pickupPaymentRawRows.push({
+      id: rawPickupId, tenantId: tenant.id, outletId: outlet.id, operationalDate: pickupDate,
+      sourceEndpoint: "DEVUI_SYNTHETIC", sourceRecordKey: `${MARKER}:pickup-payment:${scenario.waybill}`,
+      sourceFetchedAt: atJakartaHour(pickupDate, 20), syncedAt: atJakartaHour(pickupDate, 20, 8), syncStatus: "NORMALIZED",
+      sourceRecordHash: hash(payload), sourcePayload: payload, firstSeenRunId: runId, lastSeenRunId: runId,
+      waybillNo: scenario.waybill, pickNetwork: OUTLET_CODE, destination: "Kota Development",
+      settlementRaw: scenario.settlementRaw, totalFreight: scenario.freightAmount, freight: scenario.freightAmount,
+      weight: 1 + scenario.sequence / 10, staffNameRaw: people[scenario.sequence % people.length]![0],
+      senderName: scenario.customer, serviceRaw: "REG", receiverName: `DEV RECEIVER ${String(scenario.sequence).padStart(2, "0")}`,
+      receiverAddress: `Alamat Development Pickup Payment ${scenario.sequence}`,
+    });
+    pickupPaymentMasterRows.push({
+      id: masterPickupId, tenantId: tenant.id, outletId: outlet.id, rawPickupId,
+      operationalDate: pickupDate, waybillNo: scenario.waybill,
+      staffName: people[scenario.sequence % people.length]![0], senderName: scenario.customer,
+      freightAmount: scenario.freightAmount, syncStatus: "NORMALIZED", sourceSyncedAt: atJakartaHour(pickupDate, 20, 8),
+    });
+    pickupPaymentRevisionRows.push({
+      id: id(`pickup-payment-revision:${scenario.waybill}`), tenantId: tenant.id, outletId: outlet.id,
+      masterPickupId, requestKey: id(`pickup-payment-revision-request:${scenario.waybill}`), revision: 1,
+      recordStatus: "VALID", discountAmount: 0, reason: `${MARKER} Pickup Payment scenario`,
+      createdByUserId: owner.id, updatedByUserId: owner.id,
+    });
+    if (scenario.method) {
+      pickupPaymentHistoryRows.push({
+        id: id(`pickup-payment-history:${scenario.waybill}`), tenantId: tenant.id, outletId: outlet.id,
+        masterPickupId, transactionKey: id(`pickup-payment-history-transaction:${scenario.waybill}`), revision: 1,
+        recordStatus: "VALID", paymentDate: new Date(pickupDate.getTime() + DAY_MS), receivedAmount: scenario.paidAmount,
+        paymentMethodRaw: scenario.method, transferAccount: scenario.method === "TRANSFER" ? "000000000001" : null,
+        transferProofStorageKey: null, transferProofUpdatedAt: null,
+        reference: `${MARKER}-PICKPAY-HISTORY-${scenario.sequence}`, note: `${MARKER} Pickup Payment history`,
+        createdByUserId: owner.id, updatedByUserId: owner.id,
+      });
+    }
+  }
+  await prisma.$transaction([
+    prisma.rawPickup.createMany({ data: pickupPaymentRawRows, skipDuplicates: true }),
+    prisma.masterPickup.createMany({ data: pickupPaymentMasterRows, skipDuplicates: true }),
+    prisma.pickupSettlementRevision.createMany({ data: pickupPaymentRevisionRows, skipDuplicates: true }),
+    prisma.pickupPayment.createMany({ data: pickupPaymentHistoryRows, skipDuplicates: true }),
+  ]);
+
   const courierPayments: Prisma.CourierSettlementPaymentCreateManyInput[] = [];
   const courierTransfers: Prisma.CourierSettlementTransferCreateManyInput[] = [];
   for (const [index, item] of setoran.filter((_, itemIndex) => itemIndex % 5 === 0).entries()) {
@@ -706,6 +760,7 @@ async function main() {
       attendanceEvents: attendanceEvents.length, leaveRequests: 12, operationalExpenses: expenseRows.length,
       operationalClosings: closingRows.length, cashMovements: movementRows.length, cashflow: cashflowRecords.length,
       invoices: 20, salaryClosings: 2, auditLogs: 45,
+      pickupPaymentWaybills: pickupPaymentScenarios.length,
     },
   }, null, 2));
 }
