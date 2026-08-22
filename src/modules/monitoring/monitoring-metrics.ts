@@ -3,7 +3,7 @@ import { calculateAchievement, DELIVERY_TARGET } from "./monitoring-daily.calcul
 
 const zero = () => new Prisma.Decimal(0);
 const dateKey = (value: Date) => value.toISOString().slice(0, 10);
-const canonical = (value: string | null | undefined) =>
+export const canonicalMonitoringText = (value: string | null | undefined) =>
   (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ")
     .toLocaleUpperCase("id-ID");
 const displayName = (value: string | null | undefined, fallback: string) =>
@@ -39,7 +39,7 @@ export function aggregateDeliveryMonitoringMetrics(records: MonitoringDispatchRe
   for (const record of records) {
     const businessDate = dateKey(record.operationalDate);
     const teamName = displayName(record.courierNameRaw, "Team Belum Terpetakan");
-    const key = `${businessDate}\u0000${canonical(teamName)}`;
+    const key = `${businessDate}\u0000${canonicalMonitoringText(teamName)}`;
     const group = groups.get(key) ?? {
       businessDate,
       teamName,
@@ -48,7 +48,7 @@ export function aggregateDeliveryMonitoringMetrics(records: MonitoringDispatchRe
       deliveryWeight: zero(),
     };
     group.totalDelivery += 1;
-    if (canonical(record.deliveryStatusRaw) === "PENERIMAAN NORMAL") {
+    if (isMonitoringTtd(record.deliveryStatusRaw)) {
       group.totalTtd += 1;
       if (record.chargeWeight) group.deliveryWeight = group.deliveryWeight.plus(record.chargeWeight);
     }
@@ -78,11 +78,11 @@ export function aggregateDeliveryMonitoringMetrics(records: MonitoringDispatchRe
   );
 }
 
-export function aggregatePickupMonitoringMetrics(records: MonitoringPickupRecord[]) {
-  const finalByWaybill = new Map<string, MonitoringPickupRecord>();
+export function selectFinalMonitoringPickupRecords<T extends MonitoringPickupRecord>(records: T[]) {
+  const finalByWaybill = new Map<string, T>();
   for (const record of records) {
-    const key = `${dateKey(record.operationalDate)}\u0000${canonical(record.waybillNo)}`;
-    if (!canonical(record.waybillNo)) continue;
+    const key = `${dateKey(record.operationalDate)}\u0000${canonicalMonitoringText(record.waybillNo)}`;
+    if (!canonicalMonitoringText(record.waybillNo)) continue;
     const existing = finalByWaybill.get(key);
     if (!existing || record.sourceFetchedAt > existing.sourceFetchedAt ||
       (record.sourceFetchedAt.getTime() === existing.sourceFetchedAt.getTime() &&
@@ -91,6 +91,23 @@ export function aggregatePickupMonitoringMetrics(records: MonitoringPickupRecord
       finalByWaybill.set(key, record);
     }
   }
+  return [...finalByWaybill.values()];
+}
+
+export function isMonitoringTtd(status: string | null | undefined) {
+  return canonicalMonitoringText(status) === "PENERIMAAN NORMAL";
+}
+
+export function isMonitoringRegularPickup(settlement: string | null | undefined) {
+  const value = canonicalMonitoringText(settlement);
+  return value === "DFOD" || value === "TUNAI";
+}
+
+export function isMonitoringMarketplacePickup(settlement: string | null | undefined) {
+  return canonicalMonitoringText(settlement) === "BULANAN";
+}
+
+export function aggregatePickupMonitoringMetrics(records: MonitoringPickupRecord[]) {
   const groups = new Map<string, {
     businessDate: string;
     staffName: string;
@@ -99,10 +116,10 @@ export function aggregatePickupMonitoringMetrics(records: MonitoringPickupRecord
     regularWeight: Prisma.Decimal;
     marketplaceWeight: Prisma.Decimal;
   }>();
-  for (const record of finalByWaybill.values()) {
+  for (const record of selectFinalMonitoringPickupRecords(records)) {
     const businessDate = dateKey(record.operationalDate);
     const staffName = displayName(record.staffNameRaw, "Staff Belum Terpetakan");
-    const key = `${businessDate}\u0000${canonical(staffName)}`;
+    const key = `${businessDate}\u0000${canonicalMonitoringText(staffName)}`;
     const group = groups.get(key) ?? {
       businessDate,
       staffName,
@@ -112,11 +129,10 @@ export function aggregatePickupMonitoringMetrics(records: MonitoringPickupRecord
       marketplaceWeight: zero(),
     };
     group.totalWaybills += 1;
-    const settlement = canonical(record.settlementRaw);
-    if (settlement === "DFOD" || settlement === "TUNAI") {
+    if (isMonitoringRegularPickup(record.settlementRaw)) {
       group.regularRevenue = group.regularRevenue.plus(record.freight);
       group.regularWeight = group.regularWeight.plus(record.weight);
-    } else if (settlement === "BULANAN") {
+    } else if (isMonitoringMarketplacePickup(record.settlementRaw)) {
       group.marketplaceWeight = group.marketplaceWeight.plus(record.weight);
     }
     groups.set(key, group);

@@ -70,4 +70,15 @@ describe("Monitoring Daily UI contract", () => {
     expect(source).toContain("syncPickup(context");
     expect(source).toContain("resolveMonitoringOutlet");
   });
+
+  it("exposes keyboard-accessible KPI and per-team detail drilldowns", async () => {
+    const source = await readFile(new URL("./monitoring-daily-client.tsx", import.meta.url), "utf8");
+    expect(source).toContain('role="button"');
+    expect(source).toContain('event.key === "Enter" || event.key === " "');
+    expect(source).toContain("/api/monitoring/daily/detail");
+    expect(source).toContain("Rincian Achievement Delivery");
+    expect(source).toContain("Rincian Total Delivery");
+    expect(source).toContain("Rincian Pickup Omset");
+    expect(source).toContain("Menampilkan {number(rows.length)} data");
+  });
 });

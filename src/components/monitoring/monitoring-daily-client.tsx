@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { CloudDownload, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { CloudDownload, RefreshCw, Search, X } from "lucide-react";
 import {
   FilterCard,
   MetricCard,
@@ -65,6 +66,33 @@ type Pagination = {
   totalPages: number;
 };
 
+type DetailMetric =
+  | "DELIVERY_ACHIEVEMENT" | "DELIVERY_TOTAL" | "DELIVERY_TTD" | "DELIVERY_PENDING" | "DELIVERY_WEIGHT"
+  | "PICKUP_TOTAL" | "PICKUP_REVENUE" | "PICKUP_REGULAR_WEIGHT" | "PICKUP_MARKETPLACE_WEIGHT" | "PICKUP_WEIGHT";
+type DetailRow = {
+  kind: "DELIVERY" | "PICKUP";
+  waybill: string;
+  businessDate: string;
+  team: string;
+  customer: string | null;
+  status?: string;
+  ttd?: boolean;
+  settlement?: string | null;
+  revenue?: string;
+  weight: string;
+  lastActivityAt: string;
+};
+type DetailResult = {
+  metric: DetailMetric;
+  businessDate: string;
+  team: string | null;
+  summary: {
+    totalDelivery: number; totalTtd: number; totalPending: number; achievement: number;
+    deliveryCount: number; deliveryWeight: string; pickupCount: number; pickupRevenue: string; pickupWeight: string;
+  };
+  rows: DetailRow[];
+};
+
 const money = (value: string) =>
   new Intl.NumberFormat("id-ID", {
     style: "currency",
@@ -103,6 +131,7 @@ export function MonitoringDailyClient({
     tone: "success" | "error";
     text: string;
   } | null>(null);
+  const [detail, setDetail] = useState<{ title: string; loading: boolean; error: string; result: DetailResult | null } | null>(null);
 
   const load = useCallback(async () => {
     if (!outletId) {
@@ -203,6 +232,20 @@ export function MonitoringDailyClient({
     }
   }
 
+  async function openDetail(metric: DetailMetric, title: string, team?: string) {
+    if (!outletId || !(businessDate || result?.businessDate)) return;
+    setDetail({ title, loading: true, error: "", result: null });
+    const query = new URLSearchParams({ outletId, businessDate: businessDate || result!.businessDate, metric });
+    if (team) query.set("team", team);
+    try {
+      const response = await fetch(`/api/monitoring/daily/detail?${query}`, { cache: "no-store" });
+      if (!response.ok) throw new Error();
+      setDetail({ title, loading: false, error: "", result: await response.json() as DetailResult });
+    } catch {
+      setDetail({ title, loading: false, error: "Rincian monitoring belum dapat dimuat.", result: null });
+    }
+  }
+
   const achievement = result?.summary.deliveryAchievement ?? 0;
   const target = result?.target ?? 95;
   const achieved = achievement >= target;
@@ -297,6 +340,7 @@ export function MonitoringDailyClient({
       )}
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
+        <ClickableMetric onOpen={() => void openDetail("DELIVERY_ACHIEVEMENT", "Rincian Achievement Delivery")}>
         <MetricCard
           label="Achievement Delivery"
           value={
@@ -306,31 +350,31 @@ export function MonitoringDailyClient({
           }
           note={`Target ${percent(target)}`}
           noteTone={achieved ? "muted" : "warning"}
-        />
-        <MetricCard
+        /></ClickableMetric>
+        <ClickableMetric onOpen={() => void openDetail("DELIVERY_TOTAL", "Rincian Total Delivery")}><MetricCard
           label="Total Delivery"
           value={`${number(result?.summary.totalDelivery ?? 0)} Resi`}
-        />
-        <MetricCard
+        /></ClickableMetric>
+        <ClickableMetric onOpen={() => void openDetail("DELIVERY_TTD", "Rincian TTD")}><MetricCard
           label="Total TTD"
           value={`${number(result?.summary.totalTtd ?? 0)} Resi`}
-        />
-        <MetricCard
+        /></ClickableMetric>
+        <ClickableMetric onOpen={() => void openDetail("DELIVERY_PENDING", "Rincian Pending")}><MetricCard
           label="Pending"
           value={`${number(result?.summary.totalPending ?? 0)} Resi`}
-        />
-        <MetricCard
+        /></ClickableMetric>
+        <ClickableMetric onOpen={() => void openDetail("DELIVERY_WEIGHT", "Rincian Berat Delivery")}><MetricCard
           label="Berat Delivery"
           value={`${number(result?.summary.totalDeliveryWeight ?? "0", 3)} Kg`}
-        />
-        <MetricCard
+        /></ClickableMetric>
+        <ClickableMetric onOpen={() => void openDetail("PICKUP_REVENUE", "Rincian Pickup Omset")}><MetricCard
           label="Pickup Omset"
           value={money(result?.summary.pickupRevenue ?? "0")}
-        />
-        <MetricCard
+        /></ClickableMetric>
+        <ClickableMetric onOpen={() => void openDetail("PICKUP_WEIGHT", "Rincian Berat Pickup")}><MetricCard
           label="Total Berat Pickup"
           value={`${number(result?.summary.pickupWeight ?? "0", 3)} Kg`}
-        />
+        /></ClickableMetric>
       </section>
 
       <section className="space-y-6">
@@ -388,19 +432,19 @@ export function MonitoringDailyClient({
                         {row.teamName}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {number(row.totalDelivery)}
+                        <MetricLink onClick={() => void openDetail("DELIVERY_TOTAL", `Rincian Total Delivery · ${row.teamName}`, row.teamName)}>{number(row.totalDelivery)}</MetricLink>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {number(row.totalTtd)}
+                        <MetricLink onClick={() => void openDetail("DELIVERY_TTD", `Rincian TTD · ${row.teamName}`, row.teamName)}>{number(row.totalTtd)}</MetricLink>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {number(row.totalPending)}
+                        <MetricLink onClick={() => void openDetail("DELIVERY_PENDING", `Rincian Pending · ${row.teamName}`, row.teamName)}>{number(row.totalPending)}</MetricLink>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {number(row.deliveryWeight, 3)} Kg
+                        <MetricLink onClick={() => void openDetail("DELIVERY_WEIGHT", `Rincian Berat Delivery · ${row.teamName}`, row.teamName)}>{number(row.deliveryWeight, 3)} Kg</MetricLink>
                       </td>
                       <td className="px-4 py-3 text-right font-bold">
-                        {percent(row.achievement)}
+                        <MetricLink onClick={() => void openDetail("DELIVERY_ACHIEVEMENT", `Rincian Achievement Delivery · ${row.teamName}`, row.teamName)}>{percent(row.achievement)}</MetricLink>
                       </td>
                       <td className="px-4 py-3 text-right">
                         {percent(row.target)}
@@ -473,19 +517,19 @@ export function MonitoringDailyClient({
                         {row.staffName}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {number(row.totalWaybills)}
+                        <MetricLink onClick={() => void openDetail("PICKUP_TOTAL", `Rincian Total Pickup · ${row.staffName}`, row.staffName)}>{number(row.totalWaybills)}</MetricLink>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {money(row.regularRevenue)}
+                        <MetricLink onClick={() => void openDetail("PICKUP_REVENUE", `Rincian Pickup Omset · ${row.staffName}`, row.staffName)}>{money(row.regularRevenue)}</MetricLink>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {number(row.regularWeight, 3)} Kg
+                        <MetricLink onClick={() => void openDetail("PICKUP_REGULAR_WEIGHT", `Rincian Berat Reguler · ${row.staffName}`, row.staffName)}>{number(row.regularWeight, 3)} Kg</MetricLink>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {number(row.marketplaceWeight, 3)} Kg
+                        <MetricLink onClick={() => void openDetail("PICKUP_MARKETPLACE_WEIGHT", `Rincian Berat Marketplace · ${row.staffName}`, row.staffName)}>{number(row.marketplaceWeight, 3)} Kg</MetricLink>
                       </td>
                       <td className="px-4 py-3 text-right font-bold">
-                        {number(row.totalWeight, 3)} Kg
+                        <MetricLink onClick={() => void openDetail("PICKUP_WEIGHT", `Rincian Total Berat Pickup · ${row.staffName}`, row.staffName)}>{number(row.totalWeight, 3)} Kg</MetricLink>
                       </td>
                     </tr>
                   ))
@@ -500,8 +544,109 @@ export function MonitoringDailyClient({
           </div>
         </TableCard>
       </section>
+      {detail && <MonitoringDetailModal detail={detail} onClose={() => setDetail(null)} />}
     </div>
   );
+}
+
+function ClickableMetric({ children, onOpen }: { children: ReactNode; onOpen: () => void }) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className="cursor-pointer rounded-2xl outline-none transition hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+    >
+      {children}
+    </div>
+  );
+}
+
+function MetricLink({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="rounded-md font-semibold text-blue-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+      {children}
+    </button>
+  );
+}
+
+function MonitoringDetailModal({
+  detail,
+  onClose,
+}: {
+  detail: { title: string; loading: boolean; error: string; result: DetailResult | null };
+  onClose: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const rows = useMemo(() => {
+    const query = search.trim().toLocaleUpperCase("id-ID");
+    if (!query) return detail.result?.rows ?? [];
+    return (detail.result?.rows ?? []).filter((row) =>
+      [row.waybill, row.customer, row.team].some((value) => value?.toLocaleUpperCase("id-ID").includes(query)),
+    );
+  }, [detail.result, search]);
+  const result = detail.result;
+  const isDelivery = result?.metric.startsWith("DELIVERY_") ?? true;
+
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true" aria-label={detail.title} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="flex max-h-[85vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+          <div><h2 className="text-xl font-bold text-slate-950">{detail.title}</h2>{result && <p className="mt-1 text-sm text-slate-500">Business Date {result.businessDate}{result.team ? ` · ${result.team}` : ""}</p>}</div>
+          <button type="button" aria-label="Tutup rincian" onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100"><X size={20} /></button>
+        </header>
+        {detail.loading ? <div className="p-14 text-center text-slate-500">Memuat rincian…</div> : detail.error ? <div className="m-5 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">{detail.error}</div> : result ? (
+          <>
+            <div className="grid gap-3 border-b border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2 lg:grid-cols-4">
+              {isDelivery ? <>
+                <DetailStat label="Total Delivery" value={`${number(result.summary.totalDelivery)} Resi`} />
+                <DetailStat label="Total TTD" value={`${number(result.summary.totalTtd)} Resi`} />
+                <DetailStat label="Pending" value={`${number(result.summary.totalPending)} Resi`} />
+                <DetailStat label="Achievement" value={`${number(result.summary.totalTtd)} / ${number(result.summary.totalDelivery)} × 100 = ${percent(result.summary.achievement)}`} />
+              </> : <>
+                <DetailStat label="Jumlah Pickup" value={`${number(result.summary.pickupCount)} Resi`} />
+                <DetailStat label="Total Omset" value={money(result.summary.pickupRevenue)} />
+                <DetailStat label="Total Berat" value={`${number(result.summary.pickupWeight, 3)} Kg`} />
+              </>}
+            </div>
+            <div className="border-b border-slate-200 p-4">
+              <label className="relative block max-w-md"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari Waybill / Customer / Team" className={`${nextgenControlClass} w-full pl-10`} /></label>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto">
+              <table className="w-full min-w-[900px] text-left text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500"><tr>
+                  <th className="px-4 py-3">Waybill</th><th className="px-4 py-3">Tanggal</th><th className="px-4 py-3">Team / Staff</th><th className="px-4 py-3">Customer</th>
+                  <th className="px-4 py-3">{isDelivery ? "Status / TTD" : "Settlement"}</th><th className="px-4 py-3 text-right">{isDelivery ? "Berat" : "Omset"}</th><th className="px-4 py-3 text-right">{isDelivery ? "Aktivitas Terakhir" : "Berat"}</th>
+                </tr></thead>
+                <tbody className="divide-y divide-slate-100">{rows.length ? rows.map((row) => <tr key={`${row.kind}-${row.waybill}`}>
+                  <td className="px-4 py-3 font-semibold text-slate-900">{row.waybill}</td><td className="px-4 py-3">{row.businessDate}</td><td className="px-4 py-3">{row.team}</td><td className="px-4 py-3">{row.customer || "—"}</td>
+                  <td className="px-4 py-3">{isDelivery ? <><span>{row.status}</span><span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-semibold ${row.ttd ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{row.ttd ? "TTD" : "Pending"}</span></> : row.settlement || "—"}</td>
+                  <td className="px-4 py-3 text-right">{isDelivery ? `${number(row.weight, 3)} Kg` : money(row.revenue ?? "0")}</td><td className="px-4 py-3 text-right">{isDelivery ? new Date(row.lastActivityAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) : `${number(row.weight, 3)} Kg`}</td>
+                </tr>) : <EmptyRow columns={7} message="Tidak ada data yang sesuai." />}</tbody>
+              </table>
+            </div>
+            <footer className="border-t border-slate-200 px-5 py-3 text-sm text-slate-500">Menampilkan {number(rows.length)} data</footer>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function DetailStat({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-xl border border-slate-200 bg-white p-3"><p className="text-xs font-medium text-slate-500">{label}</p><p className="mt-1 font-bold text-slate-950">{value}</p></div>;
 }
 
 function TableTitle({
