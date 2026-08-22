@@ -23,6 +23,7 @@ const record = (overrides: Partial<{
   courierNameRaw: overrides.courierNameRaw ?? "Courier A",
   deliveryStatusRaw: overrides.deliveryStatusRaw ?? "Penerimaan Normal",
   receiverName: null,
+  receiverAddress: null,
   chargeWeight: overrides.chargeWeight ?? new Prisma.Decimal(12),
   syncStatus: overrides.syncStatus ?? "NORMALIZED",
   isActive: overrides.isActive ?? true,

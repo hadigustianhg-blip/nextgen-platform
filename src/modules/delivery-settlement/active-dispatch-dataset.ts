@@ -15,6 +15,7 @@ const dispatchSelect = {
   courierNameRaw: true,
   deliveryStatusRaw: true,
   receiverName: true,
+  receiverAddress: true,
   chargeWeight: true,
   syncStatus: true,
   isActive: true,
