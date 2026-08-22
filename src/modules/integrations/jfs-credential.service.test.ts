@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { decryptCredential, encryptCredential } from "./credential-crypto";
 import { maskAccount, JfsIntegrationError } from "./jfs-credential.service";
+import { isJfsNetworkAllowed } from "./jfs-network-mapping";
 
 describe("JFS Integration Credential Service & Crypto Tests", () => {
   const testKey = "Q1dSSERHQldSUkVES0pGSERLV1JLRkhERktXUkhGS0Q="; // 32-byte base64 key
@@ -70,6 +71,15 @@ describe("JFS Integration Credential Service & Crypto Tests", () => {
 
     const isSameTenant = tenantA.tenantId === tenantB.tenantId && tenantA.outletId === tenantB.outletId;
     expect(isSameTenant).toBe(false);
+  });
+
+  it("TEST 7B: Development mapping does not change tenant/outlet credential scope", () => {
+    const scope = { tenantId: "tenant-development", outletId: "outlet-dev001" };
+    expect(isJfsNetworkAllowed({
+      nextgenOutletCode: "DEV001", actualJfsNetwork: "SUM001A",
+      environment: "development", developmentMapping: "DEV001:SUM001A",
+    })).toBe(true);
+    expect(scope).toEqual({ tenantId: "tenant-development", outletId: "outlet-dev001" });
   });
 
   it("TEST 8: Single-flight refresh mutex triggers exactly 1 re-login on 20 concurrent 401s", async () => {

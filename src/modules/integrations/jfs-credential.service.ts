@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
 import type { SettingsScope } from "@/modules/settings/settings.types";
 import { decryptCredential, encryptCredential } from "./credential-crypto";
+import { isJfsNetworkAllowed } from "./jfs-network-mapping";
 
 export class JfsIntegrationError extends Error {
   constructor(
@@ -169,7 +170,12 @@ export async function connectJfsIntegration(
   const actualNetworkCode = loginResult.networkCode;
 
   // 2. Network Code Binding Check
-  if (outlet.code && actualNetworkCode.toUpperCase() !== outlet.code.toUpperCase()) {
+  if (!isJfsNetworkAllowed({
+    nextgenOutletCode: outlet.code,
+    actualJfsNetwork: actualNetworkCode,
+    environment: process.env.NEXTGEN_ENVIRONMENT,
+    developmentMapping: process.env.JFS_DEV_NETWORK_MAPPING,
+  })) {
     throw new JfsIntegrationError(
       `Akun JFS terhubung ke network yang berbeda dari outlet NEXTGEN (${actualNetworkCode} vs ${outlet.code}).`,
       400,
