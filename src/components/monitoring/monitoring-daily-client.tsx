@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { matchesMonitoringDetailSearch } from "./monitoring-detail-search";
 import { CloudDownload, RefreshCw, Search, X } from "lucide-react";
 import {
   FilterCard,
@@ -75,6 +76,7 @@ type DetailRow = {
   businessDate: string;
   team: string;
   customer: string | null;
+  receiverAddress?: string | null;
   status?: string;
   ttd?: boolean;
   settlement?: string | null;
@@ -587,9 +589,7 @@ function MonitoringDetailModal({
   const rows = useMemo(() => {
     const query = search.trim().toLocaleUpperCase("id-ID");
     if (!query) return detail.result?.rows ?? [];
-    return (detail.result?.rows ?? []).filter((row) =>
-      [row.waybill, row.customer, row.team].some((value) => value?.toLocaleUpperCase("id-ID").includes(query)),
-    );
+    return (detail.result?.rows ?? []).filter((row) => matchesMonitoringDetailSearch(row, query));
   }, [detail.result, search]);
   const result = detail.result;
   const isDelivery = result?.metric.startsWith("DELIVERY_") ?? true;
@@ -622,19 +622,19 @@ function MonitoringDetailModal({
               </>}
             </div>
             <div className="border-b border-slate-200 p-4">
-              <label className="relative block max-w-md"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari Waybill / Customer / Team" className={`${nextgenControlClass} w-full pl-10`} /></label>
+              <label className="relative block max-w-md"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari Waybill / Customer / Team / Alamat" className={`${nextgenControlClass} w-full pl-10`} /></label>
             </div>
             <div className="min-h-0 flex-1 overflow-auto">
-              <table className="w-full min-w-[900px] text-left text-sm">
+              <table className="w-full min-w-[1120px] text-left text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500"><tr>
-                  <th className="px-4 py-3">Waybill</th><th className="px-4 py-3">Tanggal</th><th className="px-4 py-3">Team / Staff</th><th className="px-4 py-3">Customer</th>
+                  <th className="px-4 py-3">Waybill</th><th className="px-4 py-3">Tanggal</th><th className="px-4 py-3">Team / Staff</th><th className="px-4 py-3">Customer</th>{isDelivery && <th className="px-4 py-3">Alamat Penerima</th>}
                   <th className="px-4 py-3">{isDelivery ? "Status / TTD" : "Settlement"}</th><th className="px-4 py-3 text-right">{isDelivery ? "Berat" : "Omset"}</th><th className="px-4 py-3 text-right">{isDelivery ? "Aktivitas Terakhir" : "Berat"}</th>
                 </tr></thead>
                 <tbody className="divide-y divide-slate-100">{rows.length ? rows.map((row) => <tr key={`${row.kind}-${row.waybill}`}>
-                  <td className="px-4 py-3 font-semibold text-slate-900">{row.waybill}</td><td className="px-4 py-3">{row.businessDate}</td><td className="px-4 py-3">{row.team}</td><td className="px-4 py-3">{row.customer || "—"}</td>
+                  <td className="px-4 py-3 font-semibold text-slate-900">{row.waybill}</td><td className="px-4 py-3">{row.businessDate}</td><td className="px-4 py-3">{row.team}</td><td className="px-4 py-3">{row.customer || "—"}</td>{isDelivery && <td className="max-w-[280px] whitespace-normal px-4 py-3 leading-snug">{row.receiverAddress || "-"}</td>}
                   <td className="px-4 py-3">{isDelivery ? <><span>{row.status}</span><span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-semibold ${row.ttd ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{row.ttd ? "TTD" : "Pending"}</span></> : row.settlement || "—"}</td>
                   <td className="px-4 py-3 text-right">{isDelivery ? `${number(row.weight, 3)} Kg` : money(row.revenue ?? "0")}</td><td className="px-4 py-3 text-right">{isDelivery ? new Date(row.lastActivityAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) : `${number(row.weight, 3)} Kg`}</td>
-                </tr>) : <EmptyRow columns={7} message="Tidak ada data yang sesuai." />}</tbody>
+                </tr>) : <EmptyRow columns={isDelivery ? 8 : 7} message="Tidak ada data yang sesuai." />}</tbody>
               </table>
             </div>
             <footer className="border-t border-slate-200 px-5 py-3 text-sm text-slate-500">Menampilkan {number(rows.length)} data</footer>

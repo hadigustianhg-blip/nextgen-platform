@@ -5,7 +5,9 @@ import { buildMonitoringDailyDetail, type MonitoringDetailMetric } from "./monit
 const date = new Date("2026-08-22T00:00:00.000Z");
 const delivery = (waybill: string, team: string, status: string, weight: number) => ({
   id: waybill, operationalDate: date, waybillNo: waybill, courierNameRaw: team,
-  deliveryStatusRaw: status, receiverName: `Receiver ${waybill}`, chargeWeight: new Prisma.Decimal(weight),
+  deliveryStatusRaw: status, receiverName: `Receiver ${waybill}`,
+  receiverAddress: waybill === "D2" ? null : `Jalan Penerima ${waybill}`,
+  chargeWeight: new Prisma.Decimal(weight),
   syncStatus: "NORMALIZED" as const, isActive: true, sourceRecordKey: waybill,
   sourceFetchedAt: new Date("2026-08-22T10:00:00.000Z"), dispatchAt: null,
   createdAt: date, updatedAt: date,
@@ -32,6 +34,8 @@ const build = (metric: MonitoringDetailMetric, team?: string) => buildMonitoring
 describe("Monitoring Daily detail drilldown", () => {
   it("keeps delivery detail counts, TTD, pending, weight, and achievement equal to the existing rules", () => {
     expect(build("DELIVERY_TOTAL").rows).toHaveLength(3);
+    expect(build("DELIVERY_TOTAL").rows[0]).toMatchObject({ receiverAddress: "Jalan Penerima D1" });
+    expect(build("DELIVERY_TOTAL").rows[1]).toMatchObject({ receiverAddress: null });
     expect(build("DELIVERY_TTD").rows.map((row) => row.waybill)).toEqual(["D1", "D3"]);
     expect(build("DELIVERY_PENDING").rows.map((row) => row.waybill)).toEqual(["D2"]);
     expect(build("DELIVERY_WEIGHT").summary.deliveryWeight).toBe("4");

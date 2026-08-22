@@ -57,6 +57,7 @@ export function buildMonitoringDailyDetail(input: {
     businessDate: input.businessDate,
     team: row.courierNameRaw?.trim() || "Team Belum Terpetakan",
     customer: row.receiverName?.trim() || null,
+    receiverAddress: row.receiverAddress?.trim() || null,
     status: row.deliveryStatusRaw?.trim() || "Status tidak tersedia",
     ttd: isMonitoringTtd(row.deliveryStatusRaw),
     weight: row.chargeWeight?.toString() ?? "0",

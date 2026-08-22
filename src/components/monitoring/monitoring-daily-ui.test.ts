@@ -80,5 +80,8 @@ describe("Monitoring Daily UI contract", () => {
     expect(source).toContain("Rincian Total Delivery");
     expect(source).toContain("Rincian Pickup Omset");
     expect(source).toContain("Menampilkan {number(rows.length)} data");
+    expect(source).toContain("Alamat Penerima");
+    expect(source).toContain("Cari Waybill / Customer / Team / Alamat");
+    expect(source).toContain('row.receiverAddress || "-"');
   });
 });

@@ -11,7 +11,7 @@ import { monitoringMonthlyQuerySchema } from "./monitoring-monthly.validation";
 describe("Monitoring Monthly", () => {
   it("builds daily and team metrics from unique active final dispatch records", () => {
     const base = {
-      receiverName: null, chargeWeight: new Prisma.Decimal(1), syncStatus: "NORMALIZED" as const,
+      receiverName: null, receiverAddress: null, chargeWeight: new Prisma.Decimal(1), syncStatus: "NORMALIZED" as const,
       isActive: true, sourceFetchedAt: new Date("2026-07-31T12:00:00Z"),
       dispatchAt: null, createdAt: new Date("2026-07-31T10:00:00Z"),
       updatedAt: new Date("2026-07-31T12:00:00Z"),
