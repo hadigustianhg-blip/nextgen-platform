@@ -2,6 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 import { jakartaOperationalDate } from "@/lib/dates/jakarta-date";
+import { PICKUP_SCHEDULING_PROVIDER } from "./pickup-scheduling.constants";
 
 export type PickupScheduleRow = {
   id: string; businessDate: Date; sourceOrderId: string; externalJfsId: string | null;
@@ -68,6 +69,7 @@ export function groupPickupSchedules(rows: PickupScheduleRow[]) {
     groupId: digest(`pickup-schedule:${row.id}`),
     recordId: row.id,
     externalJfsId: row.externalJfsId,
+    sourceProvider: row.sourceProvider,
     sellerName: row.senderNameMasked || row.customerName,
     senderPhoneMasked: row.senderPhoneMasked,
     pickupAddressMasked: row.pickupAddressMasked,
@@ -110,11 +112,13 @@ function matches(row: PickupScheduleRow, input: ListInput) {
 }
 
 async function scopedRows(input: Pick<ListInput, "tenantId" | "outletId" | "startDate" | "endDate">) {
-  return prisma.rawPickupSchedule.findMany({
+  const rows = await prisma.rawPickupSchedule.findMany({
     where: { tenantId: input.tenantId, outletId: input.outletId,
+      sourceProvider: PICKUP_SCHEDULING_PROVIDER,
       businessDate: { gte: new Date(`${input.startDate}T00:00:00.000Z`), lte: new Date(`${input.endDate}T00:00:00.000Z`) } },
     orderBy: [{ sourceUpdatedAt: "desc" }, { sourceInputAt: "desc" }, { createdAt: "desc" }],
   });
+  return rows.filter(row => row.sourceProvider === PICKUP_SCHEDULING_PROVIDER);
 }
 
 export async function listPickupScheduling(input: ListInput) {

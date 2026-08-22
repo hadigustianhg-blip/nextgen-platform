@@ -4,8 +4,9 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { executeTrustedMultiOutletScraper } from "@/modules/integrations/jfs-multi-outlet-client";
 import type { SettingsScope } from "@/modules/settings/settings.types";
+import { PICKUP_SCHEDULING_PROVIDER } from "./pickup-scheduling.constants";
 
-export const PICKUP_SCHEDULING_PROVIDER = "JFS_OMS_ORDER_DISPATCH";
+export { PICKUP_SCHEDULING_PROVIDER } from "./pickup-scheduling.constants";
 const DEFAULT_STATUS_CODES = "100,106,101,102,105";
 const locks = new Set<string>();
 const text = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : null;

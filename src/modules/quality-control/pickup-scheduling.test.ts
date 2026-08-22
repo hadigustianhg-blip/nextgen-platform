@@ -123,7 +123,22 @@ describe("latest-per-waybill projection and filters", () => {
       senderCity: "bandung", senderArea: "cicendo" });
     const result = await listPickupScheduling({ tenantId: "tenant", outletId: "outlet", ...parsed });
     expect(result.summary.totalWaybills).toBe(1);
-    expect(db.rawPickupSchedule.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ tenantId: "tenant", outletId: "outlet" }) }));
+    expect(db.rawPickupSchedule.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
+      tenantId: "tenant", outletId: "outlet", sourceProvider: PICKUP_SCHEDULING_PROVIDER,
+    }) }));
+  });
+
+  it("excludes DEVUI before projection, filters, counters, and pagination", async () => {
+    memory.rows = [
+      row("real", { externalJfsId: "100", waybillNo: "JFS-REAL", senderPhoneMasked: "081***" }),
+      row("dummy-1", { externalJfsId: "DEVUI-1", waybillNo: "DEVUI-ONE", sourceProvider: "DEVUI", senderPhoneMasked: "080***" }),
+      row("dummy-2", { externalJfsId: "DEVUI-2", waybillNo: "DEVUI-TWO", sourceProvider: "DEVUI", senderPhoneMasked: "080***" }),
+    ];
+    const parsed = pickupSchedulingQuerySchema.parse({ startDate: "2026-08-22", endDate: "2026-08-22" });
+    const result = await listPickupScheduling({ tenantId: "tenant", outletId: "outlet", ...parsed });
+    expect(result.groups.map(group => group.representativeWaybill)).toEqual(["JFS-REAL"]);
+    expect(result.summary).toEqual({ totalWaybills: 1, totalGroups: 1, validMaskedPhones: 1 });
+    expect(result.pagination.total).toBe(1);
   });
 });
 
@@ -165,6 +180,17 @@ describe("just-in-time WhatsApp detail", () => {
     expect(result.senderMobilePhone).toBe("0816700535");
     expect(memory.audits.at(-1)).toMatchObject({ metadata: expect.objectContaining({ event: "WA_CONFIRMATION_OPENED", waybill: "WB-123" }) });
     expect(JSON.stringify(memory.audits)).not.toContain("0816700535");
+  });
+
+  it("rejects a DEVUI group without invoking scoped JFS detail", async () => {
+    const dummy = row("dummy", { externalJfsId: "DEVUI-1", waybillNo: "DEVUI-WB", sourceProvider: "DEVUI" });
+    memory.rows = [dummy];
+    const groupId = groupPickupSchedules([dummy] as never[])[0]!.groupId;
+    const fetchDetail = vi.fn();
+    await expect(getPickupSchedulingDetail({ tenantId: "tenant", outletId: "outlet", actorId: "actor",
+      startDate: "2026-08-22", endDate: "2026-08-22", groupId, sessionOutletCode: "DEV001", fetchDetail }))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(fetchDetail).not.toHaveBeenCalled();
   });
 });
 

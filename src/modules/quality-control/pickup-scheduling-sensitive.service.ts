@@ -5,6 +5,7 @@ import { executeTrustedMultiOutletScraper } from "@/modules/integrations/jfs-mul
 import type { SettingsScope } from "@/modules/settings/settings.types";
 import { resolvePickupGroup } from "./pickup-scheduling.service";
 import { normalizePickupPhone } from "./pickup-scheduling-whatsapp";
+import { PICKUP_SCHEDULING_PROVIDER } from "./pickup-scheduling.constants";
 
 const safeText = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : null;
 
@@ -43,6 +44,9 @@ export async function getPickupSchedulingDetail(input: {
 }) {
   const group = await resolvePickupGroup(input);
   if (!group) throw Object.assign(new Error("NOT_FOUND"), { code: "NOT_FOUND" });
+  if (group.sourceProvider !== PICKUP_SCHEDULING_PROVIDER) {
+    throw new PickupSenderDetailError("INVALID_PICKUP_SCHEDULING_SOURCE", 403);
+  }
   if (!group.externalJfsId) throw new PickupSenderDetailError("EXTERNAL_JFS_ID_UNAVAILABLE");
   const requestId = input.requestId || randomUUID();
   const fetchDetail = input.fetchDetail || fetchPickupSenderDetail;
