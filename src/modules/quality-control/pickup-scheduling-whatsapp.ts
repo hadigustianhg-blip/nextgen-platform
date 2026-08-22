@@ -6,7 +6,11 @@ export type PickupMessageOrder = {
 
 export function normalizePickupPhone(value: string | null | undefined) {
   if (!value) return null;
-  let digits = value.replace(/[^\d]/g, "");
+  const trimmed = value.trim();
+  const plusCount = (trimmed.match(/\+/g) || []).length;
+  if (!trimmed || !/^[+\d\s()\-]+$/.test(trimmed) || plusCount > 1
+    || (plusCount === 1 && !trimmed.startsWith("+") && !trimmed.startsWith("(+"))) return null;
+  let digits = trimmed.replace(/[\s()\-+]/g, "");
   if (digits.startsWith("0")) digits = `62${digits.slice(1)}`;
   else if (digits.startsWith("8")) digits = `62${digits}`;
   if (!/^628\d{7,12}$/.test(digits)) return null;

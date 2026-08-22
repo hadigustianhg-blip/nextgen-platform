@@ -1,174 +1,85 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
+import { executeTrustedMultiOutletScraper } from "@/modules/integrations/jfs-multi-outlet-client";
+import type { SettingsScope } from "@/modules/settings/settings.types";
 import { resolvePickupGroup } from "./pickup-scheduling.service";
 import { normalizePickupPhone } from "./pickup-scheduling-whatsapp";
 
 const safeText = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : null;
-const TRANSIENT_STATUSES = new Set([502, 503, 504]);
-
-type SenderDetailBody = {
-  success?: boolean;
-  data?: {
-    senderName?: unknown;
-    senderMobilePhone?: unknown;
-    senderCityName?: unknown;
-  } | null;
-  error?: { code?: unknown };
-};
 
 export type PickupSenderDetail = {
-  waybill: string;
-  senderName: string | null;
-  senderMobilePhone: string | null;
-  senderCityName: string | null;
+  externalJfsId: string; waybill: string; senderName: string | null;
+  senderMobilePhone: string; senderCityName: string | null;
 };
 
 export class PickupSenderDetailError extends Error {
-  constructor(
-    public readonly code: string,
-    public readonly status: number,
-    public readonly contentType: string,
-    public readonly responseKeys: string[],
-  ) {
-    super(code);
-  }
-}
-
-function middlewareBaseUrl() {
-  const value = process.env.JFS_MIDDLEWARE_BASE_URL?.trim();
-  if (!value) throw new PickupSenderDetailError("MIDDLEWARE_NOT_CONFIGURED", 500, "", []);
-  return value;
-}
-
-function isTransient(error: unknown) {
-  return error instanceof PickupSenderDetailError
-    ? TRANSIENT_STATUSES.has(error.status)
-    : error instanceof DOMException && error.name === "TimeoutError";
+  constructor(public readonly code: string, public readonly status = 502) { super(code); }
 }
 
 export async function fetchPickupSenderDetail(
-  waybill: string,
-  fetcher: typeof fetch = fetch,
+  externalJfsId: string,
+  scope: SettingsScope,
+  execute: typeof executeTrustedMultiOutletScraper = executeTrustedMultiOutletScraper,
 ): Promise<PickupSenderDetail> {
-  const canonicalWaybill = waybill.trim();
-  const url = new URL("/jfs-sender-detail", middlewareBaseUrl());
-  url.searchParams.set("waybillNo", canonicalWaybill);
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const response = await fetcher(url, {
-        cache: "no-store",
-        headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(20_000),
-      });
-      const contentType = response.headers.get("content-type") || "";
-      const body = contentType.toLowerCase().includes("application/json")
-        ? await response.json().catch(() => null) as SenderDetailBody | null
-        : null;
-      const responseKeys = body && typeof body === "object" ? Object.keys(body) : [];
-
-      if (!response.ok || body?.success !== true || !body.data) {
-        const code = safeText(body?.error?.code)
-          || (response.status === 404 ? "SENDER_DETAIL_NOT_FOUND" : "SENDER_DETAIL_FAILED");
-        throw new PickupSenderDetailError(code, response.status, contentType, responseKeys);
-      }
-
-      return {
-        waybill: canonicalWaybill,
-        senderName: safeText(body.data.senderName),
-        senderMobilePhone: safeText(body.data.senderMobilePhone),
-        senderCityName: safeText(body.data.senderCityName),
-      };
-    } catch (error) {
-      if (attempt === 0 && isTransient(error)) continue;
-      if (error instanceof PickupSenderDetailError) throw error;
-      throw new PickupSenderDetailError(
-        error instanceof DOMException && error.name === "TimeoutError" ? "SENDER_DETAIL_TIMEOUT" : "SENDER_DETAIL_FAILED",
-        error instanceof DOMException && error.name === "TimeoutError" ? 504 : 502,
-        "",
-        [],
-      );
-    }
+  try {
+    const data = await execute(scope, "OMS_SCHEDULING_DETAIL", { externalJfsId }) as Record<string, unknown>;
+    const returnedId = safeText(data.id);
+    const waybill = safeText(data.waybillId);
+    const phone = safeText(data.senderMobilePhone);
+    if (!returnedId || !waybill || !phone) throw new PickupSenderDetailError("DETAIL_JFS_INVALID");
+    return { externalJfsId: returnedId, waybill, senderName: safeText(data.senderName),
+      senderMobilePhone: phone, senderCityName: safeText(data.senderCityName) };
+  } catch (error) {
+    if (error instanceof PickupSenderDetailError) throw error;
+    throw new PickupSenderDetailError("DETAIL_JFS_UNAVAILABLE");
   }
-  throw new PickupSenderDetailError("SENDER_DETAIL_FAILED", 502, "", []);
-}
-
-function maskWaybill(waybill: string) {
-  return waybill.length <= 4 ? waybill : `${"*".repeat(Math.min(8, waybill.length - 4))}${waybill.slice(-4)}`;
 }
 
 export async function getPickupSchedulingDetail(input: {
-  tenantId: string; outletId: string; actorId: string;
-  startDate: string; endDate: string;
-  groupId: string; sessionOutletCode: string | null;
-  requestId?: string;
+  tenantId: string; outletId: string; actorId: string; startDate: string; endDate: string;
+  groupId: string; sessionOutletCode: string | null; requestId?: string;
   fetchDetail?: typeof fetchPickupSenderDetail;
 }) {
   const group = await resolvePickupGroup(input);
   if (!group) throw Object.assign(new Error("NOT_FOUND"), { code: "NOT_FOUND" });
+  if (!group.externalJfsId) throw new PickupSenderDetailError("EXTERNAL_JFS_ID_UNAVAILABLE");
   const requestId = input.requestId || randomUUID();
   const fetchDetail = input.fetchDetail || fetchPickupSenderDetail;
-  const uniqueWaybills = [...new Set(group.orders.map((order) => order.waybill.trim()).filter(Boolean))];
-
-  const details = await Promise.all(uniqueWaybills.map(async (waybill) => {
-    const startedAt = Date.now();
-    try {
-      const detail = await fetchDetail(waybill);
-      return { ...detail, status: "success" as const, errorCode: null };
-    } catch (error) {
-      const failure = error instanceof PickupSenderDetailError ? error : null;
-      console.warn("PICKUP_SCHEDULING_SENDER_DETAIL_FAILED", {
-        requestId,
-        waybill: maskWaybill(waybill),
-        stage: "FETCH_SENDER_DETAIL",
-        httpStatus: failure?.status || 502,
-        responseContentType: failure?.contentType || null,
-        responseKeys: failure?.responseKeys || [],
-        errorCode: failure?.code || "SENDER_DETAIL_FAILED",
-        durationMs: Date.now() - startedAt,
+  const expectedWaybill = group.representativeWaybill.trim();
+  let detail: PickupSenderDetail;
+  try {
+    detail = await fetchDetail(group.externalJfsId, { tenantId: input.tenantId, outletId: input.outletId });
+    if (detail.externalJfsId !== group.externalJfsId || detail.waybill.trim() !== expectedWaybill) {
+      console.warn("PICKUP_SCHEDULING_DETAIL_MISMATCH", {
+        requestId, recordId: group.recordId, waybill: expectedWaybill, errorCode: "DETAIL_IDENTITY_MISMATCH",
       });
-      return {
-        waybill,
-        senderName: null,
-        senderMobilePhone: null,
-        senderCityName: null,
-        status: "failed" as const,
-        errorCode: failure?.code || "SENDER_DETAIL_FAILED",
-      };
+      throw new PickupSenderDetailError("DETAIL_IDENTITY_MISMATCH");
     }
-  }));
+    if (!normalizePickupPhone(detail.senderMobilePhone)) throw new PickupSenderDetailError("PHONE_INVALID");
+  } catch (error) {
+    if (!(error instanceof PickupSenderDetailError && error.code === "DETAIL_IDENTITY_MISMATCH")) {
+      console.warn("PICKUP_SCHEDULING_DETAIL_FAILED", {
+        requestId, recordId: group.recordId, waybill: expectedWaybill,
+        errorCode: error instanceof PickupSenderDetailError ? error.code : "DETAIL_JFS_UNAVAILABLE",
+      });
+    }
+    throw error;
+  }
 
-  const successful = details.find((detail) => detail.status === "success");
-  const detailWithValidPhone = details.find((detail) =>
-    detail.status === "success" && normalizePickupPhone(detail.senderMobilePhone));
-  const listPhone = normalizePickupPhone(group.senderPhoneMasked) ? group.senderPhoneMasked : null;
-  const senderMobilePhone = detailWithValidPhone?.senderMobilePhone || listPhone;
-
-  await prisma.auditLog.create({
-    data: {
-      tenantId: input.tenantId, outletId: input.outletId, actorId: input.actorId,
-      action: "CREATE", entityType: "PICKUP_SCHEDULING_SENSITIVE_VIEW",
-      entityId: group.groupId,
-      metadata: {
-        requestId, startDate: input.startDate, endDate: input.endDate,
-        representativeWaybill: group.representativeWaybill,
-        requested: uniqueWaybills.length,
-        succeeded: details.filter((detail) => detail.status === "success").length,
-        failed: details.filter((detail) => detail.status === "failed").length,
-        result: successful ? "SUCCESS" : "FAILED",
-      },
-    },
-  });
+  await prisma.auditLog.create({ data: {
+    tenantId: input.tenantId, outletId: input.outletId, actorId: input.actorId,
+    action: "CREATE", entityType: "PICKUP_SCHEDULING_SENSITIVE_VIEW", entityId: group.recordId,
+    metadata: { requestId, event: "WA_CONFIRMATION_OPENED", recordId: group.recordId, waybill: expectedWaybill },
+  } });
 
   return {
-    requestId,
-    groupId: group.groupId,
-    senderName: successful?.senderName || group.sellerName,
-    senderMobilePhone,
-    senderCityName: successful?.senderCityName || null,
+    requestId, groupId: group.groupId, senderName: detail.senderName || group.sellerName,
+    senderMobilePhone: detail.senderMobilePhone, senderCityName: detail.senderCityName,
     outletCode: group.outletCode || input.sessionOutletCode,
-    details,
+    details: [{ waybill: detail.waybill, senderName: detail.senderName,
+      senderMobilePhone: detail.senderMobilePhone, senderCityName: detail.senderCityName,
+      status: "success" as const, errorCode: null }],
     orders: group.orders.map(({ waybill, source, goodsName }) => ({ waybill, source, goodsName })),
   };
 }

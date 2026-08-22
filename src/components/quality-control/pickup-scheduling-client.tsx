@@ -13,7 +13,11 @@ import {
 
 type Order = {
   id: string; waybill: string; source: string | null; goodsName: string | null;
-  weight: number; status: string | null; businessDate: string; ageLabel: string;
+  weight: number; status: string | null; statusCode: number | null; businessDate: string; ageLabel: string;
+  inputTime: string | null; sendName: string | null; senderCompany: string | null;
+  senderCity: string | null; senderArea: string | null; pickupStaff: string | null;
+  pickupNetwork: string | null; assigned: boolean; pickupFailed: boolean;
+  pickFailReason: string | null; bestPickTime: string | null;
 };
 type Group = {
   groupId: string; sellerName: string | null; senderPhoneMasked: string | null;
@@ -58,15 +62,17 @@ const validRange = (startDate: string, endDate: string) => {
 export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boolean; canConfirm: boolean }) {
   const [startDate, setStartDate] = useState(defaultRange.startDate);
   const [endDate, setEndDate] = useState(defaultRange.endDate);
-  const [inputs, setInputs] = useState({ waybill: "", senderName: "", sourcePlatform: "" });
+  const [inputs, setInputs] = useState({
+    waybill: "", senderName: "", sourcePlatform: "", orderStatus: "", sendName: "",
+    pickupNetwork: "", pickupStaff: "", assignment: "ALL", pickupFailure: "ALL",
+    senderCity: "", senderArea: "",
+  });
   const [filters, setFilters] = useState(inputs);
   const [result, setResult] = useState(empty);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
-  const [detailLoading, setDetailLoading] = useState<Set<string>>(() => new Set());
-  const [detailCache, setDetailCache] = useState<Record<string, SenderDetail>>({});
   const groupDetailCache = useRef(new Map<string, GroupDetail>());
   const detailRequests = useRef(new Map<string, Promise<GroupDetail>>());
   const confirmationLocks = useRef(new Set<string>());
@@ -139,7 +145,6 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
     const active = detailRequests.current.get(groupCacheKey);
     if (active) return active;
 
-    setDetailLoading((current) => new Set(current).add(group.groupId));
     const request = (async () => {
       const query = new URLSearchParams({ startDate, endDate });
       const response = await fetch(`/api/quality-control/pickup-scheduling/groups/${group.groupId}/detail?${query}`, { cache: "no-store" });
@@ -149,22 +154,12 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
       }
       const detail = body as GroupDetail;
       groupDetailCache.current.set(groupCacheKey, detail);
-      setDetailCache((current) => {
-        const next = { ...current };
-        for (const item of detail.details) next[item.waybill.trim()] = item;
-        return next;
-      });
       return detail;
     })();
     detailRequests.current.set(groupCacheKey, request);
     try {
       return await request;
-    } finally {
-      detailRequests.current.delete(groupCacheKey);
-      setDetailLoading((current) => {
-        const next = new Set(current); next.delete(group.groupId); return next;
-      });
-    }
+    } finally { detailRequests.current.delete(groupCacheKey); }
   }, [endDate, startDate]);
 
   async function confirm(group: Group) {
@@ -189,7 +184,7 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
       const code = error instanceof Error ? error.message : "DETAIL_FAILED";
       setNotice(code === "PHONE_UNAVAILABLE" ? "Nomor WhatsApp pengirim tidak tersedia."
         : code === "PHONE_INVALID" ? "Nomor WhatsApp tidak valid."
-        : "Gagal mengambil detail pengirim.");
+        : "Detail JFS tidak dapat diambil. Coba lagi.");
     } finally {
       confirmationLocks.current.delete(group.groupId);
       setConfirming(null);
@@ -197,7 +192,8 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
   }
 
   const reset = () => {
-    const blank = { waybill: "", senderName: "", sourcePlatform: "" };
+    const blank = { waybill: "", senderName: "", sourcePlatform: "", orderStatus: "", sendName: "",
+      pickupNetwork: "", pickupStaff: "", assignment: "ALL", pickupFailure: "ALL", senderCity: "", senderArea: "" };
     setInputs(blank); setFilters(blank);
   };
   const preset = (daysBack: number) => {
@@ -207,10 +203,7 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
   const toggle = (group: Group) => setExpanded((current) => {
     const next = new Set(current);
     if (next.has(group.groupId)) next.delete(group.groupId);
-    else {
-      next.add(group.groupId);
-      void loadGroupDetail(group).catch(() => setNotice("Detail waybill gagal dimuat."));
-    }
+    else next.add(group.groupId);
     return next;
   });
 
@@ -228,18 +221,30 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
       <button onClick={() => preset(0)} className={nextgenNeutralButtonClass}>Hari Ini</button>
       <button onClick={() => preset(3)} className={nextgenNeutralButtonClass}>3 Hari Terakhir</button>
       <button onClick={() => preset(7)} className={nextgenNeutralButtonClass}>7 Hari Terakhir</button>
-    </div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+    </div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       <input aria-label="Tanggal Mulai" type="date" value={startDate} onChange={(event) => { setPage(1); setStartDate(event.target.value); }} className={nextgenControlClass}/>
       <input aria-label="Tanggal Akhir" type="date" value={endDate} onChange={(event) => { setPage(1); setEndDate(event.target.value); }} className={nextgenControlClass}/>
       <input aria-label="Search Resi" placeholder="Search Resi" value={inputs.waybill} onChange={(event) => setInputs({ ...inputs, waybill: event.target.value })} className={nextgenControlClass}/>
       <input aria-label="Search Pengirim" placeholder="Search Pengirim" value={inputs.senderName} onChange={(event) => setInputs({ ...inputs, senderName: event.target.value })} className={nextgenControlClass}/>
       <input aria-label="Search Source" placeholder="Search Source/Platform" value={inputs.sourcePlatform} onChange={(event) => setInputs({ ...inputs, sourcePlatform: event.target.value })} className={nextgenControlClass}/>
+      <input aria-label="Status JFS" placeholder="Status JFS / kode" value={inputs.orderStatus} onChange={(event) => setInputs({ ...inputs, orderStatus: event.target.value })} className={nextgenControlClass}/>
+      <input aria-label="Metode Pickup" placeholder="Metode Pickup" value={inputs.sendName} onChange={(event) => setInputs({ ...inputs, sendName: event.target.value })} className={nextgenControlClass}/>
+      <input aria-label="Network Pickup" placeholder="Network Pickup" value={inputs.pickupNetwork} onChange={(event) => setInputs({ ...inputs, pickupNetwork: event.target.value })} className={nextgenControlClass}/>
+      <input aria-label="Kurir Pickup" placeholder="Kurir Pickup" value={inputs.pickupStaff} onChange={(event) => setInputs({ ...inputs, pickupStaff: event.target.value })} className={nextgenControlClass}/>
+      <select aria-label="Assignment" value={inputs.assignment} onChange={(event) => setInputs({ ...inputs, assignment: event.target.value })} className={nextgenControlClass}>
+        <option value="ALL">Semua Assignment</option><option value="ASSIGNED">Sudah Ada Kurir</option><option value="UNASSIGNED">Belum Ada Kurir</option>
+      </select>
+      <select aria-label="Pickup Failure" value={inputs.pickupFailure} onChange={(event) => setInputs({ ...inputs, pickupFailure: event.target.value })} className={nextgenControlClass}>
+        <option value="ALL">Semua Pickup</option><option value="FAILED">Gagal Pickup</option><option value="NOT_FAILED">Tidak Gagal</option>
+      </select>
+      <input aria-label="Kota Pengirim" placeholder="Kota Pengirim" value={inputs.senderCity} onChange={(event) => setInputs({ ...inputs, senderCity: event.target.value })} className={nextgenControlClass}/>
+      <input aria-label="Area Pengirim" placeholder="Area Pengirim" value={inputs.senderArea} onChange={(event) => setInputs({ ...inputs, senderArea: event.target.value })} className={nextgenControlClass}/>
       <button onClick={reset} className={nextgenNeutralButtonClass}>Reset Filter</button>
     </div></FilterCard>
     <section className="grid gap-4 md:grid-cols-3">
       <MetricCard label="Total Resi" value={result.summary.totalWaybills.toLocaleString("id-ID")}/>
-      <MetricCard label="Total Grup Pengirim" value={result.summary.totalGroups.toLocaleString("id-ID")}/>
-      <MetricCard label="Nomor Valid" value={result.summary.validMaskedPhones.toLocaleString("id-ID")}/>
+      <MetricCard label="Total Jadwal" value={result.summary.totalGroups.toLocaleString("id-ID")}/>
+      <MetricCard label="Nomor Tersedia" value={result.summary.validMaskedPhones.toLocaleString("id-ID")}/>
     </section>
     <div className="space-y-3">
       {loading ? <div className="py-16 text-center text-slate-500"><LoaderCircle className="mx-auto animate-spin"/>Memuat data…</div>
@@ -256,23 +261,18 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
           </div>
           {expanded.has(group.groupId) && <div className="border-t border-slate-100 p-4">
             <p className="mb-3 text-sm text-slate-500">{group.pickupAddressMasked || "Alamat pickup tersensor tidak tersedia."}</p>
-            <TableCard><div className="overflow-x-auto"><table className="w-full min-w-[800px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{["No","Tanggal","Umur","Nomor Resi","Isi Barang","Platform","Berat","Status"].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead>
+            <TableCard><div className="overflow-x-auto"><table className="w-full min-w-[1700px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{["No","Waybill","Waktu Input","Source","Status JFS","Metode","Pengirim","Perusahaan","No. Pengirim","Area Pengirim","Alamat Pickup","Kurir Pickup","Waktu Pickup Terbaik","Berat","Gagal Pickup"].map((label) => <th key={label} className="px-4 py-3">{label}</th>)}</tr></thead>
               <tbody className="divide-y">{group.orders.map((order, orderIndex) => <tr key={order.id}>
-                <td className="px-4 py-3">{orderIndex + 1}</td><td className="px-4 py-3">{order.businessDate}</td>
-                <td className="px-4 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">{order.ageLabel}</span></td>
-                <td className="px-4 py-3 font-semibold">
-                  <div>{order.waybill}</div>
-                  <div className="mt-1 text-xs font-normal text-slate-500">
-                    {detailLoading.has(group.groupId) && !detailCache[order.waybill.trim()] ? "Memuat detail…"
-                      : detailCache[order.waybill.trim()]?.status === "success"
-                        ? [detailCache[order.waybill.trim()].senderName, detailCache[order.waybill.trim()].senderCityName].filter(Boolean).join(" · ") || "Detail pengirim tersedia"
-                        : detailCache[order.waybill.trim()]?.status === "failed" ? "Detail waybill gagal dimuat."
-                        : "Detail belum dimuat"}
-                  </div>
-                </td>
-                <td className="px-4 py-3">{order.goodsName || "—"}</td><td className="px-4 py-3">{order.source || "—"}</td>
-                <td className="px-4 py-3">{order.weight.toLocaleString("id-ID")}</td><td className="px-4 py-3">{order.status || "—"}</td>
+                <td className="px-4 py-3">{orderIndex + 1}</td><td className="px-4 py-3 font-semibold">{order.waybill}</td>
+                <td className="px-4 py-3">{order.inputTime ? new Date(order.inputTime).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) : order.businessDate}</td>
+                <td className="px-4 py-3">{order.source || "—"}</td><td className="px-4 py-3">{order.statusCode ? `${order.statusCode} · ` : ""}{order.status || "—"}</td>
+                <td className="px-4 py-3">{order.sendName || "—"}</td><td className="px-4 py-3">{group.sellerName || "—"}</td>
+                <td className="px-4 py-3">{order.senderCompany || "—"}</td><td className="px-4 py-3">{group.senderPhoneMasked || "—"}</td>
+                <td className="px-4 py-3">{[order.senderCity, order.senderArea].filter(Boolean).join(" · ") || "—"}</td>
+                <td className="max-w-[320px] whitespace-normal px-4 py-3">{group.pickupAddressMasked || "—"}</td>
+                <td className="px-4 py-3">{order.pickupStaff || "Belum ada"}</td><td className="px-4 py-3">{order.bestPickTime ? new Date(order.bestPickTime).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) : "—"}</td>
+                <td className="px-4 py-3">{order.weight.toLocaleString("id-ID")}</td><td className="px-4 py-3">{order.pickupFailed ? order.pickFailReason || "Ya" : "Tidak"}</td>
               </tr>)}</tbody>
             </table></div></TableCard>
           </div>}
