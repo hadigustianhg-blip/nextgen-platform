@@ -23,8 +23,9 @@ const db = vi.hoisted(() => {
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
 
 import { canReadPickupScheduling, canSyncPickupScheduling, canViewPickupSchedulingSensitive } from "./pickup-scheduling.authorization";
-import { comparePickupScheduleLatest, groupPickupSchedules, isPickupAssigned, isPickupFailed,
-  listPickupScheduling, projectLatestPickupSchedules } from "./pickup-scheduling.service";
+import { comparePickupOperationalRows, comparePickupScheduleLatest, groupPickupSchedules,
+  isPickupAssigned, isPickupFailed, listPickupScheduling, projectLatestPickupSchedules,
+  toPickupOperationalRow } from "./pickup-scheduling.service";
 import { fetchPickupScheduleList, normalizePickupScheduleRecord, PICKUP_SCHEDULING_PROVIDER,
   resetPickupSchedulingLocks, syncPickupScheduling } from "./pickup-scheduling-sync.service";
 import { fetchPickupSenderDetail, getPickupSchedulingDetail, PickupSenderDetailError } from "./pickup-scheduling-sensitive.service";
@@ -113,16 +114,20 @@ describe("latest-per-waybill projection and filters", () => {
     expect(isPickupFailed(row("1") as never)).toBe(false);
   });
 
-  it("filters persisted projection across every supported dimension", async () => {
+  it("returns flat rows and dropdown options from the operational dataset", async () => {
     memory.rows = [row("1", { waybillNo: "WB-TARGET", sourcePlatform: "API", sourceStatus: "Scheduled",
       orderStatusCode: 102, sendName: "Jemput Paket", pickNetworkName: "Bandung", pickStaffName: "Budi",
       senderCityName: "Bandung", senderAreaName: "Cicendo", pickFailReason: "Tutup" })];
     const parsed = pickupSchedulingQuerySchema.parse({ startDate: "2026-08-22", endDate: "2026-08-22",
-      waybill: "target", senderName: "customer", sourcePlatform: "api", orderStatus: "102", sendName: "jemput",
-      pickupNetwork: "bandung", pickupStaff: "budi", assignment: "ASSIGNED", pickupFailure: "FAILED",
-      senderCity: "bandung", senderArea: "cicendo" });
+      sourceProvider: PICKUP_SCHEDULING_PROVIDER, orderStatus: "102", sendName: "Jemput Paket", pickupStaff: "Budi" });
     const result = await listPickupScheduling({ tenantId: "tenant", outletId: "outlet", ...parsed });
     expect(result.summary.totalWaybills).toBe(1);
+    expect(result.rows).toHaveLength(1);
+    expect(result).not.toHaveProperty("groups");
+    expect(result.filterOptions).toMatchObject({
+      sources: [{ value: PICKUP_SCHEDULING_PROVIDER }], statuses: [{ value: "102" }],
+      methods: [{ value: "Jemput Paket" }], pickupStaff: [{ label: "Budi" }],
+    });
     expect(db.rawPickupSchedule.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
       tenantId: "tenant", outletId: "outlet", sourceProvider: PICKUP_SCHEDULING_PROVIDER,
     }) }));
@@ -136,9 +141,18 @@ describe("latest-per-waybill projection and filters", () => {
     ];
     const parsed = pickupSchedulingQuerySchema.parse({ startDate: "2026-08-22", endDate: "2026-08-22" });
     const result = await listPickupScheduling({ tenantId: "tenant", outletId: "outlet", ...parsed });
-    expect(result.groups.map(group => group.representativeWaybill)).toEqual(["JFS-REAL"]);
-    expect(result.summary).toEqual({ totalWaybills: 1, totalGroups: 1, validMaskedPhones: 1 });
+    expect(result.rows.map(item => item.waybill)).toEqual(["JFS-REAL"]);
+    expect(result.summary).toEqual({ totalWaybills: 1, totalSchedules: 1, validMaskedPhones: 1 });
     expect(result.pagination.total).toBe(1);
+  });
+
+  it("sorts flat rows by sender name, newest input time, then stable row ID", () => {
+    const rows = [
+      toPickupOperationalRow(row("3", { senderNameMasked: "Budi", sourceInputAt: new Date("2026-08-22T03:00:00Z") }) as never),
+      toPickupOperationalRow(row("1", { senderNameMasked: "Andi", sourceInputAt: new Date("2026-08-22T01:00:00Z") }) as never),
+      toPickupOperationalRow(row("2", { senderNameMasked: "Andi", sourceInputAt: new Date("2026-08-22T02:00:00Z") }) as never),
+    ].sort(comparePickupOperationalRows);
+    expect(rows.map(item => item.recordId)).toEqual(["2", "1", "3"]);
   });
 });
 
@@ -163,7 +177,7 @@ describe("just-in-time WhatsApp detail", () => {
     const group = groupPickupSchedules(memory.rows as never[])[0]!;
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await expect(getPickupSchedulingDetail({ tenantId: "tenant", outletId: "outlet", actorId: "actor",
-      startDate: "2026-08-22", endDate: "2026-08-22", groupId: group.groupId, sessionOutletCode: "DEV001",
+      startDate: "2026-08-22", endDate: "2026-08-22", rowId: group.groupId, sessionOutletCode: "DEV001",
       fetchDetail: vi.fn(async () => ({ externalJfsId: "999", waybill: "WB-OTHER", senderName: null,
         senderMobilePhone: "081234567890", senderCityName: null })) })).rejects.toMatchObject({ code: "DETAIL_IDENTITY_MISMATCH" });
     expect(JSON.stringify(warning.mock.calls)).not.toContain("081234567890");
@@ -174,7 +188,7 @@ describe("just-in-time WhatsApp detail", () => {
     memory.rows = [row("123", { waybillNo: "WB-123" })];
     const group = groupPickupSchedules(memory.rows as never[])[0]!;
     const result = await getPickupSchedulingDetail({ tenantId: "tenant", outletId: "outlet", actorId: "actor",
-      startDate: "2026-08-22", endDate: "2026-08-22", groupId: group.groupId, sessionOutletCode: "DEV001",
+      startDate: "2026-08-22", endDate: "2026-08-22", rowId: group.groupId, sessionOutletCode: "DEV001",
       fetchDetail: vi.fn(async () => ({ externalJfsId: "123", waybill: "WB-123", senderName: "A",
         senderMobilePhone: "0816700535", senderCityName: "Bandung" })) });
     expect(result.senderMobilePhone).toBe("0816700535");
@@ -182,13 +196,13 @@ describe("just-in-time WhatsApp detail", () => {
     expect(JSON.stringify(memory.audits)).not.toContain("0816700535");
   });
 
-  it("rejects a DEVUI group without invoking scoped JFS detail", async () => {
+  it("rejects a DEVUI row without invoking scoped JFS detail", async () => {
     const dummy = row("dummy", { externalJfsId: "DEVUI-1", waybillNo: "DEVUI-WB", sourceProvider: "DEVUI" });
     memory.rows = [dummy];
     const groupId = groupPickupSchedules([dummy] as never[])[0]!.groupId;
     const fetchDetail = vi.fn();
     await expect(getPickupSchedulingDetail({ tenantId: "tenant", outletId: "outlet", actorId: "actor",
-      startDate: "2026-08-22", endDate: "2026-08-22", groupId, sessionOutletCode: "DEV001", fetchDetail }))
+      startDate: "2026-08-22", endDate: "2026-08-22", rowId: groupId, sessionOutletCode: "DEV001", fetchDetail }))
       .rejects.toMatchObject({ code: "NOT_FOUND" });
     expect(fetchDetail).not.toHaveBeenCalled();
   });
@@ -201,10 +215,16 @@ describe("permissions and presentation safety", () => {
     expect(canSyncPickupScheduling(session(["VIEWER"]))).toBe(false);
     expect(canViewPickupSchedulingSensitive(session(["VIEWER"]))).toBe(false);
   });
-  it("does not fetch sensitive detail on normal row expansion", async () => {
+  it("uses flat row selection and fetches sensitive detail only for selected records", async () => {
     const ui = await readFile(new URL("../../components/quality-control/pickup-scheduling-client.tsx", import.meta.url), "utf8");
     expect(ui).not.toContain("jfs-sender-detail");
     expect(ui).not.toContain("SUM001A");
-    expect(ui).not.toContain("void loadGroupDetail(group).catch");
+    expect(ui).not.toContain("result.groups");
+    expect(ui).toContain("result.rows.filter(row => selected.has(row.rowId))");
+    expect(ui).toContain("/records/${row.rowId}/detail");
+    expect(ui).toContain("type=\"checkbox\"");
+    expect(ui).toContain("<select aria-label=\"Source\"");
+    expect(ui).not.toContain("Search Resi");
+    expect(ui).not.toContain("Search Pengirim");
   });
 });

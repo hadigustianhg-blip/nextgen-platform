@@ -20,11 +20,20 @@ export type PickupScheduleRow = {
   sourceProvider: string; createdAt: Date;
 };
 
-const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-export const normalizeMaskedPhone = (value: string | null) => value?.trim().toLowerCase().replace(/[\s\-()]/g, "") || "";
-export const normalizeMaskedAddress = (value: string | null) => value?.trim().toLowerCase().replace(/\s+/g, " ") || "";
-export const pickupGroupingKey = (row: PickupScheduleRow) => `waybill:${row.waybillNo.trim().toLowerCase()}`;
+export type PickupOperationalRow = {
+  rowId: string; recordId: string; externalJfsId: string | null; sourceProvider: string;
+  waybill: string; inputTime: string | null; businessDate: string; source: string | null;
+  status: string | null; statusCode: number | null; sendName: string | null;
+  senderName: string | null; senderCompany: string | null; senderPhoneMasked: string | null;
+  senderCity: string | null; senderArea: string | null; pickupAddressMasked: string | null;
+  pickupStaff: string | null; pickupStaffCode: string | null; pickupNetwork: string | null;
+  bestPickTime: string | null; goodsName: string | null; weight: number;
+  assigned: boolean; pickupFailed: boolean; pickFailReason: string | null; ageLabel: string;
+  outletCode: string | null;
+};
 
+const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+const scheduleRowId = (row: Pick<PickupScheduleRow, "id">) => digest(`pickup-schedule:${row.id}`);
 function timeValue(value: Date | null) { return value?.getTime() ?? Number.NEGATIVE_INFINITY; }
 function externalOrder(value: string | null) {
   if (!value) return 0n;
@@ -37,7 +46,6 @@ export function comparePickupScheduleLatest(a: PickupScheduleRow, b: PickupSched
     || (externalOrder(b.externalJfsId) > externalOrder(a.externalJfsId) ? 1
       : externalOrder(b.externalJfsId) < externalOrder(a.externalJfsId) ? -1 : b.id.localeCompare(a.id));
 }
-
 export function projectLatestPickupSchedules(rows: PickupScheduleRow[]) {
   const byWaybill = new Map<string, PickupScheduleRow[]>();
   for (const row of rows) {
@@ -47,14 +55,12 @@ export function projectLatestPickupSchedules(rows: PickupScheduleRow[]) {
   }
   return [...byWaybill.values()].map(group => [...group].sort(comparePickupScheduleLatest)[0]!);
 }
-
 export function isPickupAssigned(row: Pick<PickupScheduleRow, "pickStaffCode" | "pickStaffName">) {
   return Boolean(row.pickStaffCode?.trim() || row.pickStaffName?.trim());
 }
 export function isPickupFailed(row: Pick<PickupScheduleRow, "pickFailReason" | "pickFailAt" | "pickFailTimes">) {
   return Boolean(row.pickFailReason?.trim() || row.pickFailAt || (row.pickFailTimes || 0) > 0);
 }
-
 export function pickupAgeLabel(businessDate: Date | string, today = jakartaOperationalDate()) {
   const value = businessDate instanceof Date ? businessDate.toISOString().slice(0, 10) : businessDate;
   const days = Math.max(0, Math.floor((Date.parse(`${today}T00:00:00.000Z`) - Date.parse(`${value}T00:00:00.000Z`)) / 86_400_000));
@@ -63,79 +69,109 @@ export function pickupAgeLabel(businessDate: Date | string, today = jakartaOpera
   if (days === 2) return "2 Hari";
   return "3 Hari+";
 }
+export function toPickupOperationalRow(row: PickupScheduleRow): PickupOperationalRow {
+  return {
+    rowId: scheduleRowId(row), recordId: row.id, externalJfsId: row.externalJfsId,
+    sourceProvider: row.sourceProvider, waybill: row.waybillNo,
+    inputTime: row.sourceInputAt?.toISOString() || null,
+    businessDate: row.businessDate.toISOString().slice(0, 10), source: row.sourcePlatform,
+    status: row.sourceStatus, statusCode: row.orderStatusCode, sendName: row.sendName,
+    senderName: row.senderNameMasked || row.customerName, senderCompany: row.senderCompany,
+    senderPhoneMasked: row.senderPhoneMasked, senderCity: row.senderCityName,
+    senderArea: row.senderAreaName, pickupAddressMasked: row.pickupAddressMasked,
+    pickupStaff: row.pickStaffName || row.pickStaffCode, pickupStaffCode: row.pickStaffCode,
+    pickupNetwork: row.pickNetworkName || row.sourceNetworkCode,
+    bestPickTime: row.bestPickTimeStartAt?.toISOString() || row.bestPickTimeEndAt?.toISOString() || null,
+    goodsName: row.goodsName, weight: Number(row.weight), assigned: isPickupAssigned(row),
+    pickupFailed: isPickupFailed(row), pickFailReason: row.pickFailReason,
+    ageLabel: pickupAgeLabel(row.businessDate), outletCode: row.sourceOutletCode,
+  };
+}
+export function comparePickupOperationalRows(a: PickupOperationalRow, b: PickupOperationalRow) {
+  return (a.senderName || "").localeCompare(b.senderName || "", "id", { sensitivity: "base" })
+    || timeValue(b.inputTime ? new Date(b.inputTime) : null) - timeValue(a.inputTime ? new Date(a.inputTime) : null)
+    || a.rowId.localeCompare(b.rowId);
+}
 
+/** @deprecated Compatibility helper for the legacy detail route. */
 export function groupPickupSchedules(rows: PickupScheduleRow[]) {
-  return projectLatestPickupSchedules(rows).map(row => ({
-    groupId: digest(`pickup-schedule:${row.id}`),
-    recordId: row.id,
-    externalJfsId: row.externalJfsId,
-    sourceProvider: row.sourceProvider,
-    sellerName: row.senderNameMasked || row.customerName,
-    senderPhoneMasked: row.senderPhoneMasked,
-    pickupAddressMasked: row.pickupAddressMasked,
-    outletCode: row.sourceOutletCode,
-    representativeOrderId: row.sourceOrderId,
-    representativeWaybill: row.waybillNo,
-    orders: [{
-      id: row.id, waybill: row.waybillNo, source: row.sourcePlatform, goodsName: row.goodsName,
-      weight: Number(row.weight), status: row.sourceStatus, statusCode: row.orderStatusCode,
-      businessDate: row.businessDate.toISOString().slice(0, 10), ageLabel: pickupAgeLabel(row.businessDate),
-      inputTime: row.sourceInputAt?.toISOString() || null, sendName: row.sendName,
-      senderCompany: row.senderCompany, senderCity: row.senderCityName, senderArea: row.senderAreaName,
-      pickupStaff: row.pickStaffName || row.pickStaffCode, pickupNetwork: row.pickNetworkName || row.sourceNetworkCode,
-      assigned: isPickupAssigned(row), pickupFailed: isPickupFailed(row), pickFailReason: row.pickFailReason,
-      bestPickTime: row.bestPickTimeStartAt?.toISOString() || row.bestPickTimeEndAt?.toISOString() || null,
-    }],
-  }));
+  return projectLatestPickupSchedules(rows).map(row => {
+    const item = toPickupOperationalRow(row);
+    return {
+      groupId: item.rowId, recordId: item.recordId, externalJfsId: item.externalJfsId,
+      sourceProvider: item.sourceProvider, sellerName: item.senderName,
+      senderPhoneMasked: item.senderPhoneMasked, pickupAddressMasked: item.pickupAddressMasked,
+      outletCode: item.outletCode, representativeOrderId: row.sourceOrderId,
+      representativeWaybill: item.waybill,
+      orders: [{ id: item.recordId, waybill: item.waybill, source: item.source,
+        goodsName: item.goodsName, weight: item.weight, status: item.status, statusCode: item.statusCode,
+        businessDate: item.businessDate, ageLabel: item.ageLabel, inputTime: item.inputTime,
+        sendName: item.sendName, senderCompany: item.senderCompany, senderCity: item.senderCity,
+        senderArea: item.senderArea, pickupStaff: item.pickupStaff, pickupNetwork: item.pickupNetwork,
+        assigned: item.assigned, pickupFailed: item.pickupFailed, pickFailReason: item.pickFailReason,
+        bestPickTime: item.bestPickTime }],
+    };
+  });
 }
 
 type ListInput = {
   tenantId: string; outletId: string; startDate: string; endDate: string;
-  waybill: string; senderName: string; sourcePlatform: string; orderStatus: string;
-  sendName: string; pickupNetwork: string; pickupStaff: string; assignment: string;
-  pickupFailure: string; senderCity: string; senderArea: string; page: number; pageSize: number;
+  sourceProvider: string; orderStatus: string; sendName: string; pickupStaff: string;
+  page: number; pageSize: number;
 };
-
-function includes(value: string | null, search: string) { return !search || (value || "").toLowerCase().includes(search.toLowerCase()); }
-function matches(row: PickupScheduleRow, input: ListInput) {
-  const senderSearch = input.senderName.toLowerCase();
-  return includes(row.waybillNo, input.waybill)
-    && (!senderSearch || [row.senderNameMasked, row.customerName, row.customerId].some(value => includes(value, senderSearch)))
-    && includes(row.sourcePlatform, input.sourcePlatform)
-    && (!input.orderStatus || String(row.orderStatusCode || "") === input.orderStatus || includes(row.sourceStatus, input.orderStatus))
-    && includes(row.sendName, input.sendName)
-    && (!input.pickupNetwork || [row.pickNetworkName, row.sourceNetworkCode].some(value => includes(value, input.pickupNetwork)))
-    && (!input.pickupStaff || [row.pickStaffName, row.pickStaffCode].some(value => includes(value, input.pickupStaff)))
-    && (input.assignment === "ALL" || (input.assignment === "ASSIGNED") === isPickupAssigned(row))
-    && (input.pickupFailure === "ALL" || (input.pickupFailure === "FAILED") === isPickupFailed(row))
-    && includes(row.senderCityName, input.senderCity) && includes(row.senderAreaName, input.senderArea);
+function includes(value: string | null, search: string) {
+  return !search || (value || "").toLowerCase().includes(search.toLowerCase());
 }
+function matches(row: PickupScheduleRow, input: ListInput) {
+  return (!input.sourceProvider || row.sourceProvider === input.sourceProvider)
+    && (!input.orderStatus || String(row.orderStatusCode || "") === input.orderStatus || row.sourceStatus === input.orderStatus)
+    && (!input.sendName || row.sendName === input.sendName)
+    && (!input.pickupStaff || row.pickStaffCode === input.pickupStaff || row.pickStaffName === input.pickupStaff
+      || includes(row.pickStaffName, input.pickupStaff));
+}
+const option = (value: string, label = value) => ({ value, label });
+const uniqueOptions = (values: Array<{ value: string; label: string }>) => [...new Map(values
+  .filter(item => item.value.trim()).map(item => [item.value, item])).values()]
+  .sort((a, b) => a.label.localeCompare(b.label, "id", { sensitivity: "base" }));
 
 async function scopedRows(input: Pick<ListInput, "tenantId" | "outletId" | "startDate" | "endDate">) {
   const rows = await prisma.rawPickupSchedule.findMany({
-    where: { tenantId: input.tenantId, outletId: input.outletId,
-      sourceProvider: PICKUP_SCHEDULING_PROVIDER,
+    where: { tenantId: input.tenantId, outletId: input.outletId, sourceProvider: PICKUP_SCHEDULING_PROVIDER,
       businessDate: { gte: new Date(`${input.startDate}T00:00:00.000Z`), lte: new Date(`${input.endDate}T00:00:00.000Z`) } },
     orderBy: [{ sourceUpdatedAt: "desc" }, { sourceInputAt: "desc" }, { createdAt: "desc" }],
   });
-  return rows.filter(row => row.sourceProvider === PICKUP_SCHEDULING_PROVIDER);
+  return rows.filter(row => row.sourceProvider === PICKUP_SCHEDULING_PROVIDER) as PickupScheduleRow[];
 }
-
 export async function listPickupScheduling(input: ListInput) {
-  const projected = projectLatestPickupSchedules(await scopedRows(input) as PickupScheduleRow[]).filter(row => matches(row, input));
-  const groups = groupPickupSchedules(projected);
+  const projected = projectLatestPickupSchedules(await scopedRows(input));
+  const rows = projected.filter(row => matches(row, input)).map(toPickupOperationalRow).sort(comparePickupOperationalRows);
+  const filterOptions = {
+    sources: uniqueOptions(projected.map(row => option(row.sourceProvider))),
+    statuses: uniqueOptions(projected.filter(row => row.sourceStatus || row.orderStatusCode !== null).map(row =>
+      option(row.orderStatusCode === null ? row.sourceStatus || "" : String(row.orderStatusCode),
+        [row.orderStatusCode, row.sourceStatus].filter(value => value !== null && value !== "").join(" · ")))),
+    methods: uniqueOptions(projected.filter(row => row.sendName).map(row => option(row.sendName!, row.sendName!))),
+    pickupStaff: uniqueOptions(projected.filter(row => row.pickStaffName || row.pickStaffCode).map(row =>
+      option(row.pickStaffCode || row.pickStaffName!, row.pickStaffName || row.pickStaffCode!))),
+  };
   return {
-    summary: { totalWaybills: groups.length, totalGroups: groups.length,
-      validMaskedPhones: groups.filter(group => Boolean(group.senderPhoneMasked)).length },
-    pagination: { page: input.page, pageSize: input.pageSize, total: groups.length,
-      totalPages: Math.ceil(groups.length / input.pageSize) },
-    groups: groups.slice((input.page - 1) * input.pageSize, input.page * input.pageSize),
+    summary: { totalWaybills: rows.length, totalSchedules: rows.length,
+      validMaskedPhones: rows.filter(row => Boolean(row.senderPhoneMasked)).length },
+    pagination: { page: input.page, pageSize: input.pageSize, total: rows.length,
+      totalPages: Math.ceil(rows.length / input.pageSize) },
+    filterOptions,
+    rows: rows.slice((input.page - 1) * input.pageSize, input.page * input.pageSize),
   };
 }
-
+export async function resolvePickupRecord(input: {
+  tenantId: string; outletId: string; startDate: string; endDate: string; rowId: string;
+}) {
+  const rows = projectLatestPickupSchedules(await scopedRows(input));
+  const row = rows.find(item => scheduleRowId(item) === input.rowId);
+  return row ? toPickupOperationalRow(row) : null;
+}
 export async function resolvePickupGroup(input: {
   tenantId: string; outletId: string; startDate: string; endDate: string; groupId: string;
 }) {
-  const rows = await scopedRows(input) as PickupScheduleRow[];
-  return groupPickupSchedules(rows).find(group => group.groupId === input.groupId) || null;
+  return resolvePickupRecord({ ...input, rowId: input.groupId });
 }
