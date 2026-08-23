@@ -205,7 +205,7 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
         <button disabled={confirming} onClick={cancelSelection} className={nextgenNeutralButtonClass}><X size={17}/>Batal</button>
       </div>
     </div>}
-    <TableCard><div className="overflow-x-auto"><table className="w-full min-w-[1900px] table-fixed text-left text-sm">
+    <TableCard><div className="overflow-x-auto"><table className="w-full min-w-[1940px] table-fixed text-left text-sm">
       <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>
         {selectionMode && <th className="w-16 px-3 py-3">Pilih</th>}
         {[{ label: "No", width: "w-14" }, { label: "Waybill", width: "w-[140px]" },
@@ -213,8 +213,8 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
           { label: "Status JFS", width: "w-[170px]" }, { label: "Metode", width: "w-[125px]" },
           { label: "Pengirim", width: "w-[140px]" }, { label: "Perusahaan", width: "w-[130px]" },
           { label: "No. HP", width: "w-[120px]" }, { label: "Area Pengirim", width: "w-[160px]" },
-          { label: "Alamat Pickup", width: "w-[300px]" }, { label: "Kurir Pickup", width: "w-[150px]" },
-          { label: "Waktu Pickup", width: "w-[160px]" }, { label: "Berat", width: "w-20" },
+          { label: "Alamat Pickup", width: "w-[300px]" }, { label: "Kurir Pickup", width: "w-[180px]" },
+          { label: "Waktu Pickup", width: "w-[170px]" }, { label: "Berat", width: "w-20" },
           { label: "Status Konfirmasi", width: "w-[160px]" }]
           .map(item => <th key={item.label} className={`${item.width} px-3 py-3`}>{item.label}</th>)}
       </tr></thead>
@@ -231,7 +231,8 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
           <td className="px-3 py-3 align-top">{row.senderCompany || "—"}</td><td className="whitespace-nowrap px-3 py-3 align-top">{row.senderPhoneMasked || "—"}</td>
           <td className="px-3 py-3 align-top"><span className="line-clamp-2">{[row.senderCity, row.senderArea].filter(Boolean).join(" · ") || "—"}</span></td>
           <td className="px-3 py-3 align-top"><span className="line-clamp-2 leading-5" title={row.pickupAddressMasked || undefined}>{row.pickupAddressMasked || "—"}</span></td>
-          <td className="whitespace-nowrap px-3 py-3 align-top">{row.pickupStaff || "Belum ada"}</td><td className="whitespace-nowrap px-3 py-3 align-top">{formatDateTime(row.bestPickTime)}</td>
+          <td className="overflow-hidden px-3 py-3 align-top"><span className="line-clamp-2 break-words leading-5" title={row.pickupStaff || undefined}>{row.pickupStaff || "Belum ada"}</span></td>
+          <td className="whitespace-nowrap px-3 py-3 align-top">{formatDateTime(row.bestPickTime)}</td>
           <td className="whitespace-nowrap px-3 py-3 align-top">{row.weight.toLocaleString("id-ID")}</td>
           <td className="px-3 py-3 align-top"><span className="line-clamp-2">{row.pickupFailed ? row.pickFailReason || "Gagal pickup" : "Siap dikonfirmasi"}</span></td>
         </tr>)}</tbody>

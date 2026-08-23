@@ -38,6 +38,7 @@ describe("pickup scheduling row detail route", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store, max-age=0");
     expect(mocks.getDetail).toHaveBeenCalledWith(expect.objectContaining({
       tenantId: "tenant", outletId: "outlet", actorId: "user", rowId: "row-1", requestId: "request-1",
+      sessionOutletCode: "DEV001",
     }));
   });
 

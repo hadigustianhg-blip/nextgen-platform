@@ -82,7 +82,7 @@ export async function getPickupSchedulingDetail(input: {
   return {
     requestId, rowId: row.rowId, groupId: row.rowId, senderName: detail.senderName || row.senderName,
     senderMobilePhone: detail.senderMobilePhone, senderCityName: detail.senderCityName,
-    outletCode: row.outletCode || input.sessionOutletCode,
+    outletCode: safeText(input.sessionOutletCode),
     details: [{ waybill: detail.waybill, senderName: detail.senderName,
       senderMobilePhone: detail.senderMobilePhone, senderCityName: detail.senderCityName,
       status: "success" as const, errorCode: null }],

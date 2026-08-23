@@ -165,15 +165,39 @@ describe("latest-per-waybill projection and filters", () => {
 });
 
 describe("just-in-time WhatsApp detail", () => {
-  it("invokes scoped detail by external ID and preserves exact existing message", async () => {
+  it("invokes scoped detail by external ID and builds the final message", async () => {
     const execute = vi.fn(async () => ({ id: "123", waybillId: "WB-123", senderName: "Customer",
       senderMobilePhone: "(+62)816700535", senderCityName: "Bandung" }));
     await expect(fetchPickupSenderDetail("123", { tenantId: "tenant", outletId: "outlet" }, execute as never))
       .resolves.toMatchObject({ externalJfsId: "123", waybill: "WB-123" });
     expect(execute).toHaveBeenCalledWith({ tenantId: "tenant", outletId: "outlet" }, "OMS_SCHEDULING_DETAIL", { externalJfsId: "123" });
     expect(normalizePickupPhone("(+62)816700535")).toBe("62816700535");
-    expect(buildPickupMessage({ customerName: "A", outletCode: "OUT", orders: [{ waybill: "WB", source: "JFS", goodsName: "Barang" }] }))
-      .toContain("izin konfirmasi penjadwalan pickup");
+    expect(buildPickupMessage({ customerName: "Nusan Roomlight", outletCode: "DEV001",
+      orders: [{ waybill: "570564868067", source: "TikTok", goodsName: "Lampu Meja" }] }))
+      .toBe("Hallo kak Nusan Roomlight\n\nSaya dari JNT CARGO DEV001, izin konfirmasi penjadwalan pickup :\n\n570564868067\nTikTok Pickup\nLampu Meja\n\nUntuk barang diatas apa sudah ready di pickup? Jika sudah team lapangan akan segera melakukan penjemputan ke lokasi kaka.\n\nDitunggu ya kak responnya, terimakasih 🙏");
+  });
+
+  it.each([
+    { source: "shopee", expected: "Shopee Pickup" },
+    { source: "TikTok", expected: "TikTok Pickup" },
+    { source: "tokopedia", expected: "Tokopedia Pickup" },
+    { source: "API", expected: "API Pickup" },
+  ])("uses the actual order source without exposing the provider: $source", ({ source, expected }) => {
+    const message = buildPickupMessage({ customerName: "Sender", outletCode: "OUT001",
+      orders: [{ waybill: "WB-1", source, goodsName: "Barang" }] });
+    expect(message).toContain(`WB-1\n${expected}\nBarang`);
+    expect(message).not.toContain(PICKUP_SCHEDULING_PROVIDER);
+  });
+
+  it("uses clean fallbacks for missing sender, source, and goods name", () => {
+    const message = buildPickupMessage({ customerName: " ", outletCode: "DEV001",
+      orders: [{ waybill: "WB-1", source: null, goodsName: " " }] });
+    expect(message).toContain("Hallo kak\n\nSaya dari JNT CARGO DEV001");
+    expect(message).toContain("WB-1\nPickup\n\nUntuk barang");
+    expect(message).not.toContain("Hallo kak Kak");
+    expect(message).not.toContain("- Pickup");
+    expect(message).not.toContain("null");
+    expect(message).not.toContain("undefined");
   });
 
   it.each(["0812****789", "", "phone081234567890"])("rejects masked/malformed phone %s", value => {
@@ -193,13 +217,15 @@ describe("just-in-time WhatsApp detail", () => {
   });
 
   it("returns clear phone ephemerally only after identity validation", async () => {
-    memory.rows = [row("123", { waybillNo: "WB-123" })];
+    memory.rows = [row("123", { waybillNo: "WB-123", sourceOutletCode: "JFS-NETWORK" })];
     const group = groupPickupSchedules(memory.rows as never[])[0]!;
     const result = await getPickupSchedulingDetail({ tenantId: "tenant", outletId: "outlet", actorId: "actor",
       startDate: "2026-08-22", endDate: "2026-08-22", rowId: group.groupId, sessionOutletCode: "DEV001",
       fetchDetail: vi.fn(async () => ({ externalJfsId: "123", waybill: "WB-123", senderName: "A",
         senderMobilePhone: "0816700535", senderCityName: "Bandung" })) });
     expect(result.senderMobilePhone).toBe("0816700535");
+    expect(result.outletCode).toBe("DEV001");
+    expect(result.outletCode).not.toBe("JFS-NETWORK");
     expect(memory.audits.at(-1)).toMatchObject({ metadata: expect.objectContaining({ event: "WA_CONFIRMATION_OPENED", waybill: "WB-123" }) });
     expect(JSON.stringify(memory.audits)).not.toContain("0816700535");
   });
@@ -237,6 +263,11 @@ describe("permissions and presentation safety", () => {
     expect(ui).not.toContain("{row.sourceProvider}");
     expect(ui).toContain("line-clamp-2 leading-5");
     expect(ui).toContain("title={row.pickupAddressMasked || undefined}");
+    expect(ui).toContain("w-[180px]");
+    expect(ui).toContain("w-[170px]");
+    expect(ui).toContain("title={row.pickupStaff || undefined}");
+    expect(ui).toContain("line-clamp-2 break-words leading-5");
+    expect(ui).not.toContain("whitespace-nowrap px-3 py-3 align-top\">{row.pickupStaff");
     expect(ui).not.toContain("Search Resi");
     expect(ui).not.toContain("Search Pengirim");
   });
