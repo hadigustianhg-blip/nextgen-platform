@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { executeTrustedMultiOutletScraper } from "./jfs-multi-outlet-client";
+import { executeScopedJfsConnection, executeTrustedMultiOutletScraper } from "./jfs-multi-outlet-client";
 import { mapConcurrent } from "./bounded-concurrency";
 import { encryptCredential, decryptCredential } from "./credential-crypto";
 import { maskAccount } from "./jfs-credential.service";
@@ -78,6 +78,25 @@ describe("SaaS Multi-Tenant / Multi-Outlet Integration Test Suite", () => {
     expect(callB[1].headers["X-JFS-Outlet-Id"]).toBe("outlet-uuid-B1");
     expect(callB[1].headers["X-JFS-Outlet-Code"]).toBe("OUTLET_B1_CODE");
     expect(callB[1].headers["X-JFS-Account"]).toBe("accountB1");
+  });
+
+  it("scoped reconnect/test use server scope and never call legacy login", async () => {
+    const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      success: true, data: { connected: true, networkCode: "NET-A", sessionStatus: "ACTIVE" },
+    }), { status: 200 }));
+    for (const [operation, path] of [
+      ["SCOPED_RECONNECT", "/scoped/reconnect"],
+      ["SCOPED_TEST_CONNECTION", "/scoped/test-connection"],
+    ] as const) {
+      await executeScopedJfsConnection(scopeTenantA, operation, {
+        account: "account-a", password: "password-a", outletCode: "OUTLET-A", networkCode: "NET-A", fetcher,
+      });
+      const [url, init] = fetcher.mock.calls.at(-1)!;
+      expect(url).toBe(`https://middleware.test.internal${path}`);
+      expect(url).not.toContain("/jfs-auth/login");
+      expect(init.headers["X-JFS-Tenant-Id"]).toBe(scopeTenantA.tenantId);
+      expect(init.headers["X-JFS-Outlet-Id"]).toBe(scopeTenantA.outletId);
+    }
   });
 
   it("3 & 4. Verifies credential isolation and encryption response safety", () => {

@@ -15,6 +15,7 @@ vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
 import { getIntegrationStatus } from "./settings.service";
 
 const uiSource = readFileSync(new URL("../../components/settings/settings-integrations.tsx", import.meta.url), "utf8");
+const credentialSource = readFileSync(new URL("../integrations/jfs-credential.service.ts", import.meta.url), "utf8");
 const scope = { tenantId: "tenant-1", outletId: "outlet-1" };
 const completedAt = new Date("2026-08-03T02:00:00.000Z");
 
@@ -82,5 +83,12 @@ describe("Settings Integration control center", () => {
     expect(uiSource).toContain("showPassword");
     expect(uiSource).toContain("EyeOff");
     expect(uiSource).not.toContain("<pre");
+  });
+
+  it("routes Login Ulang and Test Koneksi through scoped operations", () => {
+    expect(uiSource).toContain("/api/settings/integrations/jfs/reconnect");
+    expect(credentialSource).toContain('"SCOPED_RECONNECT"');
+    expect(credentialSource).toContain('"SCOPED_TEST_CONNECTION"');
+    expect(credentialSource).not.toContain("/jfs-auth/login");
   });
 });

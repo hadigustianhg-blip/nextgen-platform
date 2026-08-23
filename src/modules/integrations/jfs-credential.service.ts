@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db/prisma";
 import type { SettingsScope } from "@/modules/settings/settings.types";
 import { decryptCredential, encryptCredential } from "./credential-crypto";
 import { isJfsNetworkAllowed } from "./jfs-network-mapping";
+import { executeScopedJfsConnection } from "./jfs-multi-outlet-client";
 
 export class JfsIntegrationError extends Error {
   constructor(
@@ -32,54 +33,25 @@ export interface JfsConnectionStatusView {
   lastTestedAt: string | null;
 }
 
-async function callMiddlewareLogin(account: string, password: string): Promise<{ networkCode: string; name: string }> {
-  const middlewareBaseUrl =
-    process.env.JFS_MIDDLEWARE_BASE_URL?.trim() ||
-    process.env.JFS_MIDDLEWARE_URL?.trim();
-  if (!middlewareBaseUrl) {
-    throw new JfsIntegrationError(
-      "JFS middleware URL belum dikonfigurasi. Isi JFS_MIDDLEWARE_BASE_URL.",
-      500,
-      "JFS_MIDDLEWARE_URL_NOT_CONFIGURED",
-    );
-  }
-  const authKey =
-    process.env.JFS_MIDDLEWARE_AUTH_KEY ||
-    process.env.JFS_AUTH_KEY ||
-    process.env.SECRET_INTERNAL_AUTH_KEY ||
-    "";
-
-  const url = `${middlewareBaseUrl.replace(/\/+$/, "")}/jfs-auth/login`;
-
+async function callScopedConnection(
+  scope: SettingsScope,
+  outletCode: string,
+  networkCode: string,
+  account: string,
+  password: string,
+  operation: "SCOPED_RECONNECT" | "SCOPED_TEST_CONNECTION",
+): Promise<{ networkCode: string; name: string }> {
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Auth-Key": authKey,
-      },
-      body: JSON.stringify({ account, password }),
-      cache: "no-store",
+    const result = await executeScopedJfsConnection(scope, operation, {
+      account,
+      password,
+      outletCode,
+      networkCode,
     });
-
-    if (!res.ok) {
-      const errorJson = await res.json().catch(() => ({}));
-      const code = errorJson?.error || errorJson?.code || "JFS_LOGIN_FAILED";
-      if (res.status === 401) {
-        throw new JfsIntegrationError("Account atau password JFS tidak valid.", 401, "JFS_LOGIN_FAILED");
-      }
-      throw new JfsIntegrationError("Gagal menghubungi layanan login JFS.", res.status, code);
-    }
-
-    const data = await res.json();
-    if (!data.success || !data.networkCode) {
+    if (!result.networkCode) {
       throw new JfsIntegrationError("Response login JFS tidak valid.", 400, "JFS_INVALID_RESPONSE");
     }
-
-    return {
-      networkCode: String(data.networkCode).trim(),
-      name: String(data.name || "").trim(),
-    };
+    return { networkCode: result.networkCode.trim(), name: String(result.name || "").trim() };
   } catch (error) {
     if (error instanceof JfsIntegrationError) {
       throw error;
@@ -166,7 +138,9 @@ export async function connectJfsIntegration(
   }
 
   // 1. Server-side JFS login call
-  const loginResult = await callMiddlewareLogin(account, password);
+  const loginResult = await callScopedConnection(
+    scope, outlet.code, outlet.code, account, password, "SCOPED_RECONNECT",
+  );
   const actualNetworkCode = loginResult.networkCode;
 
   // 2. Network Code Binding Check
@@ -277,8 +251,29 @@ export async function testJfsIntegration(scope: SettingsScope): Promise<JfsConne
 
   const now = new Date();
   try {
-    const loginResult = await callMiddlewareLogin(account, password);
+    const outlet = await prisma.outlet.findFirst({
+      where: { id: scope.outletId, tenantId: scope.tenantId },
+      select: { code: true },
+    });
+    if (!outlet) throw new JfsIntegrationError("Outlet tidak ditemukan.", 404, "OUTLET_NOT_FOUND");
+    const loginResult = await callScopedConnection(
+      scope,
+      outlet.code,
+      credential.networkCode || outlet.code,
+      account,
+      password,
+      "SCOPED_TEST_CONNECTION",
+    );
     const actualNetworkCode = loginResult.networkCode;
+
+    if (!isJfsNetworkAllowed({
+      nextgenOutletCode: outlet.code,
+      actualJfsNetwork: actualNetworkCode,
+      environment: process.env.NEXTGEN_ENVIRONMENT,
+      developmentMapping: process.env.JFS_DEV_NETWORK_MAPPING,
+    })) {
+      throw new JfsIntegrationError("Network JFS tidak sesuai dengan outlet aktif.", 400, "JFS_NETWORK_MISMATCH");
+    }
 
     await prisma.integrationCredential.update({
       where: { id: credential.id },
@@ -311,6 +306,70 @@ export async function testJfsIntegration(scope: SettingsScope): Promise<JfsConne
 
     throw error;
   }
+}
+
+export async function reconnectJfsIntegration(scope: SettingsScope): Promise<JfsConnectionStatusView> {
+  const credential = await prisma.integrationCredential.findUnique({
+    where: {
+      tenantId_outletId_provider: {
+        tenantId: scope.tenantId,
+        outletId: scope.outletId,
+        provider: "JFS",
+      },
+    },
+  });
+  if (!credential || credential.connectionStatus !== "CONNECTED" || !credential.isActive) {
+    throw new JfsIntegrationError("Integrasi JFS belum terhubung.", 400, "NOT_CONNECTED");
+  }
+  const outlet = await prisma.outlet.findFirst({
+    where: { id: scope.outletId, tenantId: scope.tenantId },
+    select: { code: true },
+  });
+  if (!outlet) throw new JfsIntegrationError("Outlet tidak ditemukan.", 404, "OUTLET_NOT_FOUND");
+
+  let account: string;
+  let password: string;
+  try {
+    account = decryptCredential<{ account: string }>(credential.accountEncrypted).account;
+    password = decryptCredential<{ password: string }>(credential.passwordEncrypted).password;
+  } catch {
+    throw new JfsIntegrationError("Gagal me-read credential terenkripsi.", 500, "DECRYPTION_FAILED");
+  }
+
+  const result = await callScopedConnection(
+    scope, outlet.code, credential.networkCode || outlet.code,
+    account, password, "SCOPED_RECONNECT",
+  );
+  if (!isJfsNetworkAllowed({
+    nextgenOutletCode: outlet.code,
+    actualJfsNetwork: result.networkCode,
+    environment: process.env.NEXTGEN_ENVIRONMENT,
+    developmentMapping: process.env.JFS_DEV_NETWORK_MAPPING,
+  })) {
+    throw new JfsIntegrationError("Network JFS tidak sesuai dengan outlet aktif.", 400, "JFS_NETWORK_MISMATCH");
+  }
+  const now = new Date();
+  await prisma.integrationCredential.update({
+    where: { id: credential.id },
+    data: {
+      connectionStatus: "CONNECTED",
+      lastConnectedAt: now,
+      lastTestedAt: now,
+      networkCode: result.networkCode,
+      lastFailureAt: null,
+      lastFailureCode: null,
+    },
+  });
+  return {
+    available: true,
+    connected: true,
+    outletCode: outlet.code,
+    networkCode: result.networkCode,
+    status: "CONNECTED",
+    accountMasked: maskAccount(account),
+    lastConnectedAt: now.toISOString(),
+    lastTestedAt: now.toISOString(),
+  };
 }
 
 export async function disconnectJfsIntegration(scope: SettingsScope): Promise<{ success: boolean; message: string }> {

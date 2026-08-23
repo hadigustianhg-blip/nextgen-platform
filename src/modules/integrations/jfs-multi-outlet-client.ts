@@ -15,6 +15,61 @@ export type ScraperOperation =
   | "WAYBILL_STATUS"
   | "SENDER_DETAIL";
 
+export type ScopedConnectionOperation = "SCOPED_RECONNECT" | "SCOPED_TEST_CONNECTION";
+
+type ScopedConnectionInput = {
+  account: string;
+  password: string;
+  outletCode: string;
+  networkCode: string;
+  fetcher?: typeof fetch;
+};
+
+function middlewareConfig() {
+  const baseUrl = process.env.JFS_MIDDLEWARE_BASE_URL;
+  if (!baseUrl) throw new Error("JFS_MIDDLEWARE_BASE_URL is not configured");
+  return {
+    baseUrl: baseUrl.replace(/\/+$/, ""),
+    authKey: process.env.JFS_MIDDLEWARE_AUTH_KEY || "",
+  };
+}
+
+export async function executeScopedJfsConnection(
+  scope: SettingsScope,
+  operation: ScopedConnectionOperation,
+  input: ScopedConnectionInput,
+) {
+  const { baseUrl, authKey } = middlewareConfig();
+  const endpoint = operation === "SCOPED_RECONNECT"
+    ? "/scoped/reconnect"
+    : "/scoped/test-connection";
+  const response = await (input.fetcher ?? fetch)(`${baseUrl}${endpoint}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Auth-Key": authKey,
+      "X-JFS-Tenant-Id": scope.tenantId,
+      "X-JFS-Outlet-Id": scope.outletId,
+      "X-JFS-Outlet-Code": input.outletCode,
+      "X-JFS-Network-Code": input.networkCode,
+      "X-JFS-Account": input.account,
+      "X-JFS-Password": input.password,
+    },
+    body: "{}",
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.success || !payload.data?.connected) {
+    throw new Error(payload?.error || `Scoped JFS connection failed (${response.status})`);
+  }
+  return payload.data as {
+    connected: true;
+    networkCode: string | null;
+    name?: string | null;
+    sessionStatus: "ACTIVE";
+  };
+}
+
 export async function executeTrustedMultiOutletScraper(
   scope: SettingsScope,
   operation: ScraperOperation,
@@ -40,11 +95,7 @@ export async function executeTrustedMultiOutletScraper(
   const decryptedAccount = decryptCredential<{ account: string }>(credential.accountEncrypted).account;
   const decryptedPassword = decryptCredential<{ password: string }>(credential.passwordEncrypted).password;
 
-  const baseUrl = process.env.JFS_MIDDLEWARE_BASE_URL;
-  if (!baseUrl) {
-    throw new Error("JFS_MIDDLEWARE_BASE_URL is not configured");
-  }
-  const authKey = process.env.JFS_MIDDLEWARE_AUTH_KEY || "";
+  const { baseUrl, authKey } = middlewareConfig();
   const outletCode = credential.outlet?.code?.trim();
   const networkCode = credential.networkCode?.trim();
   if (!outletCode || !networkCode) {
@@ -66,7 +117,7 @@ export async function executeTrustedMultiOutletScraper(
     SENDER_DETAIL: "/sender-detail",
   };
 
-  const url = `${baseUrl.replace(/\/+$/, "")}${endpointMap[operation]}`;
+  const url = `${baseUrl}${endpointMap[operation]}`;
   const customFetcher = (options.fetcher as typeof fetch) ?? fetch;
 
   const res = await customFetcher(url, {

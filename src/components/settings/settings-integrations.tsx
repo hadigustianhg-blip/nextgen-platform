@@ -109,6 +109,23 @@ export function JfsConnectionCard({ data }: { data: JfsConnectionState }) {
     }
   }
 
+  async function handleReconnect() {
+    setLoading("RECONNECTING");
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    try {
+      const res = await fetch("/api/settings/integrations/jfs/reconnect", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error?.message || "Login ulang JFS gagal");
+      setConn(json.data);
+      setSuccessMsg("Login ulang JFS berhasil.");
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : "Login ulang JFS gagal");
+    } finally {
+      setLoading(null);
+    }
+  }
+
   async function handleDisconnect() {
     if (!confirm("Apakah Anda yakin ingin memutuskan integrasi JFS untuk outlet ini?")) return;
     setErrorMsg(null);
@@ -251,11 +268,11 @@ export function JfsConnectionCard({ data }: { data: JfsConnectionState }) {
               <button
                 type="button"
                 className={`${buttonClass} bg-blue-50 text-blue-700 hover:bg-blue-100`}
-                onClick={handleTest}
+                onClick={handleReconnect}
                 disabled={loading !== null}
               >
                 <RefreshCw size={16} />
-                Login Ulang
+                {loading === "RECONNECTING" ? "Login Ulang..." : "Login Ulang"}
               </button>
 
               <button
