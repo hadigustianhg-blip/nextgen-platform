@@ -24,7 +24,7 @@ type OperationalRow = {
 type FilterOption = { value: string; label: string };
 type Result = {
   summary: { totalWaybills: number; totalSchedules: number; validMaskedPhones: number };
-  filterOptions: { sources: FilterOption[]; statuses: FilterOption[]; methods: FilterOption[]; pickupStaff: FilterOption[] };
+  filterOptions: { statuses: FilterOption[]; methods: FilterOption[]; pickupStaff: FilterOption[] };
   rows: OperationalRow[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
 };
@@ -35,10 +35,10 @@ type RowDetail = {
 };
 const empty: Result = {
   summary: { totalWaybills: 0, totalSchedules: 0, validMaskedPhones: 0 },
-  filterOptions: { sources: [], statuses: [], methods: [], pickupStaff: [] },
+  filterOptions: { statuses: [], methods: [], pickupStaff: [] },
   rows: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 },
 };
-const blankFilters = { sourceProvider: "", orderStatus: "", sendName: "", pickupStaff: "" };
+const blankFilters = { orderStatus: "", sendName: "", pickupStaff: "" };
 const defaultRange = jakartaDateRange(3);
 const isCalendarDate = (value: string) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -180,9 +180,6 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
     </div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       <input aria-label="Tanggal Mulai" type="date" value={startDate} onChange={event => { setPage(1); setStartDate(event.target.value); }} className={nextgenControlClass}/>
       <input aria-label="Tanggal Akhir" type="date" value={endDate} onChange={event => { setPage(1); setEndDate(event.target.value); }} className={nextgenControlClass}/>
-      <select aria-label="Source" value={filters.sourceProvider} onChange={event => setFilter("sourceProvider", event.target.value)} className={nextgenControlClass}>
-        <option value="">Semua Source</option>{result.filterOptions.sources.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-      </select>
       <select aria-label="Status JFS" value={filters.orderStatus} onChange={event => setFilter("orderStatus", event.target.value)} className={nextgenControlClass}>
         <option value="">Semua Status JFS</option>{result.filterOptions.statuses.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
       </select>
@@ -208,27 +205,35 @@ export function PickupSchedulingClient({ canSync, canConfirm }: { canSync: boole
         <button disabled={confirming} onClick={cancelSelection} className={nextgenNeutralButtonClass}><X size={17}/>Batal</button>
       </div>
     </div>}
-    <TableCard><div className="overflow-x-auto"><table className="w-full min-w-[1760px] text-left text-sm">
+    <TableCard><div className="overflow-x-auto"><table className="w-full min-w-[1900px] table-fixed text-left text-sm">
       <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>
-        {selectionMode && <th className="px-4 py-3">Pilih</th>}
-        {["No","Waybill","Waktu Input","Source","Status JFS","Metode","Pengirim","Perusahaan","No. HP","Area Pengirim","Alamat Pickup","Kurir Pickup","Waktu Pickup","Berat","Status Konfirmasi"].map(label => <th key={label} className="px-4 py-3">{label}</th>)}
+        {selectionMode && <th className="w-16 px-3 py-3">Pilih</th>}
+        {[{ label: "No", width: "w-14" }, { label: "Waybill", width: "w-[140px]" },
+          { label: "Waktu Input", width: "w-[155px]" }, { label: "Source", width: "w-[110px]" },
+          { label: "Status JFS", width: "w-[170px]" }, { label: "Metode", width: "w-[125px]" },
+          { label: "Pengirim", width: "w-[140px]" }, { label: "Perusahaan", width: "w-[130px]" },
+          { label: "No. HP", width: "w-[120px]" }, { label: "Area Pengirim", width: "w-[160px]" },
+          { label: "Alamat Pickup", width: "w-[300px]" }, { label: "Kurir Pickup", width: "w-[150px]" },
+          { label: "Waktu Pickup", width: "w-[160px]" }, { label: "Berat", width: "w-20" },
+          { label: "Status Konfirmasi", width: "w-[160px]" }]
+          .map(item => <th key={item.label} className={`${item.width} px-3 py-3`}>{item.label}</th>)}
       </tr></thead>
       <tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan={selectionMode ? 16 : 15} className="py-16 text-center text-slate-500"><LoaderCircle className="mx-auto animate-spin"/>Memuat data…</td></tr>
         : result.rows.length === 0 ? <tr><td colSpan={selectionMode ? 16 : 15} className="py-16 text-center text-slate-500">Tidak ada jadwal pickup pada filter ini.</td></tr>
         : result.rows.map((row, index) => <tr key={row.rowId} className={selected.has(row.rowId) ? "bg-blue-50/60" : "hover:bg-slate-50/70"}>
-          {selectionMode && <td className="px-4 py-3"><input type="checkbox" aria-label={`Pilih ${row.waybill}`} checked={selected.has(row.rowId)} onChange={() => toggleRow(row.rowId)} className="size-4 rounded border-slate-300 text-blue-600"/></td>}
-          <td className="px-4 py-3 text-slate-500">{(page - 1) * result.pagination.pageSize + index + 1}</td>
-          <td className="px-4 py-3 font-semibold text-slate-950">{row.waybill}</td>
-          <td className="whitespace-nowrap px-4 py-3">{formatDateTime(row.inputTime, row.businessDate)}</td>
-          <td className="px-4 py-3"><span className="font-medium">{row.sourceProvider}</span>{row.source && <span className="block text-xs text-slate-500">{row.source}</span>}</td>
-          <td className="px-4 py-3">{row.statusCode ? `${row.statusCode} · ` : ""}{row.status || "—"}</td>
-          <td className="px-4 py-3">{row.sendName || "—"}</td><td className="px-4 py-3 font-medium">{row.senderName || "—"}</td>
-          <td className="px-4 py-3">{row.senderCompany || "—"}</td><td className="px-4 py-3">{row.senderPhoneMasked || "—"}</td>
-          <td className="px-4 py-3">{[row.senderCity, row.senderArea].filter(Boolean).join(" · ") || "—"}</td>
-          <td className="max-w-[320px] whitespace-normal px-4 py-3 leading-5">{row.pickupAddressMasked || "—"}</td>
-          <td className="px-4 py-3">{row.pickupStaff || "Belum ada"}</td><td className="whitespace-nowrap px-4 py-3">{formatDateTime(row.bestPickTime)}</td>
-          <td className="px-4 py-3">{row.weight.toLocaleString("id-ID")}</td>
-          <td className="px-4 py-3">{row.pickupFailed ? row.pickFailReason || "Gagal pickup" : "Siap dikonfirmasi"}</td>
+          {selectionMode && <td className="px-3 py-3 align-top"><input type="checkbox" aria-label={`Pilih ${row.waybill}`} checked={selected.has(row.rowId)} onChange={() => toggleRow(row.rowId)} className="size-4 rounded border-slate-300 text-blue-600"/></td>}
+          <td className="px-3 py-3 align-top text-slate-500">{(page - 1) * result.pagination.pageSize + index + 1}</td>
+          <td className="whitespace-nowrap px-3 py-3 align-top font-semibold text-slate-950">{row.waybill}</td>
+          <td className="whitespace-nowrap px-3 py-3 align-top">{formatDateTime(row.inputTime, row.businessDate)}</td>
+          <td className="whitespace-nowrap px-3 py-3 align-top font-medium">{row.source || "-"}</td>
+          <td className="px-3 py-3 align-top"><span className="line-clamp-2">{row.statusCode ? `${row.statusCode} · ` : ""}{row.status || "—"}</span></td>
+          <td className="whitespace-nowrap px-3 py-3 align-top">{row.sendName || "—"}</td><td className="px-3 py-3 align-top font-medium">{row.senderName || "—"}</td>
+          <td className="px-3 py-3 align-top">{row.senderCompany || "—"}</td><td className="whitespace-nowrap px-3 py-3 align-top">{row.senderPhoneMasked || "—"}</td>
+          <td className="px-3 py-3 align-top"><span className="line-clamp-2">{[row.senderCity, row.senderArea].filter(Boolean).join(" · ") || "—"}</span></td>
+          <td className="px-3 py-3 align-top"><span className="line-clamp-2 leading-5" title={row.pickupAddressMasked || undefined}>{row.pickupAddressMasked || "—"}</span></td>
+          <td className="whitespace-nowrap px-3 py-3 align-top">{row.pickupStaff || "Belum ada"}</td><td className="whitespace-nowrap px-3 py-3 align-top">{formatDateTime(row.bestPickTime)}</td>
+          <td className="whitespace-nowrap px-3 py-3 align-top">{row.weight.toLocaleString("id-ID")}</td>
+          <td className="px-3 py-3 align-top"><span className="line-clamp-2">{row.pickupFailed ? row.pickFailReason || "Gagal pickup" : "Siap dikonfirmasi"}</span></td>
         </tr>)}</tbody>
     </table></div></TableCard>
     <div className="flex items-center justify-between text-sm text-slate-600">

@@ -119,14 +119,13 @@ describe("latest-per-waybill projection and filters", () => {
       orderStatusCode: 102, sendName: "Jemput Paket", pickNetworkName: "Bandung", pickStaffName: "Budi",
       senderCityName: "Bandung", senderAreaName: "Cicendo", pickFailReason: "Tutup" })];
     const parsed = pickupSchedulingQuerySchema.parse({ startDate: "2026-08-22", endDate: "2026-08-22",
-      sourceProvider: PICKUP_SCHEDULING_PROVIDER, orderStatus: "102", sendName: "Jemput Paket", pickupStaff: "Budi" });
+      orderStatus: "102", sendName: "Jemput Paket", pickupStaff: "Budi" });
     const result = await listPickupScheduling({ tenantId: "tenant", outletId: "outlet", ...parsed });
     expect(result.summary.totalWaybills).toBe(1);
     expect(result.rows).toHaveLength(1);
     expect(result).not.toHaveProperty("groups");
     expect(result.filterOptions).toMatchObject({
-      sources: [{ value: PICKUP_SCHEDULING_PROVIDER }], statuses: [{ value: "102" }],
-      methods: [{ value: "Jemput Paket" }], pickupStaff: [{ label: "Budi" }],
+      statuses: [{ value: "102" }], methods: [{ value: "Jemput Paket" }], pickupStaff: [{ label: "Budi" }],
     });
     expect(db.rawPickupSchedule.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({
       tenantId: "tenant", outletId: "outlet", sourceProvider: PICKUP_SCHEDULING_PROVIDER,
@@ -154,6 +153,15 @@ describe("latest-per-waybill projection and filters", () => {
     ].sort(comparePickupOperationalRows);
     expect(rows.map(item => item.recordId)).toEqual(["2", "1", "3"]);
   });
+
+  it.each([["Shopee", "Shopee"], ["TikTok", "TikTok"], [null, null]])(
+    "exposes persisted orderSourceName %s as the display source",
+    (sourcePlatform, expected) => {
+      const projected = toPickupOperationalRow(row("source", { sourcePlatform }) as never);
+      expect(projected.source).toBe(expected);
+      expect(projected.sourceProvider).toBe(PICKUP_SCHEDULING_PROVIDER);
+    },
+  );
 });
 
 describe("just-in-time WhatsApp detail", () => {
@@ -223,7 +231,12 @@ describe("permissions and presentation safety", () => {
     expect(ui).toContain("result.rows.filter(row => selected.has(row.rowId))");
     expect(ui).toContain("/records/${row.rowId}/detail");
     expect(ui).toContain("type=\"checkbox\"");
-    expect(ui).toContain("<select aria-label=\"Source\"");
+    expect(ui).not.toContain("<select aria-label=\"Source\"");
+    expect(ui).not.toContain("filters.sourceProvider");
+    expect(ui).toContain("{row.source || \"-\"}");
+    expect(ui).not.toContain("{row.sourceProvider}");
+    expect(ui).toContain("line-clamp-2 leading-5");
+    expect(ui).toContain("title={row.pickupAddressMasked || undefined}");
     expect(ui).not.toContain("Search Resi");
     expect(ui).not.toContain("Search Pengirim");
   });

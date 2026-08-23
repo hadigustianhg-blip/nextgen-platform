@@ -116,15 +116,14 @@ export function groupPickupSchedules(rows: PickupScheduleRow[]) {
 
 type ListInput = {
   tenantId: string; outletId: string; startDate: string; endDate: string;
-  sourceProvider: string; orderStatus: string; sendName: string; pickupStaff: string;
+  orderStatus: string; sendName: string; pickupStaff: string;
   page: number; pageSize: number;
 };
 function includes(value: string | null, search: string) {
   return !search || (value || "").toLowerCase().includes(search.toLowerCase());
 }
 function matches(row: PickupScheduleRow, input: ListInput) {
-  return (!input.sourceProvider || row.sourceProvider === input.sourceProvider)
-    && (!input.orderStatus || String(row.orderStatusCode || "") === input.orderStatus || row.sourceStatus === input.orderStatus)
+  return (!input.orderStatus || String(row.orderStatusCode || "") === input.orderStatus || row.sourceStatus === input.orderStatus)
     && (!input.sendName || row.sendName === input.sendName)
     && (!input.pickupStaff || row.pickStaffCode === input.pickupStaff || row.pickStaffName === input.pickupStaff
       || includes(row.pickStaffName, input.pickupStaff));
@@ -146,7 +145,6 @@ export async function listPickupScheduling(input: ListInput) {
   const projected = projectLatestPickupSchedules(await scopedRows(input));
   const rows = projected.filter(row => matches(row, input)).map(toPickupOperationalRow).sort(comparePickupOperationalRows);
   const filterOptions = {
-    sources: uniqueOptions(projected.map(row => option(row.sourceProvider))),
     statuses: uniqueOptions(projected.filter(row => row.sourceStatus || row.orderStatusCode !== null).map(row =>
       option(row.orderStatusCode === null ? row.sourceStatus || "" : String(row.orderStatusCode),
         [row.orderStatusCode, row.sourceStatus].filter(value => value !== null && value !== "").join(" · ")))),
