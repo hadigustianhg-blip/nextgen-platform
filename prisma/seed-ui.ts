@@ -348,6 +348,7 @@ async function main() {
       const order = `${MARKER}-ORDER-${dateKey.replaceAll("-", "")}-${String(index).padStart(3, "0")}`;
       schedules.push({
         id: id(`schedule:${order}`), tenantId: tenant.id, outletId: outlet.id, businessDate,
+        sourceProvider: "DEVUI", externalJfsId: order,
         sourceOrderId: order, waybillNo: `DEVUI-S-${dateKey.replaceAll("-", "")}-${String(index).padStart(3, "0")}`,
         customerId: `${MARKER}-CUSTOMER-${index % 8}`, senderNameMasked: `Pengirim Synthetic ${index % 8 + 1}`,
         senderPhoneMasked: "+62800****0000", pickupAddressMasked: `Alamat synthetic area ${index % 6 + 1}`,

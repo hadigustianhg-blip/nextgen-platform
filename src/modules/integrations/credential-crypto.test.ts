@@ -14,6 +14,27 @@ describe("integration credential encryption", () => {
   it("rejects tampered ciphertext", () => {
     const key = randomBytes(32).toString("base64");
     const envelope = encryptCredential({ token: "secret" }, key);
-    expect(() => decryptCredential(`${envelope.slice(0, -1)}x`, key)).toThrow();
+    const parts = envelope.split(".");
+    const tag = Buffer.from(parts[2]!, "base64url");
+    tag[0] = (tag[0] ?? 0) ^ 0x01;
+    parts[2] = tag.toString("base64url");
+
+    expect(() => decryptCredential(parts.join("."), key)).toThrow();
   });
+
+  it("rejects a valid envelope decrypted with the wrong key", () => {
+    const key = randomBytes(32).toString("base64");
+    const wrongKey = randomBytes(32).toString("base64");
+    const envelope = encryptCredential({ token: "secret" }, key);
+
+    expect(() => decryptCredential(envelope, wrongKey)).toThrow();
+  });
+
+  it.each(["", "v2.iv.tag.ciphertext", "v1.incomplete"])(
+    "rejects malformed or empty envelope %j",
+    (envelope) => {
+      const key = randomBytes(32).toString("base64");
+      expect(() => decryptCredential(envelope, key)).toThrow();
+    },
+  );
 });

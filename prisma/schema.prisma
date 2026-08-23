@@ -949,6 +949,47 @@ model RawPickupSchedule {
   sourceNetworkCode   String?
   sourceInputTime     String?
   sourceUpdatedTime   String?
+  sourceProvider      String   @default("LEGACY_PICKUP_SCHEDULING")
+  externalJfsId       String?
+  sourceInputAt       DateTime? @db.Timestamptz(3)
+  sourceUpdatedAt     DateTime? @db.Timestamptz(3)
+  customerOrderAt     DateTime? @db.Timestamptz(3)
+  orderSourceCode     String?
+  orderStatusCode     Int?
+  customerName        String?
+  sendName            String?
+  sendCode             String?
+  senderCompany       String?
+  senderProvinceName  String?
+  senderCityName      String?
+  senderAreaName      String?
+  receiverName        String?
+  receiverCompany     String?
+  receiverProvinceName String?
+  receiverCityName    String?
+  receiverAreaName    String?
+  receiverAddress     String?
+  goodsTypeName       String?
+  packageNumber       Int?
+  packageChargeWeight Decimal? @db.Decimal(12, 3)
+  paymentModeName     String?
+  paymentModeCode     String?
+  totalFreight        Decimal? @db.Decimal(18, 2)
+  pickNetworkName     String?
+  pickStaffName       String?
+  pickStaffCode       String?
+  dispatchNetworkAt   DateTime? @db.Timestamptz(3)
+  dispatchStaffAt     DateTime? @db.Timestamptz(3)
+  bestPickTimeStartAt DateTime? @db.Timestamptz(3)
+  bestPickTimeEndAt   DateTime? @db.Timestamptz(3)
+  latestPickAt        DateTime? @db.Timestamptz(3)
+  pickFailReason      String?
+  pickFailAt          DateTime? @db.Timestamptz(3)
+  pickFailTimes       Int?
+  printsNumber        Int?
+  proxyAreaCode       String?
+  proxyAreaName       String?
+  rawPayload          Json?
   sourceRecordKey     String
   sourceHash          String   @db.Char(64)
   syncedAt            DateTime @db.Timestamptz(3)
@@ -958,9 +999,12 @@ model RawPickupSchedule {
   outlet              Outlet   @relation(fields: [outletId], references: [id], onDelete: Restrict)
 
   @@unique([tenantId, outletId, businessDate, sourceRecordKey])
+  @@unique([tenantId, outletId, sourceProvider, externalJfsId])
   @@index([tenantId, outletId, businessDate])
   @@index([tenantId, outletId, waybillNo])
   @@index([tenantId, outletId, customerId])
+  @@index([tenantId, outletId, sourceProvider, sourceInputAt])
+  @@index([tenantId, outletId, orderStatusCode, pickStaffCode])
 }
 
 model MasterPickup {

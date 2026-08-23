@@ -23,9 +23,9 @@ const dateRange = z.object({ startDate: date, endDate: date }).superRefine(
 export const pickupSchedulingQuerySchema = z.object({
   startDate: date,
   endDate: date,
-  waybill: z.string().trim().max(100).default(""),
-  senderName: z.string().trim().max(100).default(""),
-  sourcePlatform: z.string().trim().max(100).default(""),
+  orderStatus: z.string().trim().max(100).default(""),
+  sendName: z.string().trim().max(100).default(""),
+  pickupStaff: z.string().trim().max(100).default(""),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 }).and(dateRange);

@@ -8,6 +8,8 @@ export type ScraperOperation =
   | "COD"
   | "IBK"
   | "OMS"
+  | "OMS_SCHEDULING_LIST"
+  | "OMS_SCHEDULING_DETAIL"
   | "INVENTORY"
   | "AGING_SIGN"
   | "WAYBILL_STATUS"
@@ -43,6 +45,11 @@ export async function executeTrustedMultiOutletScraper(
     throw new Error("JFS_MIDDLEWARE_BASE_URL is not configured");
   }
   const authKey = process.env.JFS_MIDDLEWARE_AUTH_KEY || "";
+  const outletCode = credential.outlet?.code?.trim();
+  const networkCode = credential.networkCode?.trim();
+  if (!outletCode || !networkCode) {
+    throw new Error(`JFS outlet/network mapping is not configured for outlet ${scope.outletId}`);
+  }
 
   // Dynamic route selection: support both clean path and /jfs- prefixed path
   const endpointMap: Record<ScraperOperation, string> = {
@@ -51,6 +58,8 @@ export async function executeTrustedMultiOutletScraper(
     COD: "/cod",
     IBK: "/ibk",
     OMS: "/oms",
+    OMS_SCHEDULING_LIST: "/oms-scheduling-list",
+    OMS_SCHEDULING_DETAIL: "/oms-scheduling-detail",
     INVENTORY: "/inventory",
     AGING_SIGN: "/aging-sign",
     WAYBILL_STATUS: "/waybill-status",
@@ -67,13 +76,13 @@ export async function executeTrustedMultiOutletScraper(
       "X-Auth-Key": authKey,
       "X-JFS-Tenant-Id": scope.tenantId,
       "X-JFS-Outlet-Id": scope.outletId,
-      "X-JFS-Outlet-Code": credential.outlet?.code || credential.networkCode || "SUM001A",
-      "X-JFS-Network-Code": credential.networkCode || credential.outlet?.code || "SUM001A",
+      "X-JFS-Outlet-Code": outletCode,
+      "X-JFS-Network-Code": networkCode,
       "X-JFS-Account": decryptedAccount,
       "X-JFS-Password": decryptedPassword,
     },
     body: JSON.stringify({
-      networkCode: credential.networkCode || credential.outlet?.code,
+      networkCode,
       ...options,
     }),
   });
