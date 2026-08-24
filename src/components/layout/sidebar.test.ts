@@ -15,7 +15,7 @@ describe("pickup navigation", () => {
     );
     expect(source).not.toContain("Outlet aktif");
     expect(source).not.toContain("Semua Outlet");
-    expect(source).toContain('<nav\n          className="mt-5');
+    expect(source).toContain('<nav\n          className="mt-8');
   });
 
   it("hides RAW Pickup and exposes Pickup Settlement under Settlement Center", async () => {

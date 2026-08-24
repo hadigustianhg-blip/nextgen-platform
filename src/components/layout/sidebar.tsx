@@ -202,10 +202,11 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
         ].join(" ")}
       >
         <div className="relative flex h-[96px] items-center rounded-t-[var(--nextgen-radius-workspace)] border-b border-white/[0.075] px-5">
-          <span className="grid size-11 shrink-0 place-items-center rounded-[15px] bg-gradient-to-br from-white/[0.14] to-white/[0.055] shadow-[0_10px_28px_rgba(2,6,23,0.28)] ring-1 ring-inset ring-white/[0.14]"><NextgenBrand variant="mark" className="size-9 shrink-0" priority /></span>
+          <span className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-[15px] bg-gradient-to-br from-white/[0.14] to-white/[0.055] shadow-[0_10px_28px_rgba(2,6,23,0.28)] ring-1 ring-inset ring-white/[0.14]">
+            <NextgenBrand variant="light" className="h-11 w-[190px] max-w-none shrink-0 object-contain object-left" priority />
+          </span>
           <div className={`ml-3.5 min-w-0 ${labelClass}`}>
-            <div className="text-[15px] font-bold leading-none tracking-[0.2em] text-white">NEXTGEN</div>
-            <div className="mt-2 text-[9px] font-medium uppercase leading-none tracking-[0.18em] text-blue-200/70">Operations System</div>
+            <div className="truncate text-[15px] font-semibold leading-none tracking-[-0.01em] text-white">Nextgen System</div>
           </div>
           <button
             type="button"
@@ -218,7 +219,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
         </div>
 
         <nav
-          className="mt-5 relative flex-1 space-y-1.5 overflow-y-auto px-3.5 pb-5 pt-3 [scrollbar-color:rgba(148,163,184,0.28)_transparent] [scrollbar-width:thin]"
+          className="mt-8 relative flex-1 space-y-1.5 overflow-y-auto px-3.5 pb-5 pt-5 [scrollbar-color:rgba(148,163,184,0.28)_transparent] [scrollbar-width:thin]"
           aria-label="Navigasi utama"
         >
           {navigation.slice(0, 1).map((item) => {
@@ -552,7 +553,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
           aria-label={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
-          className="absolute -right-4 top-[104px] z-50 hidden size-8 place-items-center rounded-full border border-white/70 bg-white/95 text-[var(--nextgen-primary)] shadow-[0_8px_24px_rgba(2,6,23,0.24)] backdrop-blur outline-none transition duration-200 hover:scale-105 hover:bg-blue-50 hover:shadow-[0_10px_28px_rgba(2,6,23,0.30)] focus-visible:ring-2 focus-visible:ring-blue-300 motion-reduce:transform-none lg:grid"
+          className="absolute -right-4 top-[106px] z-50 hidden size-8 place-items-center rounded-full border border-white/70 bg-white/95 text-[var(--nextgen-primary)] shadow-[0_8px_24px_rgba(2,6,23,0.24)] backdrop-blur outline-none transition duration-200 hover:scale-105 hover:bg-blue-50 hover:shadow-[0_10px_28px_rgba(2,6,23,0.30)] focus-visible:ring-2 focus-visible:ring-blue-300 motion-reduce:transform-none lg:grid"
         >
           <ChevronLeft
             size={15}
