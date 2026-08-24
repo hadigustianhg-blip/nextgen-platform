@@ -9,6 +9,7 @@ import {
   calculateDeliveryFinancials,
   deduplicateDispatchEnvelope,
   deliverySyncFailureDiagnostic,
+  fetchDispatchOnlySource,
   fetchDeliverySources,
   normalizeComparison,
   sourceHash,
@@ -30,6 +31,25 @@ import {
 const d = (value: number | string) => new Prisma.Decimal(value);
 
 describe("Delivery Settlement aggregation", () => {
+  it("fetches Dispatch-only without requesting COD", async () => {
+    const fetcher = vi.fn(async () => ({ success: true, total: 0, data: [] }));
+    const scope = { tenantId: "tenant-a", outletId: "outlet-a" };
+
+    await fetchDispatchOnlySource(fetcher as never, "2026-08-24", scope);
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledWith(
+      "/jfs-dispatch",
+      "2026-08-24",
+      { scope },
+    );
+    expect(fetcher).not.toHaveBeenCalledWith(
+      "/jfs-cod",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it("deduplicates overlapping endpoint pages by waybill and keeps the latest event", () => {
     const base = {
       kurir: "A", ongkir: 100, receiver: "", address: "",

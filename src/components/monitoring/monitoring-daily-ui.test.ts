@@ -66,9 +66,16 @@ describe("Monitoring Daily UI contract", () => {
     );
     expect(source).toContain("canSyncDelivery(session)");
     expect(source).toContain("canSyncPickup(session)");
-    expect(source).toContain("syncDeliverySettlement(context");
+    expect(source).toContain("syncDispatchOnly(context");
+    expect(source).not.toContain("syncDeliverySettlement(context");
+    expect(source).not.toContain('"/jfs-cod"');
     expect(source).toContain("syncPickup(context");
     expect(source).toContain("resolveMonitoringOutlet");
+    const client = await readFile(
+      new URL("./monitoring-daily-client.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(client).toContain('failed.join(" dan ")');
   });
 
   it("exposes keyboard-accessible KPI and per-team detail drilldowns", async () => {

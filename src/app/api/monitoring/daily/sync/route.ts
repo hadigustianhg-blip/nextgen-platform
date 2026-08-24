@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import {
   canSyncDelivery,
-  syncDeliverySettlement,
+  syncDispatchOnly,
 } from "@/modules/delivery-settlement";
 import { syncPickup } from "@/modules/pickup";
 import { canSyncPickup } from "@/modules/pickup/pickup.authorization";
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
   };
   const result = await orchestrateMonitoringSync(
     async () => {
-      const delivery = await syncDeliverySettlement(context, {
+      const delivery = await syncDispatchOnly(context, {
         operationalDate: parsed.data.businessDate,
       });
       return {

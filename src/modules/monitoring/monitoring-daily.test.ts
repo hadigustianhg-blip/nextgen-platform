@@ -193,6 +193,18 @@ describe("Monitoring Daily", () => {
     });
   });
 
+  it("reports success when independent Dispatch and Pickup syncs succeed", async () => {
+    const result = await orchestrateMonitoringSync(
+      async () => ({ processed: 3 }),
+      async () => ({ processed: 2 }),
+    );
+    expect(result).toEqual({
+      success: true,
+      dispatch: { success: true, processed: 3 },
+      pickup: { success: true, processed: 2 },
+    });
+  });
+
   it("runs Dispatch before Pickup", async () => {
     const order: string[] = [];
     await orchestrateMonitoringSync(
@@ -206,5 +218,29 @@ describe("Monitoring Daily", () => {
       },
     );
     expect(order).toEqual(["dispatch", "pickup"]);
+  });
+
+  it("labels a Dispatch-only failure as Dispatch", async () => {
+    const result = await orchestrateMonitoringSync(
+      async () => { throw new Error("dispatch unavailable"); },
+      async () => ({ processed: 2 }),
+    );
+    expect(result).toEqual({
+      success: false,
+      dispatch: { success: false, error: "Sinkronisasi Dispatch gagal." },
+      pickup: { success: true, processed: 2 },
+    });
+  });
+
+  it("labels independent Dispatch and Pickup failures", async () => {
+    const result = await orchestrateMonitoringSync(
+      async () => { throw new Error("dispatch unavailable"); },
+      async () => { throw new Error("pickup unavailable"); },
+    );
+    expect(result).toEqual({
+      success: false,
+      dispatch: { success: false, error: "Sinkronisasi Dispatch gagal." },
+      pickup: { success: false, error: "Sinkronisasi Pickup gagal." },
+    });
   });
 });

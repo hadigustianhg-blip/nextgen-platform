@@ -31,6 +31,14 @@ export async function fetchDeliverySources(
   return { dispatchEnvelope, codEnvelope };
 }
 
+export async function fetchDispatchOnlySource(
+  fetchSource: SourceFetcher,
+  operationalDate: string,
+  scope: SettingsScope,
+) {
+  return fetchSource("/jfs-dispatch", operationalDate, { scope });
+}
+
 export class DeliverySyncError extends Error {
   constructor(readonly reference: {
     requestId: string;
@@ -70,6 +78,7 @@ function parseSourceDate(value: string) {
 }
 
 type DispatchSourceRecord = ReturnType<typeof dispatchRecordSchema.parse>;
+type DispatchEnvelope = Awaited<ReturnType<typeof fetchDeliverySource>>;
 
 export function deduplicateDispatchEnvelope(records: DispatchSourceRecord[]) {
   const byWaybill = new Map<string, { record: DispatchSourceRecord; index: number }>();
@@ -88,6 +97,140 @@ export function deduplicateDispatchEnvelope(records: DispatchSourceRecord[]) {
   return [...byWaybill.values()]
     .sort((left, right) => left.index - right.index)
     .map(({ record }) => record);
+}
+
+async function persistDispatchEnvelope(input: {
+  context: Context;
+  envelope: DispatchEnvelope;
+  operationalDate: Date;
+  runId: string;
+  fetchedAt: Date;
+}) {
+  const { context, envelope, operationalDate, runId, fetchedAt } = input;
+  let created = 0;
+  let updated = 0;
+  let unchanged = 0;
+  let inactive = 0;
+  let anomaly = 0;
+
+  const parsed: DispatchSourceRecord[] = [];
+  for (const rawValue of envelope.data) {
+    const result = dispatchRecordSchema.safeParse(rawValue);
+    if (result.success) parsed.push(result.data);
+    else anomaly += 1;
+  }
+  const unique = deduplicateDispatchEnvelope(parsed);
+  const overlapDuplicate = parsed.length - unique.length;
+
+  const waybillNos = unique.map((record) => record.waybillNo.trim());
+  const missing = await prisma.rawDispatch.updateMany({
+    where: {
+      tenantId: context.tenantId,
+      outletId: context.outletId,
+      operationalDate,
+      isActive: true,
+      ...(waybillNos.length ? { waybillNo: { notIn: waybillNos } } : {}),
+    },
+    data: { isActive: false },
+  });
+  inactive += missing?.count ?? 0;
+
+  const keys = unique.map((record) => `v2:dispatch:${record.waybillNo.trim()}`);
+  const existingRows = keys.length
+    ? await prisma.rawDispatch.findMany({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          sourceRecordKey: { in: keys },
+        },
+      })
+    : [];
+  const existingByKey = new Map(existingRows.map((row) => [row.sourceRecordKey, row]));
+
+  const batchSize = 50;
+  for (let index = 0; index < unique.length; index += batchSize) {
+    const batch = unique.slice(index, index + batchSize);
+    await prisma.$transaction(async (tx) => {
+      for (const record of batch) {
+        const key = `v2:dispatch:${record.waybillNo.trim()}`;
+        const hash = sourceHash(record);
+        const existing = existingByKey.get(key);
+        const common = {
+          operationalDate,
+          sourceEndpoint: "/jfs-dispatch",
+          sourceFetchedAt: fetchedAt,
+          syncedAt: new Date(),
+          syncStatus: "NORMALIZED" as const,
+          syncError: null,
+          sourceRecordHash: hash,
+          sourcePayload: record as unknown as Prisma.InputJsonValue,
+          lastSeenRunId: runId,
+          waybillNo: record.waybillNo,
+          courierNameRaw: record.kurir || null,
+          freightAmount: decimal(record.ongkir),
+          dispatchTimeRaw: record.waktu || null,
+          dispatchAt: parseSourceDate(record.waktu),
+          receiverName: record.receiver || null,
+          receiverAddress: record.address || null,
+          deliveryStatusRaw: record.status || null,
+          chargeWeight: decimal(record.berat),
+          settlementTypeRaw: record.pembayaran || null,
+          serviceRaw: record.service || null,
+          codStatusRaw: record.codStatus || null,
+          codValue: decimal(record.codValue),
+          goodsDescription: record.barang || null,
+          isActive: true,
+        };
+
+        const superseded = await tx.rawDispatch.updateMany({
+          where: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            operationalDate,
+            waybillNo: record.waybillNo,
+            ...(existing ? { id: { not: existing.id } } : {}),
+            isActive: true,
+          },
+          data: { isActive: false },
+        });
+        inactive += superseded?.count ?? 0;
+
+        const isHashUnchanged = existing?.sourceRecordHash === hash;
+        const upserted = await tx.rawDispatch.upsert({
+          where: {
+            tenantId_outletId_sourceRecordKey: {
+              tenantId: context.tenantId,
+              outletId: context.outletId,
+              sourceRecordKey: key,
+            },
+          },
+          create: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            sourceRecordKey: key,
+            firstSeenRunId: runId,
+            ...common,
+          },
+          update: isHashUnchanged
+            ? {
+                sourceFetchedAt: fetchedAt,
+                syncedAt: new Date(),
+                lastSeenRunId: runId,
+                isActive: true,
+                operationalDate,
+              }
+            : common,
+        });
+        existingByKey.set(key, upserted);
+
+        if (!existing) created += 1;
+        else if (isHashUnchanged) unchanged += 1;
+        else updated += 1;
+      }
+    });
+  }
+
+  return { parsed, unique, overlapDuplicate, created, updated, unchanged, inactive, anomaly };
 }
 
 type Aggregate = {
@@ -203,6 +346,158 @@ function isPrismaP2002(error: unknown): boolean {
 
 type DeliverySyncResult = Awaited<ReturnType<typeof executeSyncDeliverySettlement>>;
 const activeDeliverySyncs = new Map<string, Promise<DeliverySyncResult>>();
+type DispatchOnlySyncResult = Awaited<ReturnType<typeof executeDispatchOnlySync>>;
+const activeDispatchOnlySyncs = new Map<string, Promise<DispatchOnlySyncResult>>();
+
+export async function syncDispatchOnly(
+  context: Context,
+  options: { operationalDate?: string; fetchSource?: SourceFetcher } = {},
+): Promise<DispatchOnlySyncResult> {
+  const operationalDate = options.operationalDate ?? todayJakarta();
+  const lockKey = `${context.tenantId}:${context.outletId}:${operationalDate}`;
+  const existingPromise = activeDispatchOnlySyncs.get(lockKey);
+  if (existingPromise) return existingPromise;
+
+  const syncPromise = (async () => {
+    try {
+      return await executeDispatchOnlySync(context, options, operationalDate);
+    } finally {
+      activeDispatchOnlySyncs.delete(lockKey);
+    }
+  })();
+  activeDispatchOnlySyncs.set(lockKey, syncPromise);
+  return syncPromise;
+}
+
+async function executeDispatchOnlySync(
+  context: Context,
+  options: { operationalDate?: string; fetchSource?: SourceFetcher },
+  operationalDate: string,
+) {
+  const requestId = randomUUID();
+  const startedAt = new Date();
+  const date = new Date(`${operationalDate}T00:00:00.000Z`);
+  const run = await prisma.syncRun.create({ data: {
+    tenantId: context.tenantId,
+    outletId: context.outletId,
+    runType: "DISPATCH",
+    operationalDate: date,
+    status: "RUNNING",
+    startedAt,
+    triggeredByUserId: context.actorId,
+  } });
+  await prisma.auditLog.create({ data: {
+    tenantId: context.tenantId,
+    outletId: context.outletId,
+    actorId: context.actorId,
+    action: "CREATE",
+    entityType: "DISPATCH_SYNC_STARTED",
+    entityId: run.id,
+    metadata: { operationalDate },
+  } });
+
+  try {
+    const envelope = await fetchDispatchOnlySource(
+      options.fetchSource ?? fetchDeliverySource,
+      operationalDate,
+      { tenantId: context.tenantId, outletId: context.outletId },
+    );
+    const diagnostic = "diagnostic" in envelope ? envelope.diagnostic : null;
+    const persisted = await persistDispatchEnvelope({
+      context,
+      envelope,
+      operationalDate: date,
+      runId: run.id,
+      fetchedAt: startedAt,
+    });
+    const duplicate = persisted.overlapDuplicate + persisted.unchanged;
+    const status: SyncRunStatus = persisted.anomaly ? "PARTIAL_SUCCESS" : "SUCCESS";
+    const completedAt = new Date();
+    await prisma.syncRun.update({ where: { id: run.id }, data: {
+      status,
+      completedAt,
+      dispatchFetchedCount: envelope.total,
+      dispatchCreatedCount: persisted.created,
+      dispatchUpdatedCount: persisted.updated,
+      duplicateCount: duplicate,
+      anomalyCount: persisted.anomaly,
+      metadata: {
+        dispatchAcceptedCount: persisted.parsed.length,
+        dispatchUniqueWaybillCount: persisted.unique.length,
+        dispatchOverlapDuplicateCount: persisted.overlapDuplicate,
+        dispatchUnchangedCount: persisted.unchanged,
+        dispatchHttpStatus: diagnostic?.httpStatus ?? null,
+        dispatchAttemptCount: diagnostic?.attemptCount ?? 1,
+        dispatchDurationMs: diagnostic?.durationMs ?? null,
+        requestId,
+      },
+    } });
+    await prisma.auditLog.create({ data: {
+      tenantId: context.tenantId,
+      outletId: context.outletId,
+      actorId: context.actorId,
+      action: "UPDATE",
+      entityType: "DISPATCH_SYNC_COMPLETED",
+      entityId: run.id,
+      metadata: { status, dispatchFetched: envelope.total, duplicate, anomaly: persisted.anomaly },
+    } });
+    return {
+      requestId,
+      runId: run.id,
+      status,
+      startedAt,
+      completedAt,
+      dispatch: {
+        fetched: envelope.total,
+        accepted: persisted.parsed.length,
+        unique: persisted.unique.length,
+        created: persisted.created,
+        updated: persisted.updated,
+        unchanged: persisted.unchanged,
+        duplicateIgnored: persisted.overlapDuplicate,
+        inactiveVersions: persisted.inactive,
+      },
+      duplicate,
+      anomaly: persisted.anomaly,
+    };
+  } catch (error) {
+    const completedAt = new Date();
+    const diagnostic = deliverySyncFailureDiagnostic({
+      requestId,
+      stage: "FETCH_DISPATCH",
+      error,
+      tenantId: context.tenantId,
+      outletId: context.outletId,
+      businessDate: operationalDate,
+    });
+    console.error("DISPATCH_SYNC_FAILED", diagnostic);
+    await prisma.syncRun.update({ where: { id: run.id }, data: {
+      status: "FAILED",
+      completedAt,
+      errorMessage: "Sinkronisasi Dispatch gagal.",
+    } });
+    await prisma.auditLog.create({ data: {
+      tenantId: context.tenantId,
+      outletId: context.outletId,
+      actorId: context.actorId,
+      action: "UPDATE",
+      entityType: "DISPATCH_SYNC_FAILED",
+      entityId: run.id,
+      metadata: {
+        requestId,
+        stage: "FETCH_DISPATCH",
+        errorCode: diagnostic.errorCode,
+        httpStatus: diagnostic.httpStatus,
+        attemptCount: diagnostic.attemptCount,
+      },
+    } });
+    throw new DeliverySyncError({
+      requestId,
+      stage: "FETCH_DISPATCH",
+      code: diagnostic.errorCode,
+    });
+  }
+}
 
 export async function syncDeliverySettlement(
   context: Context,
@@ -262,17 +557,7 @@ async function executeSyncDeliverySettlement(
     );
     dispatchFetch = "diagnostic" in dispatchEnvelope ? dispatchEnvelope.diagnostic : null;
     codFetch = "diagnostic" in codEnvelope ? codEnvelope.diagnostic : null;
-    let dispatchCreated = 0, dispatchUpdated = 0, dispatchUnchanged = 0, dispatchInactive = 0;
     let codCreated = 0, codUpdated = 0, codUnchanged = 0, duplicate = 0, anomaly = 0;
-    const parsedDispatches: DispatchSourceRecord[] = [];
-    for (const rawValue of dispatchEnvelope.data) {
-      const parsed = dispatchRecordSchema.safeParse(rawValue);
-      if (parsed.success) parsedDispatches.push(parsed.data);
-      else anomaly += 1;
-    }
-    const uniqueDispatches = deduplicateDispatchEnvelope(parsedDispatches);
-    const dispatchOverlapDuplicate = parsedDispatches.length - uniqueDispatches.length;
-    duplicate += dispatchOverlapDuplicate;
     const parsedCods: ReturnType<typeof codRecordSchema.parse>[] = [];
     for (const rawValue of codEnvelope.data) {
       const parsed = codRecordSchema.safeParse(rawValue);
@@ -284,123 +569,22 @@ async function executeSyncDeliverySettlement(
     duplicate += codOverlapDuplicate;
 
     stage = "NORMALIZE_AND_UPSERT";
-
-    const waybillNos = uniqueDispatches.map((r) => r.waybillNo.trim());
-    const missingDispatches = await prisma.rawDispatch.updateMany({
-      where: {
-        tenantId: context.tenantId,
-        outletId: context.outletId,
-        operationalDate: date,
-        isActive: true,
-        ...(waybillNos.length ? { waybillNo: { notIn: waybillNos } } : {}),
-      },
-      data: { isActive: false },
+    const dispatchPersistence = await persistDispatchEnvelope({
+      context,
+      envelope: dispatchEnvelope,
+      operationalDate: date,
+      runId: run.id,
+      fetchedAt: startedAt,
     });
-    dispatchInactive += missingDispatches?.count ?? 0;
-
-    const dispatchKeys = uniqueDispatches.map((r) => `v2:dispatch:${r.waybillNo.trim()}`);
-    const existingDispatches = dispatchKeys.length
-      ? await prisma.rawDispatch.findMany({
-          where: {
-            tenantId: context.tenantId,
-            outletId: context.outletId,
-            sourceRecordKey: { in: dispatchKeys },
-          },
-        })
-      : [];
-    const dispatchMap = new Map(existingDispatches.map((d) => [d.sourceRecordKey, d]));
-
-    const DISPATCH_BATCH_SIZE = 50;
-    for (let i = 0; i < uniqueDispatches.length; i += DISPATCH_BATCH_SIZE) {
-      const batch = uniqueDispatches.slice(i, i + DISPATCH_BATCH_SIZE);
-      await prisma.$transaction(async (tx) => {
-        for (const record of batch) {
-          const waybillNoTrim = record.waybillNo.trim();
-          const key = `v2:dispatch:${waybillNoTrim}`;
-          const hash = sourceHash(record);
-          const existing = dispatchMap.get(key);
-
-          const common = {
-            operationalDate: date,
-            sourceEndpoint: "/jfs-dispatch",
-            sourceFetchedAt: startedAt,
-            syncedAt: new Date(),
-            syncStatus: "NORMALIZED" as const,
-            syncError: null,
-            sourceRecordHash: hash,
-            sourcePayload: record as unknown as Prisma.InputJsonValue,
-            lastSeenRunId: run.id,
-            waybillNo: record.waybillNo,
-            courierNameRaw: record.kurir || null,
-            freightAmount: decimal(record.ongkir),
-            dispatchTimeRaw: record.waktu || null,
-            dispatchAt: parseSourceDate(record.waktu),
-            receiverName: record.receiver || null,
-            receiverAddress: record.address || null,
-            deliveryStatusRaw: record.status || null,
-            chargeWeight: decimal(record.berat),
-            settlementTypeRaw: record.pembayaran || null,
-            serviceRaw: record.service || null,
-            codStatusRaw: record.codStatus || null,
-            codValue: decimal(record.codValue),
-            goodsDescription: record.barang || null,
-            isActive: true,
-          };
-
-          const supersededDispatches = await tx.rawDispatch.updateMany({
-            where: {
-              tenantId: context.tenantId,
-              outletId: context.outletId,
-              operationalDate: date,
-              waybillNo: record.waybillNo,
-              ...(existing ? { id: { not: existing.id } } : {}),
-              isActive: true,
-            },
-            data: { isActive: false },
-          });
-          dispatchInactive += supersededDispatches?.count ?? 0;
-
-          const isHashUnchanged = existing?.sourceRecordHash === hash;
-
-          const upserted = await tx.rawDispatch.upsert({
-            where: {
-              tenantId_outletId_sourceRecordKey: {
-                tenantId: context.tenantId,
-                outletId: context.outletId,
-                sourceRecordKey: key,
-              },
-            },
-            create: {
-              tenantId: context.tenantId,
-              outletId: context.outletId,
-              sourceRecordKey: key,
-              firstSeenRunId: run.id,
-              ...common,
-            },
-            update: isHashUnchanged
-              ? {
-                  sourceFetchedAt: startedAt,
-                  syncedAt: new Date(),
-                  lastSeenRunId: run.id,
-                  isActive: true,
-                  operationalDate: date,
-                }
-              : common,
-          });
-
-          dispatchMap.set(key, upserted);
-
-          if (!existing) {
-            dispatchCreated += 1;
-          } else if (isHashUnchanged) {
-            dispatchUnchanged += 1;
-            duplicate += 1;
-          } else {
-            dispatchUpdated += 1;
-          }
-        }
-      });
-    }
+    const parsedDispatches = dispatchPersistence.parsed;
+    const uniqueDispatches = dispatchPersistence.unique;
+    const dispatchOverlapDuplicate = dispatchPersistence.overlapDuplicate;
+    const dispatchCreated = dispatchPersistence.created;
+    const dispatchUpdated = dispatchPersistence.updated;
+    const dispatchUnchanged = dispatchPersistence.unchanged;
+    const dispatchInactive = dispatchPersistence.inactive;
+    duplicate += dispatchOverlapDuplicate + dispatchUnchanged;
+    anomaly += dispatchPersistence.anomaly;
 
     const codKeys = uniqueCods.map((r) => codSourceKey(r.waybillNo));
     const existingCods = codKeys.length
