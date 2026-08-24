@@ -89,10 +89,7 @@ export async function fetchDeliverySource(
 ) {
   const startedAt = Date.now();
 
-  const isSum001a = !options.scope || options.scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
-  const useScoped = Boolean(options.scope) && (endpoint === "/jfs-dispatch" || !isSum001a);
-
-  if (options.scope && useScoped) {
+  if (options.scope) {
     const op = endpoint === "/jfs-dispatch" ? "DISPATCH" : "COD";
     try {
       const result = await executeTrustedMultiOutletScraper(options.scope, op, {
@@ -117,15 +114,12 @@ export async function fetchDeliverySource(
         connectionCode: null, attemptCount: 1, durationMs: Date.now() - startedAt,
       });
     } catch (err) {
-      if (endpoint === "/jfs-dispatch") {
-        if (err instanceof DeliverySourceError) throw err;
-        throw new DeliverySourceError({
-          code: endpointCode(endpoint), endpoint, target: "scoped-middleware",
-          httpStatus: null, contentType: null, bodyPreview: null,
-          connectionCode: connectionCode(err), attemptCount: 1, durationMs: Date.now() - startedAt,
-        });
-      }
-      console.warn(`[MultiOutletFallback] COD multi-outlet fetch failed, falling back to legacy GET ${endpoint}:`, err instanceof Error ? err.message : err);
+      if (err instanceof DeliverySourceError) throw err;
+      throw new DeliverySourceError({
+        code: endpointCode(endpoint), endpoint, target: "scoped-middleware",
+        httpStatus: null, contentType: null, bodyPreview: null,
+        connectionCode: connectionCode(err), attemptCount: 1, durationMs: Date.now() - startedAt,
+      });
     }
   }
 

@@ -35,6 +35,52 @@ describe("Delivery Settlement middleware fetch", () => {
     })).rejects.toMatchObject({ diagnostic: { code: "SYNC_FETCH_DISPATCH_FAILED", target: "scoped-middleware" } });
     expect(legacyFetcher).not.toHaveBeenCalled();
   });
+
+  it("uses scoped COD for a server-resolved scope and never reaches legacy GET", async () => {
+    executeScoped.mockResolvedValueOnce({
+      success: true,
+      total: 1,
+      data: [{
+        waybillNo: "WB-1",
+        codAmount: 100,
+        repaymentStatus: 1,
+        repaymentType: 2,
+        repaymentTypeCode: 2,
+        repaymentTypeLabel: "QRIS COD",
+        signTime: "",
+        dispatchStaffName: "A",
+      }],
+    });
+    const legacyFetcher = vi.fn();
+    const scope = { tenantId: "tenant-a", outletId: "outlet-a" };
+
+    const result = await fetchDeliverySource("/jfs-cod", "2026-08-24", {
+      scope,
+      fetcher: legacyFetcher,
+    });
+
+    expect(result.total).toBe(1);
+    expect(result.data[0]).toMatchObject({ repaymentTypeCode: 2, repaymentTypeLabel: "QRIS COD" });
+    expect(executeScoped).toHaveBeenCalledWith(
+      scope,
+      "COD",
+      expect.objectContaining({ date: "2026-08-24" }),
+    );
+    expect(legacyFetcher).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when scoped COD fails without legacy fallback", async () => {
+    executeScoped.mockRejectedValueOnce(new Error("scoped COD unavailable"));
+    const legacyFetcher = vi.fn();
+
+    await expect(fetchDeliverySource("/jfs-cod", "2026-08-24", {
+      scope: { tenantId: "tenant-a", outletId: "outlet-a" },
+      fetcher: legacyFetcher,
+    })).rejects.toMatchObject({
+      diagnostic: { code: "SYNC_FETCH_COD_FAILED", target: "scoped-middleware" },
+    });
+    expect(legacyFetcher).not.toHaveBeenCalled();
+  });
   it("uses JFS_MIDDLEWARE_BASE_URL and normalizes its trailing slash", () => {
     expect(resolveDeliveryMiddlewareBaseUrl("https://middleware.example.test/").href)
       .toBe("https://middleware.example.test/");
