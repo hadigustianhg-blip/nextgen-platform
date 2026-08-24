@@ -123,10 +123,13 @@ describe("pickup navigation", () => {
       "utf8",
     );
 
-    expect(source).toContain("bg-[#040814]/95");
-    expect(source).toContain("rgba(124,58,237,0.16)");
-    expect(source).toContain("rgba(37,99,235,0.14)");
+    expect(source).toContain("rgba(139,92,246,0.24)");
+    expect(source).toContain("rgba(37,99,235,0.24)");
+    expect(source).toContain("linear-gradient(170deg,#0c1326_0%,#020611_48%,#061329_100%)");
     expect(source).toContain("to-violet-500/78");
+    expect(source).not.toContain("before:-z-10");
+    expect(source).toContain("bg-white/[0.14]");
+    expect(source).toContain("shadow-[0_0_10px_rgba(120,160,255,0.18)]");
   });
 
   it("keeps mobile drawer behavior and accessible controls", async () => {

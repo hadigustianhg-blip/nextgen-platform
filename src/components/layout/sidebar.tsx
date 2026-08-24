@@ -194,14 +194,14 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
       )}
       <aside
         className={[
-          "fixed inset-y-0 left-0 z-40 isolate flex flex-col overflow-visible border-r border-white/[0.08] bg-[#040814]/95 text-white shadow-[0_24px_70px_rgba(2,6,23,0.30)] backdrop-blur-xl transition-[width,transform] duration-300 ease-out before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:rounded-[inherit] before:bg-[radial-gradient(ellipse_at_18%_-5%,rgba(124,58,237,0.16),transparent_38%),radial-gradient(ellipse_at_90%_14%,rgba(30,58,138,0.12),transparent_40%),radial-gradient(ellipse_at_34%_88%,rgba(37,99,235,0.14),transparent_46%),linear-gradient(170deg,rgba(15,23,42,0.52)_0%,rgba(2,6,17,0.86)_50%,rgba(6,17,40,0.78)_100%)] after:pointer-events-none after:absolute after:inset-y-6 after:right-0 after:w-px after:bg-gradient-to-b after:from-transparent after:via-blue-300/20 after:to-transparent lg:inset-y-3 lg:left-3 lg:rounded-[var(--nextgen-radius-workspace)] lg:border lg:border-white/[0.11]",
+          "fixed inset-y-0 left-0 z-40 isolate flex flex-col overflow-visible border-r border-white/[0.08] bg-[radial-gradient(ellipse_at_12%_-2%,rgba(139,92,246,0.24),transparent_36%),radial-gradient(ellipse_at_92%_88%,rgba(37,99,235,0.24),transparent_44%),radial-gradient(ellipse_at_8%_100%,rgba(14,165,233,0.13),transparent_34%),linear-gradient(170deg,#0c1326_0%,#020611_48%,#061329_100%)] text-white shadow-[0_24px_70px_rgba(2,6,23,0.30)] backdrop-blur-xl transition-[width,transform] duration-300 ease-out after:pointer-events-none after:absolute after:inset-y-6 after:right-0 after:w-px after:bg-gradient-to-b after:from-transparent after:via-blue-300/20 after:to-transparent lg:inset-y-3 lg:left-3 lg:rounded-[var(--nextgen-radius-workspace)] lg:border lg:border-white/[0.11]",
           collapsed ? "lg:w-[88px]" : "lg:w-[272px]",
           mobileOpen
             ? "w-[280px] translate-x-0"
             : "w-[280px] -translate-x-full lg:translate-x-0",
         ].join(" ")}
       >
-        <div className="relative flex h-[96px] items-center rounded-t-[var(--nextgen-radius-workspace)] border-b border-white/[0.075] px-5">
+        <div className="relative flex h-[96px] items-center rounded-t-[var(--nextgen-radius-workspace)] px-5">
           <span className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-[15px] bg-gradient-to-br from-white/[0.14] to-white/[0.055] shadow-[0_10px_28px_rgba(2,6,23,0.28)] ring-1 ring-inset ring-white/[0.14]">
             <NextgenBrand variant="light" className="h-11 w-[190px] max-w-none shrink-0 object-contain object-left" priority />
           </span>
@@ -217,6 +217,10 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
             <X size={20} />
           </button>
         </div>
+        <div
+          aria-hidden="true"
+          className="mx-5 h-px shrink-0 bg-white/[0.14] shadow-[0_0_10px_rgba(120,160,255,0.18)]"
+        />
 
         <nav
           className="mt-8 relative flex-1 space-y-1.5 overflow-y-auto px-3.5 pb-5 pt-5 [scrollbar-color:rgba(148,163,184,0.28)_transparent] [scrollbar-width:thin]"
