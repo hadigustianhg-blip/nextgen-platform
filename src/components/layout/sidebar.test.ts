@@ -123,10 +123,10 @@ describe("pickup navigation", () => {
       "utf8",
     );
 
-    expect(source).toContain("bg-[#030611]/95");
-    expect(source).toContain("rgba(139,92,246,0.28)");
-    expect(source).toContain("rgba(37,99,235,0.20)");
-    expect(source).toContain("rgba(14,165,233,0.13)");
+    expect(source).toContain("bg-[#040814]/95");
+    expect(source).toContain("rgba(124,58,237,0.16)");
+    expect(source).toContain("rgba(37,99,235,0.14)");
+    expect(source).toContain("to-violet-500/78");
   });
 
   it("keeps mobile drawer behavior and accessible controls", async () => {

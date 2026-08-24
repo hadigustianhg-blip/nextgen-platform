@@ -194,7 +194,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
       )}
       <aside
         className={[
-          "fixed inset-y-0 left-0 z-40 isolate flex flex-col overflow-visible border-r border-white/[0.08] bg-[#030611]/95 text-white shadow-[0_24px_70px_rgba(2,6,23,0.34)] backdrop-blur-xl transition-[width,transform] duration-300 ease-out before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:rounded-[inherit] before:bg-[radial-gradient(ellipse_at_22%_-4%,rgba(139,92,246,0.28),transparent_35%),radial-gradient(ellipse_at_88%_16%,rgba(76,29,149,0.18),transparent_38%),radial-gradient(ellipse_at_28%_72%,rgba(37,99,235,0.20),transparent_42%),radial-gradient(ellipse_at_84%_96%,rgba(14,165,233,0.13),transparent_36%),linear-gradient(165deg,rgba(15,23,42,0.58)_0%,rgba(3,7,18,0.82)_48%,rgba(8,18,42,0.72)_100%)] after:pointer-events-none after:absolute after:inset-y-6 after:right-0 after:w-px after:bg-gradient-to-b after:from-transparent after:via-blue-300/20 after:to-transparent lg:inset-y-3 lg:left-3 lg:rounded-[var(--nextgen-radius-workspace)] lg:border lg:border-white/[0.11]",
+          "fixed inset-y-0 left-0 z-40 isolate flex flex-col overflow-visible border-r border-white/[0.08] bg-[#040814]/95 text-white shadow-[0_24px_70px_rgba(2,6,23,0.30)] backdrop-blur-xl transition-[width,transform] duration-300 ease-out before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:rounded-[inherit] before:bg-[radial-gradient(ellipse_at_18%_-5%,rgba(124,58,237,0.16),transparent_38%),radial-gradient(ellipse_at_90%_14%,rgba(30,58,138,0.12),transparent_40%),radial-gradient(ellipse_at_34%_88%,rgba(37,99,235,0.14),transparent_46%),linear-gradient(170deg,rgba(15,23,42,0.52)_0%,rgba(2,6,17,0.86)_50%,rgba(6,17,40,0.78)_100%)] after:pointer-events-none after:absolute after:inset-y-6 after:right-0 after:w-px after:bg-gradient-to-b after:from-transparent after:via-blue-300/20 after:to-transparent lg:inset-y-3 lg:left-3 lg:rounded-[var(--nextgen-radius-workspace)] lg:border lg:border-white/[0.11]",
           collapsed ? "lg:w-[88px]" : "lg:w-[272px]",
           mobileOpen
             ? "w-[280px] translate-x-0"
@@ -236,7 +236,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
                 className={[
                   "group flex h-11 items-center gap-3 rounded-[14px] px-3 text-[13.5px] font-semibold tracking-[-0.01em] outline-none transition-[background-color,color,box-shadow,transform] duration-200 focus-visible:ring-2 focus-visible:ring-blue-300",
                   active
-                    ? "bg-gradient-to-r from-blue-500/95 via-blue-500/90 to-indigo-500/90 text-white shadow-[0_10px_28px_rgba(30,64,175,0.28),inset_0_1px_0_rgba(255,255,255,0.20)] ring-1 ring-inset ring-white/[0.16]"
+                    ? "bg-gradient-to-r from-blue-500/85 via-blue-500/80 to-violet-500/78 text-white shadow-[0_9px_26px_rgba(30,64,175,0.22),inset_0_1px_0_rgba(255,255,255,0.18)] ring-1 ring-inset ring-white/[0.16]"
                     : "text-slate-300 hover:bg-white/[0.075] hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]",
                   itemLayout,
                 ].join(" ")}
