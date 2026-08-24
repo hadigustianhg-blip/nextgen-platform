@@ -1,7 +1,7 @@
 import "server-only";
 import { pickupEnvelopeSchema, pickupRecordSchema } from "./pickup.validation";
 import type { PickupEnvelope, PickupSourceRecord } from "./pickup.types";
-import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
+import { executeTrustedMultiOutletScraper } from "@/modules/integrations/jfs-multi-outlet-client";
 import type { SettingsScope } from "@/modules/settings/settings.types";
 
 function resolvePickupUrl(baseUrl?: string) {
@@ -28,9 +28,7 @@ export async function fetchPickupSource(
   operationalDate: string,
   options: { fetcher?: typeof fetch; baseUrl?: string; scope?: SettingsScope } = {},
 ): Promise<PickupEnvelope> {
-  const isSum001a = !options.scope || options.scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
-
-  if (options.scope && !isSum001a) {
+  if (options.scope) {
     try {
       const result = await executeTrustedMultiOutletScraper(options.scope, "PICKUP", {
         date: operationalDate,
@@ -45,10 +43,10 @@ export async function fetchPickupSource(
           data: envelope.data.data as PickupSourceRecord[],
         };
       }
+      throw new PickupSourceError("Respons pickup scoped tidak lengkap.");
     } catch (err) {
-      if (isSecurityFailure(err)) throw err;
-      console.warn(`[MultiOutletFallback] PICKUP multi-outlet fetch failed, falling back to legacy GET /jfs-pickup:`, err instanceof Error ? err.message : err);
-      // Fallback to legacy GET endpoint for unconfigured or degraded outlets
+      if (err instanceof PickupSourceError) throw err;
+      throw new PickupSourceError("Sinkronisasi pickup scoped gagal.");
     }
   }
 

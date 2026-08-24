@@ -1,6 +1,6 @@
 import "server-only";
 import { sourceEnvelopeSchema } from "./delivery-settlement.validation";
-import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
+import { executeTrustedMultiOutletScraper } from "@/modules/integrations/jfs-multi-outlet-client";
 import type { SettingsScope } from "@/modules/settings/settings.types";
 
 export type DeliveryFetchErrorCode =
@@ -90,8 +90,9 @@ export async function fetchDeliverySource(
   const startedAt = Date.now();
 
   const isSum001a = !options.scope || options.scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
+  const useScoped = Boolean(options.scope) && (endpoint === "/jfs-dispatch" || !isSum001a);
 
-  if (options.scope && !isSum001a) {
+  if (options.scope && useScoped) {
     const op = endpoint === "/jfs-dispatch" ? "DISPATCH" : "COD";
     try {
       const result = await executeTrustedMultiOutletScraper(options.scope, op, {
@@ -110,10 +111,21 @@ export async function fetchDeliverySource(
           } satisfies FetchDiagnostic,
         };
       }
+      throw new DeliverySourceError({
+        code: "SYNC_RESPONSE_INVALID", endpoint, target: "scoped-middleware",
+        httpStatus: 200, contentType: "application/json", bodyPreview: null,
+        connectionCode: null, attemptCount: 1, durationMs: Date.now() - startedAt,
+      });
     } catch (err) {
-      if (isSecurityFailure(err)) throw err;
-      console.warn(`[MultiOutletFallback] ${op} multi-outlet fetch failed, falling back to legacy GET ${endpoint}:`, err instanceof Error ? err.message : err);
-      // Fallback to legacy GET endpoint for unconfigured or degraded outlets
+      if (endpoint === "/jfs-dispatch") {
+        if (err instanceof DeliverySourceError) throw err;
+        throw new DeliverySourceError({
+          code: endpointCode(endpoint), endpoint, target: "scoped-middleware",
+          httpStatus: null, contentType: null, bodyPreview: null,
+          connectionCode: connectionCode(err), attemptCount: 1, durationMs: Date.now() - startedAt,
+        });
+      }
+      console.warn(`[MultiOutletFallback] COD multi-outlet fetch failed, falling back to legacy GET ${endpoint}:`, err instanceof Error ? err.message : err);
     }
   }
 

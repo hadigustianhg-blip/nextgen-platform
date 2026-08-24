@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+const executeScoped = vi.hoisted(() => vi.fn());
+vi.mock("@/modules/integrations/jfs-multi-outlet-client", () => ({
+  executeTrustedMultiOutletScraper: executeScoped,
+}));
 
 import {
   DeliverySourceError,
@@ -13,6 +17,24 @@ const json = (value: unknown, status = 200, contentType = "application/json") =>
   new Response(JSON.stringify(value), { status, headers: { "content-type": contentType } });
 
 describe("Delivery Settlement middleware fetch", () => {
+  it("uses scoped Dispatch for a server-resolved scope and never reaches legacy GET", async () => {
+    executeScoped.mockResolvedValueOnce({ success: true, total: 0, data: [] });
+    const legacyFetcher = vi.fn();
+    const scope = { tenantId: "tenant-a", outletId: "outlet-a" };
+    const result = await fetchDeliverySource("/jfs-dispatch", "2026-08-24", { scope, fetcher: legacyFetcher });
+    expect(result.total).toBe(0);
+    expect(executeScoped).toHaveBeenCalledWith(scope, "DISPATCH", expect.objectContaining({ date: "2026-08-24" }));
+    expect(legacyFetcher).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when scoped Dispatch fails without legacy fallback", async () => {
+    executeScoped.mockRejectedValueOnce(new Error("scoped unavailable"));
+    const legacyFetcher = vi.fn();
+    await expect(fetchDeliverySource("/jfs-dispatch", "2026-08-24", {
+      scope: { tenantId: "tenant-a", outletId: "outlet-a" }, fetcher: legacyFetcher,
+    })).rejects.toMatchObject({ diagnostic: { code: "SYNC_FETCH_DISPATCH_FAILED", target: "scoped-middleware" } });
+    expect(legacyFetcher).not.toHaveBeenCalled();
+  });
   it("uses JFS_MIDDLEWARE_BASE_URL and normalizes its trailing slash", () => {
     expect(resolveDeliveryMiddlewareBaseUrl("https://middleware.example.test/").href)
       .toBe("https://middleware.example.test/");
