@@ -535,6 +535,28 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
             })}
         </nav>
 
+        <div className={collapsed ? "hidden" : "hidden px-4 pb-4 lg:block"}>
+          <div
+            aria-label="Integrasi penuh NEXTGEN dan J&T Cargo"
+            className="relative overflow-hidden rounded-[18px] border border-blue-400/70 bg-[linear-gradient(135deg,rgba(7,25,64,0.94),rgba(20,25,73,0.90)_56%,rgba(48,24,108,0.84))] p-3 shadow-[0_0_24px_rgba(37,99,235,0.24),0_0_18px_rgba(124,58,237,0.16),inset_0_1px_0_rgba(255,255,255,0.12)] ring-1 ring-inset ring-violet-400/35 before:pointer-events-none before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_8%_12%,rgba(56,189,248,0.15),transparent_34%),radial-gradient(circle_at_94%_88%,rgba(139,92,246,0.18),transparent_40%)]"
+          >
+            <div className="relative flex items-center gap-3">
+              <div className="relative grid size-[58px] shrink-0 grid-cols-2 gap-1 rounded-[14px] border border-white/10 bg-slate-950/35 p-1.5 shadow-inner shadow-slate-950/35">
+                <span className="grid place-items-center rounded-lg bg-white/[0.10] ring-1 ring-inset ring-white/[0.10]">
+                  <NextgenBrand variant="mark" className="size-6" />
+                </span>
+                <span aria-hidden="true" className="grid place-items-center text-[15px] font-semibold text-blue-200">↘</span>
+                <span aria-hidden="true" className="grid place-items-center text-[15px] font-semibold text-blue-200">↗</span>
+                <span className="grid place-items-center rounded-lg bg-emerald-600 text-[10px] font-bold italic text-white shadow-sm shadow-emerald-950/30">J&amp;T</span>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold leading-[1.35] text-white">Integrasi Penuh<br />J&amp;T Cargo Faster</p>
+                <p className="mt-1 text-[10.5px] font-medium leading-[1.35] text-blue-200/70">Pengiriman Kargo Cepat<br />&amp; Terintegrasi</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <form
           action="/api/auth/logout"
           method="post"

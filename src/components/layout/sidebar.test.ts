@@ -132,6 +132,19 @@ describe("pickup navigation", () => {
     expect(source).toContain("shadow-[0_0_10px_rgba(120,160,255,0.18)]");
   });
 
+  it("renders the desktop integration banner between navigation and logout", async () => {
+    const source = await readFile(
+      new URL("./sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain('aria-label="Integrasi penuh NEXTGEN dan J&T Cargo"');
+    expect(source).toContain("J&amp;T Cargo Faster");
+    expect(source).toContain('collapsed ? "hidden" : "hidden px-4 pb-4 lg:block"');
+    expect(source.indexOf("Integrasi Penuh")).toBeGreaterThan(source.indexOf("</nav>"));
+    expect(source.indexOf("Integrasi Penuh")).toBeLessThan(source.indexOf('action="/api/auth/logout"'));
+  });
+
   it("keeps mobile drawer behavior and accessible controls", async () => {
     const source = await readFile(
       new URL("./sidebar.tsx", import.meta.url),
