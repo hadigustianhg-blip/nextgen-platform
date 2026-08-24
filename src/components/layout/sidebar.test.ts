@@ -117,6 +117,18 @@ describe("pickup navigation", () => {
     )).toBe("payment");
   });
 
+  it("uses the premium layered violet and blue sidebar background", async () => {
+    const source = await readFile(
+      new URL("./sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain("bg-[#030611]/95");
+    expect(source).toContain("rgba(139,92,246,0.28)");
+    expect(source).toContain("rgba(37,99,235,0.20)");
+    expect(source).toContain("rgba(14,165,233,0.13)");
+  });
+
   it("keeps mobile drawer behavior and accessible controls", async () => {
     const source = await readFile(
       new URL("./sidebar.tsx", import.meta.url),
