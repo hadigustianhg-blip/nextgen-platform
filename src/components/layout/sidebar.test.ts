@@ -15,7 +15,7 @@ describe("pickup navigation", () => {
     );
     expect(source).not.toContain("Outlet aktif");
     expect(source).not.toContain("Semua Outlet");
-    expect(source).toContain('<nav\n          className="mt-5');
+    expect(source).toContain('<nav\n          className="mt-8');
   });
 
   it("hides RAW Pickup and exposes Pickup Settlement under Settlement Center", async () => {
@@ -115,6 +115,34 @@ describe("pickup navigation", () => {
       "payment",
       reloadState,
     )).toBe("payment");
+  });
+
+  it("uses the premium layered violet and blue sidebar background", async () => {
+    const source = await readFile(
+      new URL("./sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain("rgba(139,92,246,0.24)");
+    expect(source).toContain("rgba(37,99,235,0.24)");
+    expect(source).toContain("linear-gradient(170deg,#0c1326_0%,#020611_48%,#061329_100%)");
+    expect(source).toContain("to-violet-500/78");
+    expect(source).not.toContain("before:-z-10");
+    expect(source).toContain("bg-white/[0.14]");
+    expect(source).toContain("shadow-[0_0_10px_rgba(120,160,255,0.18)]");
+  });
+
+  it("renders the desktop integration banner between navigation and logout", async () => {
+    const source = await readFile(
+      new URL("./sidebar.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain('aria-label="Integrasi penuh NEXTGEN dan J&T Cargo"');
+    expect(source).toContain("J&amp;T Cargo Faster");
+    expect(source).toContain('collapsed ? "hidden" : "hidden px-4 pb-4 lg:block"');
+    expect(source.indexOf("Integrasi Penuh")).toBeGreaterThan(source.indexOf("</nav>"));
+    expect(source.indexOf("Integrasi Penuh")).toBeLessThan(source.indexOf('action="/api/auth/logout"'));
   });
 
   it("keeps mobile drawer behavior and accessible controls", async () => {
