@@ -118,7 +118,7 @@ function buildTableQuery(
     search: filters.search,
     sort: filters.sort,
     page: String(filters.page),
-    pageSize: "25",
+    pageSize: "100",
     ...(filters.source ? { source: filters.source } : {}),
     ...(filters.category ? { category: filters.category } : {}),
   });
@@ -169,7 +169,7 @@ function TransactionSection({
   const visibleTotal = rows.reduce((sum, row) => sum + Number(row.amount), 0);
   const pagination = result?.pagination ?? {
     page: filters.page,
-    pageSize: 25,
+    pageSize: 100,
     total: 0,
     totalPages: 1,
   };
@@ -229,8 +229,8 @@ function TransactionSection({
         onChange={(event) => setFilter({ sort: event.target.value })}
         className={nextgenControlClass}
       >
-        <option value="newest">Terbaru</option>
-        <option value="oldest">Terlama</option>
+        <option value="newest">Nominal Terbesar</option>
+        <option value="oldest">Nominal Terkecil</option>
       </select>
     </div>
     <TableCard>
@@ -238,7 +238,6 @@ function TransactionSection({
         <table className="w-full min-w-[900px] text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
             <tr>
-              <th className="px-4 py-3">Tanggal</th>
               <th className="px-4 py-3">Keterangan</th>
               <th className="px-4 py-3">Kategori</th>
               <th className="px-4 py-3 text-right">Nominal</th>
@@ -248,15 +247,14 @@ function TransactionSection({
           </thead>
           <tbody className="divide-y">
             {loading && rows.length === 0
-              ? <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+              ? <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-500">
                   Memuat data {label.toLowerCase()}...
                 </td></tr>
               : rows.length === 0
-                ? <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                ? <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-500">
                     Tidak ada data {label.toLowerCase()} pada periode dan filter ini.
                   </td></tr>
                 : rows.map((row) => <tr key={`${row.source}:${row.id}`}>
-                    <td className="px-4 py-3">{row.date}</td>
                     <td className="px-4 py-3 font-semibold">{row.description}</td>
                     <td className="px-4 py-3">{row.category}</td>
                     <td className="px-4 py-3 text-right font-semibold">{money(row.amount)}</td>
@@ -281,8 +279,8 @@ function TransactionSection({
           </tbody>
           <tfoot className="border-t bg-slate-50">
             <tr>
-              <td colSpan={3} className="px-4 py-3 font-bold text-slate-700">
-                TOTAL {label.toUpperCase()} TAMPIL
+              <td colSpan={2} className="px-4 py-3 font-bold text-slate-700">
+                TOTAL {label.toUpperCase()} PERIODE TAMPIL
               </td>
               <td className="px-4 py-3 text-right text-base font-bold text-slate-900">
                 {money(visibleTotal)}

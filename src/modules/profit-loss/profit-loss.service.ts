@@ -225,10 +225,36 @@ export async function getProfitLoss(scope: Scope, query: ProfitLossQuery) {
     (!query.category || row.category === query.category) &&
     (!lowerSearch || [row.category, row.description, row.sourceReference ?? ""]
       .some((value) => value.toLocaleLowerCase("id-ID").includes(lowerSearch))));
-  filtered.sort((left, right) => {
-    const byDate = left.date.localeCompare(right.date);
-    const ordered = query.sort === "oldest" ? byDate : -byDate;
-    return ordered || left.source.localeCompare(right.source) || left.id.localeCompare(right.id);
+
+  // Rincian Profit Loss ditampilkan sebagai total per jenis transaksi untuk seluruh
+  // periode terpilih. Data sumber tetap disimpan per tanggal; hanya presentasinya
+  // yang diagregasi agar analisis bulanan tidak terpecah menjadi banyak baris harian.
+  const periodGroups = new Map<string, CanonicalRow[]>();
+  for (const row of filtered) {
+    const key = [row.direction, row.source, row.category, row.description].join("|");
+    const group = periodGroups.get(key);
+    if (group) group.push(row);
+    else periodGroups.set(key, [row]);
+  }
+  const periodRows = [...periodGroups.entries()].map(([key, group]) => {
+    const first = group[0];
+    const amount = group.reduce((sum, row) => sum.plus(row.amount), zero());
+    const references = [...new Set(group.map((row) => row.sourceReference).filter(Boolean))];
+    const singleEditable = group.length === 1 && first.isEditable;
+    return {
+      ...first,
+      id: group.length === 1 ? first.id : `period:${key}`,
+      date: group.length === 1 ? first.date : query.endDate,
+      amount,
+      sourceReference: references.length === 1 ? references[0] ?? null : null,
+      isEditable: singleEditable,
+    };
+  });
+  periodRows.sort((left, right) => {
+    const byAmount = left.amount.comparedTo(right.amount);
+    const ordered = query.sort === "oldest" ? byAmount : -byAmount;
+    return ordered || left.description.localeCompare(right.description, "id-ID")
+      || left.source.localeCompare(right.source) || left.id.localeCompare(right.id);
   });
   const startIndex = (query.page - 1) * query.pageSize;
   const pickupDfodTotal = [...pickupDaily].filter(([key]) => key.endsWith("|DFOD")).reduce((sum, [, value]) => sum.plus(value), zero());
@@ -249,8 +275,8 @@ export async function getProfitLoss(scope: Scope, query: ProfitLossQuery) {
     daily,
     sourceSummary,
     categories: [...new Set(rows.map((row) => row.category))].sort(),
-    transactions: filtered.slice(startIndex, startIndex + query.pageSize).map(serialize),
-    pagination: { page: query.page, pageSize: query.pageSize, total: filtered.length, totalPages: Math.max(1, Math.ceil(filtered.length / query.pageSize)) },
+    transactions: periodRows.slice(startIndex, startIndex + query.pageSize).map(serialize),
+    pagination: { page: query.page, pageSize: query.pageSize, total: periodRows.length, totalPages: Math.max(1, Math.ceil(periodRows.length / query.pageSize)) },
     anomalies: [
       "Pemasukan JFS dan Omzet Pickup ditampilkan berdasarkan masing-masing sumber analisis.",
       "Salary periode ditempatkan pada tanggal akhir periode karena calculator existing tidak menyediakan nominal harian yang dapat diaudit.",

@@ -36,12 +36,16 @@ describe("Profit Loss split transaction presentation", () => {
     ]) expect(source).toContain(action);
   });
 
-  it("keeps source rows read-only and shows visible totals and empty states", async () => {
+  it("shows period-aggregated rows without a per-date column", async () => {
     const source = await sourcePromise;
     expect(source).toContain("row.isEditable && canManage");
-    expect(source).toContain("TOTAL {label.toUpperCase()} TAMPIL");
+    expect(source).toContain("TOTAL {label.toUpperCase()} PERIODE TAMPIL");
     expect(source).toContain("Tidak ada data {label.toLowerCase()} pada periode dan filter ini.");
     expect(source).toContain("visibleTotal");
+    expect(source).not.toContain('>Tanggal</th>');
+    expect(source).toContain('pageSize: "100"');
+    expect(source).toContain("Nominal Terbesar");
+    expect(source).toContain("Nominal Terkecil");
   });
 
   it("keeps metrics, chart, and period-only Excel export unchanged", async () => {

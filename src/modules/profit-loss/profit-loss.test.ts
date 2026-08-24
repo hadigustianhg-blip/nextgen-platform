@@ -85,6 +85,32 @@ describe("Profit Loss canonical aggregator", () => {
     expect(result.transactions.filter((row) => ["MANUAL", "ADJUSTMENT"].includes(row.source)).every((row) => row.isEditable)).toBe(true);
   });
 
+  it("aggregates the same transaction description across dates into one period row", async () => {
+    mocks.jfs.mockResolvedValue([
+      { id: "j1", businessDate: day("2026-08-01"), direction: "income", transactionType: "Receivable return fee", category: "Main", amount: d(125), sourceReference: "SUM001A" },
+      { id: "j2", businessDate: day("2026-08-02"), direction: "income", transactionType: "Receivable return fee", category: "Main", amount: d(75), sourceReference: "SUM001A" },
+    ]);
+    mocks.pickups.mockResolvedValue([]);
+    mocks.expenses.mockResolvedValue([]);
+    mocks.manual.mockResolvedValue([]);
+    mocks.adjustments.mockResolvedValue([]);
+    mocks.salary.mockResolvedValue({
+      summary: { estimatedNetTotal: "0", kasbonDeductionTotal: "0" },
+      data: [],
+    });
+
+    const result = await getProfitLoss({ tenantId: "tenant-1", outletId: "outlet-1" }, query);
+    const rows = result.transactions.filter((row) => row.description === "Receivable return fee");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      direction: "INCOME",
+      source: "JFS",
+      amount: "200",
+      isEditable: false,
+    });
+    expect(result.pagination.total).toBe(1);
+  });
+
   it("uses the final Profit Loss role policy", () => {
     const session = (roles: string[]) => ({
       sessionId: "s", tenantId: "t", tenantName: "Tenant", outletId: "o",
