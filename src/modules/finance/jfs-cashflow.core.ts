@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
+import { executeTrustedMultiOutletScraper } from "@/modules/integrations/jfs-multi-outlet-client";
 import type { SettingsScope } from "@/modules/settings/settings.types";
 
 export type JfsCashflowDirection = "income" | "expense";
@@ -127,91 +127,26 @@ export async function fetchJfsCashflow(input: {
   endDate: string;
   fetcher?: typeof fetch;
   wait?: (milliseconds: number) => Promise<unknown>;
-  scope?: SettingsScope;
+  scope: SettingsScope;
+  executeScoped?: typeof executeTrustedMultiOutletScraper;
 }) {
-  const isSum001a = !input.scope || input.scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
-
-  if (input.scope && !isSum001a) {
-    try {
-      const result = await executeTrustedMultiOutletScraper(input.scope, "IBK", {
-        startDate: input.startDate,
-        endDate: input.endDate,
-        fetcher: input.fetcher,
-      });
-
-      const dataArray = Array.isArray(result.data) ? result.data : [];
-      const normalized = dataArray.map(normalizeIbkRecord);
-      const records = normalized.filter((record: JfsCashflowSourceRecord | null): record is JfsCashflowSourceRecord => Boolean(
-        record && record.date >= input.startDate && record.date <= input.endDate,
-      ));
-      return {
-        records,
-        fetchedCount: dataArray.length,
-        anomalyCount: normalized.length - records.length,
-        ...summarizeJfsCashflow(records),
-        receivedAt: new Date().toISOString(),
-      };
-    } catch (err) {
-      if (err instanceof JfsCashflowError) throw err;
-      if (isSecurityFailure(err)) throw err;
-      console.warn(`[MultiOutletFallback] IBK multi-outlet fetch failed, falling back to legacy GET /jfs-ibk-report:`, err instanceof Error ? err.message : err);
-      // Fallback to legacy GET for unconfigured or degraded outlets
-    }
-  }
-
-  const baseUrl = process.env.JFS_MIDDLEWARE_BASE_URL?.trim()
-    || process.env.JFS_MIDDLEWARE_URL?.trim();
-  if (!baseUrl) throw new JfsCashflowError("MIDDLEWARE_NOT_CONFIGURED");
-  const url = new URL("/jfs-ibk-report", baseUrl);
-  url.searchParams.set("startDate", input.startDate);
-  url.searchParams.set("endDate", input.endDate);
-  const fetcher = input.fetcher || fetch;
-  const wait = input.wait || sleep;
-
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    try {
-      const response = await fetcher(url, {
-        cache: "no-store",
-        headers: { accept: "application/json" },
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!response.ok) {
-        throw new JfsCashflowError("SOURCE_UNAVAILABLE", transientStatuses.has(response.status));
-      }
-      const body = await response.json().catch(() => null) as
-        | { success?: boolean; data?: unknown[]; total?: unknown; startDate?: unknown; endDate?: unknown }
-        | null;
-      if (body?.success !== true || !Array.isArray(body.data)) {
-        throw new JfsCashflowError("INVALID_RESPONSE", false);
-      }
-      const declaredTotal = Number(body.total);
-      if (
-        (body.total !== undefined && (!Number.isSafeInteger(declaredTotal) || declaredTotal !== body.data.length)) ||
-        (body.startDate !== undefined && body.startDate !== input.startDate) ||
-        (body.endDate !== undefined && body.endDate !== input.endDate)
-      ) {
-        throw new JfsCashflowError("INVALID_RESPONSE", false);
-      }
-      const normalized = body.data.map(normalizeIbkRecord);
-      const records = normalized.filter((record): record is JfsCashflowSourceRecord => Boolean(
-        record && record.date >= input.startDate && record.date <= input.endDate,
-      ));
-      return {
-        records,
-        fetchedCount: body.data.length,
-        anomalyCount: normalized.length - records.length,
-        ...summarizeJfsCashflow(records),
-        receivedAt: new Date().toISOString(),
-      };
-    } catch (error) {
-      const normalized = error instanceof JfsCashflowError
-        ? error
-        : new JfsCashflowError("SOURCE_UNAVAILABLE", true);
-      if (!normalized.retryable || attempt === 2) throw normalized;
-      await wait(250);
-    }
-  }
-  throw new JfsCashflowError("SOURCE_UNAVAILABLE");
+  const result = await (input.executeScoped ?? executeTrustedMultiOutletScraper)(input.scope, "IBK", {
+    startDate: input.startDate,
+    endDate: input.endDate,
+    fetcher: input.fetcher,
+  });
+  const dataArray = Array.isArray(result.data) ? result.data : [];
+  const normalized = dataArray.map(normalizeIbkRecord);
+  const records = normalized.filter((record: JfsCashflowSourceRecord | null): record is JfsCashflowSourceRecord => Boolean(
+    record && record.date >= input.startDate && record.date <= input.endDate,
+  ));
+  return {
+    records,
+    fetchedCount: dataArray.length,
+    anomalyCount: normalized.length - records.length,
+    ...summarizeJfsCashflow(records),
+    receivedAt: new Date().toISOString(),
+  };
 }
 
 type CashflowStore = {
@@ -317,6 +252,7 @@ export async function runJfsCashflowSync(input: {
     const source = await (input.fetchSource || fetchJfsCashflow)({
       startDate: input.startDate,
       endDate: input.endDate,
+      scope: { tenantId: input.tenantId, outletId: input.outletId },
     });
     const uniqueRecords = aggregateJfsCashflowRecords(source.records);
     let createdCount = 0;

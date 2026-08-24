@@ -133,50 +133,29 @@ describe("JFS Cashflow source contract", () => {
     expect(aggregated[0].amount).toBe(150);
   });
 
-  it("requests the actual middleware range with no-store and retries one transient error", async () => {
-    const fetcher = vi.fn()
-      .mockResolvedValueOnce(new Response("", { status: 503 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: [] })));
-    await fetchJfsCashflow({
-      startDate: "2026-08-01", endDate: "2026-08-01", fetcher, wait: vi.fn(async () => undefined),
+  it("uses the scoped IBK operation with the active tenant/outlet and exact range", async () => {
+    const executeScoped = vi.fn(async () => ({ data: [] }));
+    const result = await fetchJfsCashflow({
+      startDate: "2026-08-01", endDate: "2026-08-01",
+      scope: { tenantId: "tenant-1", outletId: "outlet-1" },
+      executeScoped: executeScoped as never,
     });
-    const [url, init] = fetcher.mock.calls[1] as unknown as [URL, RequestInit];
-    expect(url.pathname).toBe("/jfs-ibk-report");
-    expect(url.searchParams.get("startDate")).toBe("2026-08-01");
-    expect(url.searchParams.get("endDate")).toBe("2026-08-01");
-    expect(init.cache).toBe("no-store");
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(result.fetchedCount).toBe(0);
+    expect(executeScoped).toHaveBeenCalledWith(
+      { tenantId: "tenant-1", outletId: "outlet-1" }, "IBK",
+      expect.objectContaining({ startDate: "2026-08-01", endDate: "2026-08-01" }),
+    );
   });
 
-  it("does not retry invalid responses or permanent HTTP errors", async () => {
-    const invalid = vi.fn(async () => new Response("{}"));
+  it("fails closed when scoped IBK fails and never invokes a legacy fetcher", async () => {
+    const fetcher = vi.fn();
+    const executeScoped = vi.fn(async () => { throw new Error("SCOPED_UNAVAILABLE"); });
     await expect(fetchJfsCashflow({
-      startDate: "2026-08-01", endDate: "2026-08-01", fetcher: invalid,
-    })).rejects.toEqual(new JfsCashflowError("INVALID_RESPONSE"));
-    expect(invalid).toHaveBeenCalledOnce();
-    const unauthorized = vi.fn(async () => new Response("", { status: 401 }));
-    await expect(fetchJfsCashflow({
-      startDate: "2026-08-01", endDate: "2026-08-01", fetcher: unauthorized,
-    })).rejects.toMatchObject({ code: "SOURCE_UNAVAILABLE", retryable: false });
-    expect(unauthorized).toHaveBeenCalledOnce();
-  });
-
-  it("rejects inconsistent middleware totals and date ranges", async () => {
-    const inconsistentTotal = vi.fn(async () => new Response(JSON.stringify({
-      success: true, total: 2, startDate: "2026-08-01", endDate: "2026-08-01", data: [],
-    })));
-    await expect(fetchJfsCashflow({
-      startDate: "2026-08-01", endDate: "2026-08-01", fetcher: inconsistentTotal,
-    })).rejects.toEqual(new JfsCashflowError("INVALID_RESPONSE"));
-    expect(inconsistentTotal).toHaveBeenCalledOnce();
-
-    const inconsistentRange = vi.fn(async () => new Response(JSON.stringify({
-      success: true, total: 0, startDate: "2026-07-31", endDate: "2026-08-01", data: [],
-    })));
-    await expect(fetchJfsCashflow({
-      startDate: "2026-08-01", endDate: "2026-08-01", fetcher: inconsistentRange,
-    })).rejects.toEqual(new JfsCashflowError("INVALID_RESPONSE"));
-    expect(inconsistentRange).toHaveBeenCalledOnce();
+      startDate: "2026-08-01", endDate: "2026-08-01", fetcher,
+      scope: { tenantId: "tenant-1", outletId: "outlet-1" },
+      executeScoped: executeScoped as never,
+    })).rejects.toThrow("SCOPED_UNAVAILABLE");
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });
 

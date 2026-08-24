@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
+import { executeTrustedMultiOutletScraper } from "@/modules/integrations/jfs-multi-outlet-client";
 import type { SettingsScope } from "@/modules/settings/settings.types";
 import {
   type AgingSignRecord,
@@ -74,72 +74,19 @@ const sleep = (milliseconds: number) =>
 
 export async function fetchAgingSignSnapshot(
   fetcher: Fetcher = fetch,
-  wait: (milliseconds: number) => Promise<unknown> = sleep,
-  maxAttempts = 3,
+  _wait: (milliseconds: number) => Promise<unknown> = sleep,
+  _maxAttempts = 3,
   scope?: SettingsScope,
+  executeScoped = executeTrustedMultiOutletScraper,
 ) {
-  const isSum001a = !scope || scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
-
-  if (scope && !isSum001a) {
-    try {
-      const payload = await executeTrustedMultiOutletScraper(scope, "AGING_SIGN", { fetcher });
-      if (!payload.success || !Array.isArray(payload.data) || payload.data.length !== 1) {
-        throw new SlaSyncError(
-          "Respons jfs-aging-sign tidak valid.",
-          "INVALID_RESPONSE",
-          false,
-        );
-      }
-      return { record: normalizeAgingSign(payload.data[0]), attempts: 1 };
-    } catch (error) {
-      if (isSecurityFailure(error)) throw error;
-      console.warn(`[MultiOutletFallback] AGING_SIGN multi-outlet fetch failed, falling back to legacy GET /jfs-aging-sign:`, error instanceof Error ? error.message : error);
-      // Fallback to legacy GET endpoint for unconfigured or degraded outlets
-    }
+  if (!scope) {
+    throw new SlaSyncError("Scope tenant/outlet JFS wajib tersedia.", "SOURCE_UNAVAILABLE", false);
   }
-
-  const sourceEndpoint = resolveSlaSourceEndpoint();
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const response = await fetcher(sourceEndpoint, {
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!response.ok) {
-        const retryable = response.status >= 500;
-        throw new SlaSyncError(
-          `Sumber SLA gagal (${response.status}).`,
-          "SOURCE_UNAVAILABLE",
-          retryable,
-        );
-      }
-      const payload = (await response.json()) as {
-        success?: boolean;
-        data?: unknown[];
-      };
-      if (!payload.success || !Array.isArray(payload.data) || payload.data.length !== 1) {
-        throw new SlaSyncError(
-          "Respons jfs-aging-sign tidak valid.",
-          "INVALID_RESPONSE",
-          false,
-        );
-      }
-      return { record: normalizeAgingSign(payload.data[0]), attempts: attempt };
-    } catch (error) {
-      const normalized =
-        error instanceof SlaSyncError
-          ? error
-          : new SlaSyncError(
-              "Sumber SLA tidak dapat dihubungi.",
-              "SOURCE_UNAVAILABLE",
-              true,
-            );
-      if (!normalized.retryable || attempt === maxAttempts) throw normalized;
-      await wait(250 * 2 ** (attempt - 1));
-    }
+  const payload = await executeScoped(scope, "AGING_SIGN", { fetcher });
+  if (!payload || !Array.isArray(payload.data) || payload.data.length !== 1) {
+    throw new SlaSyncError("Respons jfs-aging-sign tidak valid.", "INVALID_RESPONSE", false);
   }
-  throw new SlaSyncError("Sumber SLA tidak tersedia.", "SOURCE_UNAVAILABLE", true);
+  return { record: normalizeAgingSign(payload.data[0]), attempts: 1 };
 }
 
 async function writeSyncAudit(
@@ -294,7 +241,10 @@ export function syncSlaCutOffForOutlet(input: {
 }) {
   return runSlaSyncForOutlet(input, {
     store: prisma,
-    fetchSnapshot: () => fetchAgingSignSnapshot(),
+    fetchSnapshot: () => fetchAgingSignSnapshot(fetch, sleep, 3, {
+      tenantId: input.tenantId,
+      outletId: input.outletId,
+    }),
     now: () => new Date(),
   });
 }

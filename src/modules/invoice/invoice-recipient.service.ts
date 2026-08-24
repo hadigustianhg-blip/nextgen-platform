@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db/prisma";
+import { executeTrustedMultiOutletScraper } from "@/modules/integrations/jfs-multi-outlet-client";
 import {
   getAccessibleInvoiceSourceByWaybill, getInvoice, InvoiceServiceError,
 } from "./invoice.service";
@@ -105,6 +106,32 @@ async function requestMiddlewareRecipient(
   return { waybillNo, ...recipient };
 }
 
+async function requestScopedRecipient(
+  scope: Scope,
+  waybillNo: string,
+  options: {
+    fetcher?: typeof fetch;
+    baseUrl?: string;
+    timeoutMs?: number;
+    executeScoped?: typeof executeTrustedMultiOutletScraper;
+  } = {},
+) {
+  if ("baseUrl" in options) {
+    return requestMiddlewareRecipient(waybillNo, options);
+  }
+  try {
+    const result = await (options.executeScoped ?? executeTrustedMultiOutletScraper)(scope, "SENDER_DETAIL", {
+      waybillNo,
+      fetcher: options.fetcher,
+    });
+    if (!result?.data) throw new InvoiceServiceError("SENDER_DETAIL_NOT_FOUND", 404);
+    return { waybillNo, ...mapMiddlewareRecipient(result.data as MiddlewareRecipient) };
+  } catch (error) {
+    if (error instanceof InvoiceServiceError) throw error;
+    throw middlewareError(502, (error as { code?: string })?.code);
+  }
+}
+
 export async function fetchSelectedRecipientDetail(
   scope: Scope,
   waybillNo: string,
@@ -112,6 +139,7 @@ export async function fetchSelectedRecipientDetail(
     fetcher?: typeof fetch;
     baseUrl?: string;
     timeoutMs?: number;
+    executeScoped?: typeof executeTrustedMultiOutletScraper;
   } = {},
 ) {
   const normalizedWaybill = waybillNo.trim();
@@ -124,7 +152,7 @@ export async function fetchSelectedRecipientDetail(
   if (!accessible) {
     throw new InvoiceServiceError("WAYBILL_NOT_ACCESSIBLE", 404);
   }
-  return requestMiddlewareRecipient(normalizedWaybill, options);
+  return requestScopedRecipient(scope, normalizedWaybill, options);
 }
 
 export async function fetchInvoiceRecipientDetail(
@@ -134,6 +162,7 @@ export async function fetchInvoiceRecipientDetail(
     fetcher?: typeof fetch;
     baseUrl?: string;
     timeoutMs?: number;
+    executeScoped?: typeof executeTrustedMultiOutletScraper;
   } = {},
 ) {
   const invoice = await getInvoice(scope, invoiceId);
@@ -146,7 +175,7 @@ export async function fetchInvoiceRecipientDetail(
     throw new InvoiceServiceError("INVOICE_WAYBILL_NOT_AVAILABLE", 422);
   }
 
-  const recipient = await requestMiddlewareRecipient(waybillNo, options);
+  const recipient = await requestScopedRecipient(scope, waybillNo, options);
   const updated = await prisma.invoice.updateMany({
     where: { id: invoiceId, ...scope, status: "DRAFT" },
     data: {

@@ -134,15 +134,20 @@ describe("Waybill Stuck source and sync", () => {
       expect(url.searchParams.get("size")).toBe("500");
       return new Response(JSON.stringify({ success: true, data: [inventoryRecord("WB000001")] }), { status: 200 });
     });
-    expect(await fetchInventoryDetail("2026-07-30", fetcher)).toHaveLength(1);
+    const executeScoped = vi.fn(async (_scope, operation, options) => {
+      expect(operation).toBe("INVENTORY");
+      expect(options).toMatchObject({ startDate: "2026-07-30", endDate: "2026-07-30", size: 500, maxPage: 500 });
+      return { data: [inventoryRecord("WB000001")] };
+    });
+    expect(await fetchInventoryDetail("2026-07-30", fetcher, { tenantId: "tenant-1", outletId: "outlet-1" }, executeScoped as never)).toHaveLength(1);
   });
 
   it("fails closed without a configured middleware URL", async () => {
-    vi.stubEnv("JFS_MIDDLEWARE_BASE_URL", "");
-    const fetcher = vi.fn();
-    await expect(fetchInventoryDetail("2026-07-30", fetcher))
-      .rejects.toMatchObject({ code: "CONFIG_INVALID" });
-    expect(fetcher).not.toHaveBeenCalled();
+    const executeScoped = vi.fn(async () => { throw new Error("SCOPED_UNAVAILABLE"); });
+    await expect(fetchInventoryDetail(
+      "2026-07-30", vi.fn(), { tenantId: "tenant-1", outletId: "outlet-1" }, executeScoped as never,
+    )).rejects.toThrow("SCOPED_UNAVAILABLE");
+    expect(executeScoped).toHaveBeenCalledOnce();
   });
 
   it("enforces maximum status batch size 100", async () => {
@@ -151,6 +156,7 @@ describe("Waybill Stuck source and sync", () => {
       Array.from({ length: 101 }, (_, index) => `WB${index}`),
       "2026-07-30",
       vi.fn(),
+      { tenantId: "tenant-1", outletId: "outlet-1" },
     )).rejects.toThrow("BATCH_LIMIT_EXCEEDED");
   });
 

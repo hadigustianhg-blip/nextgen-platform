@@ -209,12 +209,12 @@ describe("Problem Waybill sensitive detail", () => {
       id: "raw-1", waybillNo: "WB000001", deliveryStatusRaw: "Belum Diterima",
       sourceFetchedAt: new Date(), dispatchAt: null, updatedAt: new Date(), createdAt: new Date(),
     }]);
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({
-      success: true, data: { waybillNo: "WB000001", receiverName: "Private", receiverMobilePhone: "081234567890" },
-    }), { status: 200 }));
+    const executeScoped = vi.fn(async () => ({
+      data: { waybillNo: "WB000001", receiverName: "Private", receiverMobilePhone: "081234567890" },
+    }));
     await getProblemWaybillSensitiveDetail({
       tenantId: "tenant-1", outletId: "outlet-1", actorId: "user-1",
-      waybill: "WB000001", fetcher,
+      waybill: "WB000001", executeScoped: executeScoped as never,
     });
     const serialized = JSON.stringify(db.auditLog.create.mock.calls[0][0]);
     expect(serialized).toContain("PROBLEM_WAYBILL_SENSITIVE_VIEW");

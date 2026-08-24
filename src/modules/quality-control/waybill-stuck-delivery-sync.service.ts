@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { executeTrustedMultiOutletScraper, isSecurityFailure } from "@/modules/integrations/jfs-multi-outlet-client";
+import { executeTrustedMultiOutletScraper } from "@/modules/integrations/jfs-multi-outlet-client";
 import type { SettingsScope } from "@/modules/settings/settings.types";
 
 const BATCH_SIZE = 100;
@@ -143,100 +143,40 @@ export async function requestWithRetry(
 export async function fetchInventoryDetail(
   businessDate: string,
   fetcher: typeof fetch = fetch,
-  scope?: SettingsScope,
+  scope: SettingsScope,
+  executeScoped = executeTrustedMultiOutletScraper,
 ) {
-  const isSum001a = !scope || scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
-
-  if (scope && !isSum001a) {
-    try {
-      const envelope = await executeTrustedMultiOutletScraper(scope, "INVENTORY", {
-        startDate: businessDate,
-        endDate: businessDate,
-        fetcher,
-      });
-      if (!envelope || typeof envelope !== "object" || envelope.success !== true || !Array.isArray(envelope.data)) {
-        throw new WaybillStuckSourceError("INVALID_RESPONSE");
-      }
-      return (envelope.data as unknown[]).map(normalizeInventoryRecord);
-    } catch (err) {
-      if (err instanceof WaybillStuckSourceError) throw err;
-      if (isSecurityFailure(err)) throw err;
-      console.warn(`[MultiOutletFallback] INVENTORY multi-outlet fetch failed, falling back to legacy GET /jfs-inventory-detail:`, err instanceof Error ? err.message : err);
-      // Fallback to legacy GET endpoint for unconfigured or degraded outlets
-    }
-  }
-
-  const url = new URL(
-    "/jfs-inventory-detail",
-    resolveWaybillStuckMiddlewareBaseUrl(),
-  );
-  for (const [key, value] of Object.entries({
+  const result = await executeScoped(scope, "INVENTORY", {
     startDate: businessDate,
     endDate: businessDate,
-    size: "500",
-    maxPage: "500",
-  })) url.searchParams.set(key, value);
-  const response = await requestWithRetry(() =>
-    fetcher(url, {
-      headers: { accept: "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(30_000),
-    }),
-  );
-  let envelope: unknown;
-  try { envelope = await response.json(); } catch { throw new WaybillStuckSourceError("INVALID_RESPONSE"); }
-  if (!envelope || typeof envelope !== "object" || (envelope as { success?: unknown }).success !== true || !Array.isArray((envelope as { data?: unknown }).data)) {
+    size: 500,
+    maxPage: 500,
+    fetcher,
+  });
+  if (!result || typeof result !== "object" || !Array.isArray(result.data)) {
     throw new WaybillStuckSourceError("INVALID_RESPONSE");
   }
-  return (envelope as { data: unknown[] }).data.map(normalizeInventoryRecord);
+  return (result.data as unknown[]).map(normalizeInventoryRecord);
 }
 
 export async function fetchWaybillStatusBatch(
   waybills: string[],
   businessDate: string,
   fetcher: typeof fetch = fetch,
-  scope?: SettingsScope,
+  scope: SettingsScope,
+  executeScoped = executeTrustedMultiOutletScraper,
 ) {
   if (waybills.length > BATCH_SIZE) throw new Error("BATCH_LIMIT_EXCEEDED");
-  const isSum001a = !scope || scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
-
-  if (scope && !isSum001a) {
-    try {
-      const envelope = await executeTrustedMultiOutletScraper(scope, "WAYBILL_STATUS", {
-        waybillList: waybills,
-        startDate: businessDate,
-        endDate: businessDate,
-        fetcher,
-      });
-      if (!envelope || typeof envelope !== "object" || envelope.success !== true || !Array.isArray(envelope.data)) {
-        throw new WaybillStuckSourceError("INVALID_RESPONSE");
-      }
-      return (envelope.data as unknown[]).map(normalizeWaybillStatusRecord);
-    } catch (err) {
-      if (err instanceof WaybillStuckSourceError) throw err;
-      if (isSecurityFailure(err)) throw err;
-      console.warn(`[MultiOutletFallback] WAYBILL_STATUS multi-outlet fetch failed, falling back to legacy POST /jfs-waybill-status-batch:`, err instanceof Error ? err.message : err);
-      // Fallback to legacy POST endpoint for unconfigured or degraded outlets
-    }
-  }
-
-  const response = await requestWithRetry(() =>
-    fetcher(new URL("/jfs-waybill-status-batch", resolveWaybillStuckMiddlewareBaseUrl()), {
-      method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ waybills, startDate: businessDate, endDate: businessDate }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(30_000),
-    }),
-  );
-  let envelope: unknown;
-  try { envelope = await response.json(); } catch { throw new WaybillStuckSourceError("INVALID_RESPONSE"); }
-  if (!envelope || typeof envelope !== "object" || (envelope as { success?: unknown }).success !== true || !Array.isArray((envelope as { data?: unknown }).data)) {
+  const result = await executeScoped(scope, "WAYBILL_STATUS", {
+    waybillList: waybills,
+    startDate: businessDate,
+    endDate: businessDate,
+    fetcher,
+  });
+  if (!result || typeof result !== "object" || !Array.isArray(result.data)) {
     throw new WaybillStuckSourceError("INVALID_RESPONSE");
   }
-  return (envelope as { data: unknown[] }).data.map(
-    normalizeWaybillStatusRecord,
-  );
+  return (result.data as unknown[]).map(normalizeWaybillStatusRecord);
 }
 
 async function syncWaybillStuckDeliveryCore(input: {
@@ -244,8 +184,8 @@ async function syncWaybillStuckDeliveryCore(input: {
   outletId: string;
   actorId: string;
   businessDate: string;
-  fetchInventory?: typeof fetchInventoryDetail;
-  fetchStatus?: typeof fetchWaybillStatusBatch;
+  fetchInventory?: (businessDate: string) => Promise<InventoryRecord[]>;
+  fetchStatus?: (waybills: string[], businessDate: string) => Promise<StatusRecord[]>;
   scope?: SettingsScope;
 }) {
   const startedAt = new Date();

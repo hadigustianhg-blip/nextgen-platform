@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db/prisma";
+import { executeTrustedMultiOutletScraper } from "@/modules/integrations/jfs-multi-outlet-client";
 import { selectLatestDispatchRecords } from "@/modules/delivery-settlement/dispatch-deduplication";
 import { isBelumDiterima } from "./problem-waybill-delivery.service";
 
@@ -112,6 +113,7 @@ export async function getProblemWaybillSensitiveDetail(input: {
   actorId: string;
   waybill: string;
   fetcher?: typeof fetch;
+  executeScoped?: typeof executeTrustedMultiOutletScraper;
 }) {
   const audit = (result: "SUCCESS" | "FAILED") =>
     prisma.auditLog.create({
@@ -153,7 +155,12 @@ export async function getProblemWaybillSensitiveDetail(input: {
     throw new SensitiveDetailError("STATUS_CHANGED");
   }
   try {
-    const raw = await fetchSensitiveDetail(row.waybillNo, { fetcher: input.fetcher });
+    const result = await (input.executeScoped ?? executeTrustedMultiOutletScraper)(
+      { tenantId: input.tenantId, outletId: input.outletId },
+      "SENSITIVE_DETAIL",
+      { waybillNo: row.waybillNo, fetcher: input.fetcher },
+    );
+    const raw = result?.data;
     const detail = normalizeSensitiveDetail(raw, {
       waybill: row.waybillNo,
       currentStatus: "Belum diterima",

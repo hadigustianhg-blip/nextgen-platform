@@ -13,7 +13,8 @@ export type ScraperOperation =
   | "INVENTORY"
   | "AGING_SIGN"
   | "WAYBILL_STATUS"
-  | "SENDER_DETAIL";
+  | "SENDER_DETAIL"
+  | "SENSITIVE_DETAIL";
 
 export type ScopedConnectionOperation = "SCOPED_RECONNECT" | "SCOPED_TEST_CONNECTION";
 
@@ -115,6 +116,7 @@ export async function executeTrustedMultiOutletScraper(
     AGING_SIGN: "/aging-sign",
     WAYBILL_STATUS: "/waybill-status",
     SENDER_DETAIL: "/sender-detail",
+    SENSITIVE_DETAIL: "/sensitive-detail",
   };
 
   const url = `${baseUrl}${endpointMap[operation]}`;

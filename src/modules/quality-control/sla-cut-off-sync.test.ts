@@ -100,28 +100,32 @@ describe("shared SLA sync", () => {
     expect(result.reason).toBe("STALE_SNAPSHOT");
   });
 
-  it("retries network and 5xx failures", async () => {
-    const fetcher = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("network"))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: [record] }), { status: 200 }));
-    const wait = vi.fn(async () => undefined);
-    expect((await fetchAgingSignSnapshot(fetcher, wait)).attempts).toBe(2);
-    expect(wait).toHaveBeenCalledOnce();
+  it("uses scoped aging-sign without a legacy retry path", async () => {
+    const executeScoped = vi.fn(async () => ({ data: [record] }));
+    const result = await fetchAgingSignSnapshot(
+      vi.fn(), vi.fn(async () => undefined), 3,
+      { tenantId: "tenant-1", outletId: "outlet-1" }, executeScoped as never,
+    );
+    expect(result.attempts).toBe(1);
+    expect(executeScoped).toHaveBeenCalledOnce();
   });
 
-  it("does not retry validation and HTTP 4xx errors", async () => {
-    const fetcher = vi.fn(async () => new Response("unauthorized", { status: 401 }));
-    await expect(fetchAgingSignSnapshot(fetcher, vi.fn(async () => undefined))).rejects.toMatchObject({
-      retryable: false,
-    });
-    expect(fetcher).toHaveBeenCalledOnce();
+  it("fails closed when the scoped operation fails", async () => {
+    const executeScoped = vi.fn(async () => { throw new Error("SCOPED_UNAVAILABLE"); });
+    await expect(fetchAgingSignSnapshot(
+      vi.fn(), vi.fn(async () => undefined), 3,
+      { tenantId: "tenant-1", outletId: "outlet-1" }, executeScoped as never,
+    )).rejects.toThrow("SCOPED_UNAVAILABLE");
+    expect(executeScoped).toHaveBeenCalledOnce();
   });
 
-  it("does not retry an invalid payload", async () => {
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({ success: true, data: [] }), { status: 200 }));
-    await expect(fetchAgingSignSnapshot(fetcher, vi.fn(async () => undefined))).rejects.toBeInstanceOf(SlaSyncError);
-    expect(fetcher).toHaveBeenCalledOnce();
+  it("rejects an invalid scoped payload without fallback", async () => {
+    const executeScoped = vi.fn(async () => ({ data: [] }));
+    await expect(fetchAgingSignSnapshot(
+      vi.fn(), vi.fn(async () => undefined), 3,
+      { tenantId: "tenant-1", outletId: "outlet-1" }, executeScoped as never,
+    )).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    expect(executeScoped).toHaveBeenCalledOnce();
   });
 
   it("fails closed without a configured middleware URL", async () => {
