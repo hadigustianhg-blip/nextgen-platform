@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, LoaderCircle, RefreshCw } from "lucide-react";
 import { formatDateTime, formatMoney } from "./pickup-format";
 
@@ -42,6 +42,43 @@ type SuccessSummary = {
 };
 
 const WAYBILL_PATTERN = /^[A-Za-z0-9]{1,100}$/;
+export const PICKUP_RESOLVER_RETRY_COUNT = 5;
+export const PICKUP_RESOLVER_RETRY_INTERVAL_MS = 1_500;
+
+type ResolverOutcome<T> =
+  | { kind: "found"; data: T }
+  | { kind: "missing" }
+  | { kind: "error"; message: string };
+
+type AutoSyncOutcome<T> =
+  | ResolverOutcome<T>
+  | { kind: "sync-error" };
+
+export async function runPickupAutoSyncFlow<T>(options: {
+  resolve: () => Promise<ResolverOutcome<T>>;
+  sync: () => Promise<boolean>;
+  delay?: (milliseconds: number) => Promise<void>;
+  retryCount?: number;
+  retryIntervalMs?: number;
+  onPhase?: (phase: "syncing" | "retrying") => void;
+}): Promise<AutoSyncOutcome<T>> {
+  const initial = await options.resolve();
+  if (initial.kind !== "missing") return initial;
+
+  options.onPhase?.("syncing");
+  if (!(await options.sync())) return { kind: "sync-error" };
+
+  const retryCount = options.retryCount ?? PICKUP_RESOLVER_RETRY_COUNT;
+  const retryIntervalMs = options.retryIntervalMs ?? PICKUP_RESOLVER_RETRY_INTERVAL_MS;
+  const delay = options.delay ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  options.onPhase?.("retrying");
+  for (let attempt = 0; attempt < retryCount; attempt += 1) {
+    await delay(retryIntervalMs);
+    const retried = await options.resolve();
+    if (retried.kind !== "missing") return retried;
+  }
+  return { kind: "missing" };
+}
 
 export function buildPickupAdjustmentPayload(input: {
   requestId: string;
@@ -69,7 +106,10 @@ export function PickupAdjustmentHelperClient({ waybillNo }: { waybillNo: string 
   const [pickup, setPickup] = useState<ResolverData | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(validWaybill);
+  const [loadingMessage, setLoadingMessage] = useState("Mencari data pickup...");
   const [notFound, setNotFound] = useState(false);
+  const [notFoundAfterSync, setNotFoundAfterSync] = useState(false);
+  const [syncFailed, setSyncFailed] = useState(false);
   const [error, setError] = useState("");
   const [discount, setDiscount] = useState("0");
   const [status, setStatus] = useState<"BELUM_BAYAR" | "SUDAH_BAYAR">("BELUM_BAYAR");
@@ -81,6 +121,7 @@ export function PickupAdjustmentHelperClient({ waybillNo }: { waybillNo: string 
   const [currentTotalPaid, setCurrentTotalPaid] = useState("0");
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState<SuccessSummary | null>(null);
+  const initialFlowWaybillRef = useRef<string | null>(null);
 
   const applyCurrentState = useCallback((resolved: ResolverData, detail?: PickupDetail) => {
     const current = detail ?? resolved.settlement;
@@ -92,34 +133,14 @@ export function PickupAdjustmentHelperClient({ waybillNo }: { waybillNo: string 
     setCurrentTotalPaid(current.totalPaid);
   }, []);
 
-  const resolvePickup = useCallback(async () => {
-    if (!validWaybill) {
-      setLoading(false);
-      setError("Nomor waybill tidak valid.");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
+  const hydratePickup = useCallback(async (resolved: ResolverData) => {
+    setPickup(resolved);
+    applyCurrentState(resolved);
     setNotFound(false);
-    setSuccess(null);
+    setNotFoundAfterSync(false);
+    setSyncFailed(false);
+    setError("");
     try {
-      const response = await fetch(
-        `/api/pickup/settlements/resolve-by-waybill?waybillNo=${encodeURIComponent(normalizedWaybill)}`,
-        { cache: "no-store" },
-      );
-      const body = await response.json();
-      if (response.status === 404 && body.error?.code === "PICKUP_NOT_FOUND") {
-        setPickup(null);
-        setNotFound(true);
-        return;
-      }
-      if (!response.ok) throw new Error(body.error?.message ?? "Pickup belum dapat dimuat.");
-
-      const resolved = body.data as ResolverData;
-      setPickup(resolved);
-      applyCurrentState(resolved);
-
       const [detailResponse, accountsResponse] = await Promise.all([
         fetch(`/api/pickup/settlements/${resolved.pickupId}`, { cache: "no-store" }),
         fetch("/api/pickup/transfer-accounts", { cache: "no-store" }),
@@ -132,17 +153,96 @@ export function PickupAdjustmentHelperClient({ waybillNo }: { waybillNo: string 
         const accountsBody = await accountsResponse.json();
         setAccounts(accountsBody.data as Account[]);
       }
-    } catch (cause) {
-      setPickup(null);
-      setError(cause instanceof Error ? cause.message : "Pickup belum dapat dimuat.");
-    } finally {
-      setLoading(false);
+    } catch {
+      // Resolver data remains usable; existing APIs still validate all writes server-side.
     }
-  }, [applyCurrentState, normalizedWaybill, validWaybill]);
+  }, [applyCurrentState]);
+
+  const requestResolver = useCallback(async (): Promise<ResolverOutcome<ResolverData>> => {
+    try {
+      const response = await fetch(
+        `/api/pickup/settlements/resolve-by-waybill?waybillNo=${encodeURIComponent(normalizedWaybill)}`,
+        { cache: "no-store" },
+      );
+      const body = await response.json();
+      if (response.status === 404 && body.error?.code === "PICKUP_NOT_FOUND") return { kind: "missing" };
+      if (!response.ok) return { kind: "error", message: body.error?.message ?? "Pickup belum dapat dimuat." };
+      return { kind: "found", data: body.data as ResolverData };
+    } catch {
+      return { kind: "error", message: "Pickup belum dapat dimuat." };
+    }
+  }, [normalizedWaybill]);
+
+  const requestPickupSync = useCallback(async () => {
+    try {
+      const response = await fetch("/api/pickup/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const resolveOnly = useCallback(async () => {
+    if (!validWaybill) return;
+    setLoading(true);
+    setLoadingMessage("Mencari data pickup...");
+    setNotFound(false);
+    setNotFoundAfterSync(false);
+    setSyncFailed(false);
+    setError("");
+    setSuccess(null);
+    const result = await requestResolver();
+    if (result.kind === "found") await hydratePickup(result.data);
+    else if (result.kind === "missing") {
+      setPickup(null);
+      setNotFound(true);
+    } else {
+      setPickup(null);
+      setError(result.message);
+    }
+    setLoading(false);
+  }, [hydratePickup, requestResolver, validWaybill]);
+
+  const runInitialFlow = useCallback(async () => {
+    if (initialFlowWaybillRef.current === normalizedWaybill) return;
+    initialFlowWaybillRef.current = normalizedWaybill;
+    if (!validWaybill) {
+      setLoading(false);
+      setError("Nomor waybill tidak valid.");
+      return;
+    }
+
+    setLoading(true);
+    setLoadingMessage("Mencari data pickup...");
+    const result = await runPickupAutoSyncFlow({
+      resolve: requestResolver,
+      sync: requestPickupSync,
+      onPhase: (phase) => setLoadingMessage(
+        phase === "syncing" ? "Memperbarui data pickup..." : "Mencari resi yang baru dibuat...",
+      ),
+    });
+    if (result.kind === "found") await hydratePickup(result.data);
+    else if (result.kind === "missing") {
+      setPickup(null);
+      setNotFound(true);
+      setNotFoundAfterSync(true);
+    } else if (result.kind === "sync-error") {
+      setPickup(null);
+      setSyncFailed(true);
+    } else {
+      setPickup(null);
+      setError(result.message);
+    }
+    setLoading(false);
+  }, [hydratePickup, normalizedWaybill, requestPickupSync, requestResolver, validWaybill]);
 
   useEffect(() => {
-    void resolvePickup();
-  }, [resolvePickup]);
+    void runInitialFlow();
+  }, [runInitialFlow]);
 
   const totalAfterDiscount = useMemo(
     () => Math.max(0, Number(pickup?.freightAmount ?? 0) - Number(discount || 0)),
@@ -212,7 +312,7 @@ export function PickupAdjustmentHelperClient({ waybillNo }: { waybillNo: string 
 
       {loading && (
         <div className="flex min-h-64 items-center justify-center gap-2 p-6 text-sm font-medium text-slate-600">
-          <LoaderCircle className="animate-spin" size={18} /> Mencari Pickup…
+          <LoaderCircle className="animate-spin" size={18} /> {loadingMessage}
         </div>
       )}
 
@@ -225,7 +325,17 @@ export function PickupAdjustmentHelperClient({ waybillNo }: { waybillNo: string 
       {!loading && validWaybill && notFound && (
         <div className="p-6 text-center">
           <p className="font-semibold text-slate-800">Pickup belum tersedia di NEXTGEN.</p>
-          <button type="button" onClick={() => void resolvePickup()} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white">
+          {notFoundAfterSync && <p className="mt-1 text-sm text-slate-500">Data resi belum muncul setelah pembaruan pickup.</p>}
+          <button type="button" onClick={() => void resolveOnly()} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white">
+            <RefreshCw size={16} /> Coba Lagi
+          </button>
+        </div>
+      )}
+
+      {!loading && validWaybill && syncFailed && (
+        <div className="p-6 text-center">
+          <p className="font-semibold text-red-700">Data pickup belum dapat diperbarui.</p>
+          <button type="button" onClick={() => void resolveOnly()} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white">
             <RefreshCw size={16} /> Coba Lagi
           </button>
         </div>
