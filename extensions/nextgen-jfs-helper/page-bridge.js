@@ -46,12 +46,13 @@
       const method = init?.method ?? (typeof input === "object" && input ? input.method : "GET");
       const url = typeof input === "string" || input instanceof URL ? String(input) : input?.url ?? "";
       const fetchResult = originalFetch.apply(this, arguments);
-      void fetchResult.then((response) => {
-        if (!matchesEndpoint(url, method)) return;
-        void response.clone().json()
-          .then((payload) => emitIfSuccessful(url, method, response.status, payload))
-          .catch(() => undefined);
-      }).catch(() => undefined);
+      void fetchResult
+        .then(async (response) => {
+          if (!matchesEndpoint(url, method)) return;
+          const payload = await response.clone().json();
+          emitIfSuccessful(url, method, response.status, payload);
+        })
+        .catch(() => undefined);
       return fetchResult;
     };
   }

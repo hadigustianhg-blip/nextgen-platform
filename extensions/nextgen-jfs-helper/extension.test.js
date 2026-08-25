@@ -69,6 +69,35 @@ describe("NEXTGEN DEV JFS waybill extension", () => {
     expect(messages[0]).toEqual({ type: "NEXTGEN_JFS_WAYBILL_CREATED", waybillNo: "201712345678" });
   });
 
+  it("preserves an original fetch rejection without a secondary unhandled rejection", async () => {
+    const source = await readFile(new URL("./page-bridge.js", import.meta.url), "utf8");
+    const messages = [];
+    const originalError = new TypeError("Failed to fetch");
+    const originalPromise = Promise.reject(originalError);
+    const originalFetch = vi.fn(() => originalPromise);
+    class FakeXHR { open() {} send() {} addEventListener() {} }
+    const window = {
+      fetch: originalFetch,
+      XMLHttpRequest: FakeXHR,
+      location: { href: "https://jfs.jtcargo.co.id/", origin: "https://jfs.jtcargo.co.id" },
+      postMessage: (message) => messages.push(message),
+    };
+    const unhandled = [];
+    const onUnhandled = (reason) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      vm.runInNewContext(source, { window, URL, WeakMap, Object, String });
+      const returned = window.fetch("https://open.feishu.cn/unrelated", { method: "GET" });
+      expect(returned).toBe(originalPromise);
+      await expect(returned).rejects.toBe(originalError);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+      expect(messages).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
   it("observes XHR loadend without replacing open/send results", async () => {
     const source = await readFile(new URL("./page-bridge.js", import.meta.url), "utf8");
     const messages = [];
