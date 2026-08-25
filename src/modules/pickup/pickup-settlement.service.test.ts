@@ -16,7 +16,8 @@ const state = vi.hoisted(() => ({
 
 function scopedMaster(where: any) {
   return state.masters.find((master) =>
-    master.id === where.id &&
+    (!where.id || master.id === where.id) &&
+    (!where.waybillNo || master.waybillNo === where.waybillNo) &&
     master.tenantId === where.tenantId &&
     master.outletId === where.outletId,
   );
@@ -181,6 +182,7 @@ import {
   bulkAdjustPickupSettlements,
   calculatePickupFinancials,
   listPickupSettlements,
+  resolvePickupSettlementByWaybill,
 } from "./pickup-settlement.service";
 
 function addMaster(
@@ -223,6 +225,61 @@ beforeEach(() => {
 });
 
 describe("Pickup Settlement service", () => {
+  it("resolves an exact waybill only inside the requested tenant and outlet", async () => {
+    addMaster("pickup-a", "JP1234567890", "Tunai");
+    addMaster("pickup-other-tenant", "JP1234567890", "Tunai", "tenant-b");
+    addMaster("pickup-other-outlet", "JP1234567890", "Tunai", "tenant-a", "outlet-b");
+
+    const result = await resolvePickupSettlementByWaybill(
+      "tenant-a",
+      "outlet-a",
+      "JP1234567890",
+    );
+
+    expect(result).toMatchObject({
+      pickupId: "pickup-a",
+      waybillNo: "JP1234567890",
+      staff: "Ridwan",
+      sender: "Sender Test",
+      freightAmount: "10000",
+      settlement: {
+        paymentStatus: "BELUM_BAYAR",
+        totalPaid: "0",
+      },
+    });
+  });
+
+  it("does not resolve a waybill from another tenant or outlet", async () => {
+    addMaster("pickup-other-tenant", "JP2234567890", "Tunai", "tenant-b");
+    addMaster("pickup-other-outlet", "JP3234567890", "Tunai", "tenant-a", "outlet-b");
+
+    await expect(resolvePickupSettlementByWaybill(
+      "tenant-a",
+      "outlet-a",
+      "JP2234567890",
+    )).resolves.toBeNull();
+    await expect(resolvePickupSettlementByWaybill(
+      "tenant-a",
+      "outlet-a",
+      "JP3234567890",
+    )).resolves.toBeNull();
+  });
+
+  it("resolves read-only without creating revisions, payments, movements, or audits", async () => {
+    addMaster("pickup-read-only", "JP4234567890", "Tunai");
+
+    await resolvePickupSettlementByWaybill(
+      "tenant-a",
+      "outlet-a",
+      "JP4234567890",
+    );
+
+    expect(state.revisions).toHaveLength(0);
+    expect(state.payments).toHaveLength(0);
+    expect(state.movements).toHaveLength(0);
+    expect(state.audits).toHaveLength(0);
+  });
+
   it("shows only trimmed case-insensitive Tunai and excludes Bulanan", async () => {
     addMaster("cash", "WB-CASH", "  TuNaI ");
     addMaster("monthly", "WB-MONTHLY", "Bulanan");

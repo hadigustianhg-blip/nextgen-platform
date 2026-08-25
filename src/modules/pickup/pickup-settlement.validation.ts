@@ -32,6 +32,15 @@ export const pickupSettlementListQuerySchema = z.object({
   paymentMethod: z.enum(["", "TUNAI", "TRANSFER"]).optional().default(""),
 });
 
+export const pickupWaybillResolverQuerySchema = z.object({
+  waybillNo: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .regex(/^[A-Za-z0-9]+$/),
+});
+
 export const pickupAdjustmentSchema = z.preprocess(
   normalizeTransferAccount,
   z
