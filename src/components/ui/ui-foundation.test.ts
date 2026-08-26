@@ -121,6 +121,6 @@ describe("NEXTGEN UI asset and theme foundation", () => {
     expect(dashboard).toContain('title="Payment Settlement"');
     expect(sidebar).toContain("resolveSidebarOpenGroup(pathname, activeGroup, accordionState)");
     expect(sidebar).toContain('toggleGroup("settings")');
-    expect(sidebar).toContain('<NextgenBrand variant="mark" className="size-10 shrink-0"');
+    expect(sidebar).toContain('<NextgenBrand variant="mark" className="size-6"');
   });
 });
