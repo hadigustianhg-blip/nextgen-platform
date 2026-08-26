@@ -1,12 +1,15 @@
 # NEXTGEN DEV JFS Waybill Helper
 
-Development-only Manifest V3 extension. It observes successful JFS waybill creation responses and opens the authenticated NEXTGEN DEV Pickup Adjustment helper.
+Versi ini hanya untuk NEXTGEN DEV. Extension Manifest V3 ini membuka helper Penyesuaian Pickup NEXTGEN DEV setelah pembuatan resi JFS berhasil.
 
-## Local installation
+## Instalasi di Chrome Desktop
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Choose **Load unpacked**.
-4. Select this `extensions/nextgen-jfs-helper` folder.
+1. Extract file ZIP.
+2. Buka `chrome://extensions`.
+3. Aktifkan **Developer mode**.
+4. Klik **Load unpacked**.
+5. Pilih folder `nextgen-jfs-helper` hasil extract yang berisi `manifest.json`.
+6. Pastikan extension dalam keadaan **ON**.
+7. Refresh halaman JFS.
 
-The extension runs only on `https://jfs.jtcargo.co.id/*` and opens only `https://dev.nextgen-platform.com/helper/pickup-adjustment`. It does not read request headers, credentials, or request payloads, and it never persists, forwards, or logs the full response payload. Deduplication stores only a SHA-256-derived session key and timestamp for 60 seconds.
+Extension hanya berjalan pada `https://jfs.jtcargo.co.id/*` dan hanya membuka `https://dev.nextgen-platform.com/helper/pickup-adjustment`. Extension tidak membaca request header, credential, atau request payload, serta tidak menyimpan, meneruskan, maupun mencatat response payload lengkap. Deduplication hanya menyimpan session key turunan SHA-256 dan timestamp selama 60 detik.
