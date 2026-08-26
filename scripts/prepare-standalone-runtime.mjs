@@ -13,6 +13,8 @@ const standaloneNextRoot = path.join(standaloneRoot, ".next");
 await access(path.join(standaloneRoot, "server.js"));
 await access(path.join(projectRoot, ".next", "static"));
 await access(path.join(projectRoot, "public"));
+await access(path.join(standaloneRoot, "private-assets", "nextgen-jfs-helper-dev.zip"));
+await access(path.join(standaloneRoot, "private-assets", "nextgen-jfs-helper.zip"));
 
 await mkdir(standaloneNextRoot, { recursive: true });
 await cp(

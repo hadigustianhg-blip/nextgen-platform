@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Cloud, Database, Eye, EyeOff, Globe2, Link2, LockKeyhole, RefreshCw, ShieldAlert, ShieldCheck, X } from "lucide-react";
+import { CheckCircle2, Cloud, Database, Download, Eye, EyeOff, Globe2, Link2, LockKeyhole, Puzzle, RefreshCw, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { buttonClass, inputClass, SettingsCard } from "./settings-shell";
 import { SettingsOwnerControl } from "./settings-owner-control";
 
@@ -26,6 +26,7 @@ export type IntegrationData = {
   datasets?: DatasetView[];
   infrastructure?: { middlewareHostMasked: string | null; middlewareStatus: string; databaseStatus: string; applicationDomain: string | null; salaryCardStatus: string; cron: { key: string; lastRunAt: string | null }[]; lastSuccessfulSync: string | null; lastFailedSync: string | null };
   activities?: ActivityView[];
+  jfsWaybillHelper?: { available: true; version: string; badge: string };
 };
 
 const statusLabel: Record<DatasetStatus, string> = { SUCCESS: "Berhasil", FAILED: "Gagal", RUNNING: "Sedang Berjalan", NEVER_SYNCED: "Belum Pernah Sinkron", STALE: "Perlu Diperbarui", UNAVAILABLE: "Belum tersedia" };
@@ -312,6 +313,7 @@ export function SettingsIntegrations({ data }: { data: IntegrationData }) {
   return <div className="space-y-5">
     <section><div className="mb-3"><h2 className="text-lg font-bold text-slate-950">Ringkasan Integrasi</h2><p className="text-sm text-slate-500">Status aman layanan yang mendukung operasional outlet.</p></div><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><IntegrationStatusCard icon={<Link2 size={20}/>} title="Status JFS" value={jfsStatusLabel} subtitle={connection.networkCode ? `Network: ${connection.networkCode}` : "Koneksi per-outlet mandiri aktif"} tone={summary.jfsConnectionStatus === "CONNECTED" ? "green" : summary.jfsConnectionStatus === "FAILED" ? "red" : "slate"}/><IntegrationStatusCard icon={<Cloud size={20}/>} title="Middleware" value={middlewareLabel} subtitle={data.infrastructure?.middlewareHostMasked ?? "Host belum tersedia"} tone={summary.middlewareStatus === "ONLINE" ? "green" : summary.middlewareStatus === "OFFLINE" ? "red" : "slate"}/><IntegrationStatusCard icon={<Database size={20}/>} title="Database" value={summary.databaseStatus === "CONNECTED" ? "Terhubung" : "Gangguan"} tone={summary.databaseStatus === "CONNECTED" ? "green" : "red"}/><IntegrationStatusCard icon={<Globe2 size={20}/>} title="Domain Aplikasi" value={summary.applicationDomain ?? "Belum dikonfigurasi"}/></div></section>
     <JfsConnectionCard data={connection}/>
+    {data.jfsWaybillHelper?.available && <SettingsCard title="JFS Waybill Helper"><div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-4"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-700"><Puzzle size={21}/></div><div><div className="flex flex-wrap items-center gap-2"><p className="font-bold text-slate-900">Extension Chrome Desktop</p><span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-bold text-violet-700">{data.jfsWaybillHelper.badge}</span></div><p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">Membuka Penyesuaian Pickup NEXTGEN secara otomatis setelah pembuatan resi JFS berhasil.</p><p className="mt-2 text-xs font-medium text-slate-500">Version {data.jfsWaybillHelper.version} · Extract ZIP lalu gunakan Load unpacked di chrome://extensions.</p></div></div><a className={`${buttonClass} shrink-0 bg-slate-900 text-white hover:bg-slate-800`} href="/api/settings/integrations/jfs-waybill-helper/download"><Download size={16}/> Download Extension</a></div></SettingsCard>}
     <SettingsCard title="Status Sinkronisasi"><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-600">Status hanya berasal dari run canonical yang tersedia.</p><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">Segera Tersedia</span></div><div>{(data.datasets ?? []).map((dataset) => <DatasetSyncRow key={dataset.key} dataset={dataset} onDetail={() => setDetail(dataset)}/>)}</div><div className="mt-4"><ComingSoonButton><RefreshCw size={16}/> Sinkronkan Sekarang</ComingSoonButton></div></SettingsCard>
     {data.infrastructure && <InfrastructureCard data={data.infrastructure}/>}<IntegrationActivityTable activities={data.activities ?? []}/>
     <SettingsOwnerControl />

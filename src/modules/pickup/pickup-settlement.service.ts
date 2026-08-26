@@ -229,6 +229,36 @@ export async function getPickupSettlement(
   return mapSettlementRow(row);
 }
 
+export async function resolvePickupSettlementByWaybill(
+  tenantId: string,
+  outletId: string,
+  waybillNo: string,
+) {
+  const row = await prisma.masterPickup.findFirst({
+    where: { tenantId, outletId, waybillNo },
+    include: financialInclude,
+  });
+  if (!row) return null;
+
+  const settlement = mapSettlementRow(row);
+  return {
+    pickupId: settlement.id,
+    waybillNo: settlement.waybillNo,
+    operationalDate: settlement.operationalDate,
+    staff: settlement.staff,
+    sender: settlement.sender,
+    freightAmount: settlement.freightAmount,
+    settlement: {
+      discountAmount: settlement.discountAmount,
+      finalObligation: settlement.finalObligation,
+      totalPaid: settlement.totalPaid,
+      remainingAmount: settlement.remainingAmount,
+      paymentStatus: settlement.paymentStatus,
+      paymentMethod: settlement.paymentMethod,
+    },
+  };
+}
+
 function auditData(
   context: SettlementContext,
   entityType: string,
