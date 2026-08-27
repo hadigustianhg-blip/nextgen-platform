@@ -196,4 +196,21 @@ describe("SaaS Multi-Tenant / Multi-Outlet Integration Test Suite", () => {
       expect(mockFetcher.mock.calls[0][0]).toBe(`https://middleware.test.internal${item.expectedPath}`);
     }
   });
+
+  it("routes waybill tracking with scoped headers and the operation-only body", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, data: { waybillNo: "JT123", latest: {}, timeline: [] } }), { status: 200 }));
+    (prisma.integrationCredential.findUnique as any).mockResolvedValue({
+      connectionStatus: "CONNECTED", isActive: true, networkCode: "NET-A",
+      accountEncrypted: encryptCredential({ account: "account-a" }),
+      passwordEncrypted: encryptCredential({ password: "password-a" }),
+      outlet: { code: "OUTLET-A" },
+    });
+    await executeTrustedMultiOutletScraper(scopeTenantA, "WAYBILL_TRACKING", { waybillNo: "JT123", fetcher });
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe("https://middleware.test.internal/waybill-tracking");
+    expect(init.headers["X-JFS-Tenant-Id"]).toBe("tenant-uuid-A");
+    expect(init.headers["X-JFS-Outlet-Id"]).toBe("outlet-uuid-A1");
+    expect(init.headers["X-JFS-Network-Code"]).toBe("NET-A");
+    expect(JSON.parse(init.body)).toEqual({ waybillNo: "JT123" });
+  });
 });

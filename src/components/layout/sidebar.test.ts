@@ -236,6 +236,17 @@ describe("pickup navigation", () => {
     );
   });
 
+  it("adds a permission-filtered Pengecekan group without changing Monitoring children", async () => {
+    const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
+    expect(source).toContain('aria-controls="checking-submenu"');
+    expect(source).toContain('canAccessResource(roles, "WAYBILL_TRACKING", "READ")');
+    expect(source).toContain('href="/dashboard/checking/tracking"');
+    expect(source).toContain('label="Tracking Resi"');
+    expect(source.indexOf("Pengecekan")).toBeGreaterThan(source.indexOf("Monitoring"));
+    expect(source).toContain('label="Monitoring Daily"');
+    expect(source).toContain('label="Monitoring Monthly"');
+  });
+
   it("exposes Rincian Operasional under persistent Finance & HR", async () => {
     const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
     expect(source).toContain('const financeVisible = openGroupId === "finance"');

@@ -30,6 +30,12 @@ describe("final role permission policy", () => {
     expect(canAccessResource(["VIEWER"], "USER_PROFILE", "UPDATE")).toBe(true);
   });
 
+  it("grants the dedicated tracking resource read-only to operational roles", () => {
+    expect(canAccessResource(["OPERATIONAL"], "WAYBILL_TRACKING", "READ")).toBe(true);
+    expect(canAccessResource(["OPERATIONAL"], "WAYBILL_TRACKING", "MANAGE")).toBe(false);
+    expect(canAccessResource(["TEAM"], "WAYBILL_TRACKING", "READ")).toBe(false);
+  });
+
   it("isolates TEAM to its own read-only portal", () => {
     expect(canAccessResource(["TEAM"], "TEAM_PORTAL", "READ")).toBe(true);
     expect(canAccessResource(["TEAM"], "DASHBOARD", "READ")).toBe(false);

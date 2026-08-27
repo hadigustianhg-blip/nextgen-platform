@@ -14,7 +14,8 @@ export type ScraperOperation =
   | "AGING_SIGN"
   | "WAYBILL_STATUS"
   | "SENDER_DETAIL"
-  | "SENSITIVE_DETAIL";
+  | "SENSITIVE_DETAIL"
+  | "WAYBILL_TRACKING";
 
 export type ScopedConnectionOperation = "SCOPED_RECONNECT" | "SCOPED_TEST_CONNECTION";
 
@@ -117,6 +118,7 @@ export async function executeTrustedMultiOutletScraper(
     WAYBILL_STATUS: "/waybill-status",
     SENDER_DETAIL: "/sender-detail",
     SENSITIVE_DETAIL: "/sensitive-detail",
+    WAYBILL_TRACKING: "/waybill-tracking",
   };
 
   const url = `${baseUrl}${endpointMap[operation]}`;
@@ -134,10 +136,9 @@ export async function executeTrustedMultiOutletScraper(
       "X-JFS-Account": decryptedAccount,
       "X-JFS-Password": decryptedPassword,
     },
-    body: JSON.stringify({
-      networkCode,
-      ...options,
-    }),
+    body: JSON.stringify(operation === "WAYBILL_TRACKING"
+      ? { waybillNo: options.waybillNo }
+      : { networkCode, ...options }),
   });
 
   if (!res.ok) {
