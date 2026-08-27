@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { deriveTrackingRoute, formatTrackingTimestamp, newestTrackingEvents } from "./waybill-tracking-client";
+import { deriveTrackingRoute, formatTrackingTimestamp, newestTrackingEvents, registerAutoTrackingWaybill } from "./waybill-tracking-client";
 
 const event = (location: string, time: string) => ({ scanTime: time, uploadTime: "", scanTypeName: "Transit", scanNetworkName: location, scanNetworkCode: "", nextStopName: "", nextNetworkCode: "", status: "", code: null, scanMode: "", taskCode: "", description: "" });
 
@@ -42,6 +42,25 @@ describe("waybill tracking UI", () => {
     expect(source).toContain('setRevealedPhone(null)');
     expect(source).toContain('target="_blank" rel="noopener noreferrer"');
     expect(source).toContain("Nomor WhatsApp tidak valid.");
+    expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB/);
+  });
+
+  it("guards auto tracking by valid waybill while allowing each new query exactly once", () => {
+    const searched = new Set<string>();
+    expect(registerAutoTrackingWaybill(searched, "  JT123  ")).toBe("JT123");
+    expect(registerAutoTrackingWaybill(searched, "JT123")).toBeNull();
+    expect(registerAutoTrackingWaybill(searched, "JT456")).toBe("JT456");
+    expect(registerAutoTrackingWaybill(searched, "JT 789")).toBeNull();
+    expect(searched).toEqual(new Set(["JT123", "JT456"]));
+  });
+
+  it("uses the same tracking function for query auto-search and manual submit", async () => {
+    const source = await readFile(new URL("./waybill-tracking-client.tsx", import.meta.url), "utf8");
+    expect(source.match(/fetch\("\/api\/checking\/waybill-tracking"/g)).toHaveLength(1);
+    expect(source).toContain("if (autoWaybill) void runTracking(autoWaybill)");
+    expect(source).toContain("await runTracking(normalized)");
+    expect(source).toContain("useRef(new Set<string>())");
+    expect(source).toContain("initialWaybillNo = \"\"");
     expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB/);
   });
 });

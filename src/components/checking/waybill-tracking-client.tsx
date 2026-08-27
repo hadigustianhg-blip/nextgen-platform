@@ -1,10 +1,17 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, LoaderCircle, MapPin, MessageCircle, PackageSearch, Route, Search } from "lucide-react";
 import { buildTrackingWhatsAppUrl, type WaybillTrackingResult } from "@/modules/checking";
 
 const WAYBILL_PATTERN = /^[A-Za-z0-9]{1,100}$/;
+
+export function registerAutoTrackingWaybill(searched: Set<string>, value: string) {
+  const normalized = value.trim();
+  if (!WAYBILL_PATTERN.test(normalized) || searched.has(normalized)) return null;
+  searched.add(normalized);
+  return normalized;
+}
 
 export function deriveTrackingRoute(timeline: WaybillTrackingResult["timeline"]) {
   return timeline.reduce<string[]>((locations, event) => {
@@ -31,24 +38,26 @@ export function formatTrackingTimestamp(value: string) {
   }).format(date).replace("pukul", "·")} WIB`;
 }
 
-export function WaybillTrackingClient({ canRevealSensitive = false }: { canRevealSensitive?: boolean }) {
-  const [waybillNo, setWaybillNo] = useState("");
+export function WaybillTrackingClient({
+  canRevealSensitive = false,
+  initialWaybillNo = "",
+}: {
+  canRevealSensitive?: boolean;
+  initialWaybillNo?: string;
+}) {
+  const [waybillNo, setWaybillNo] = useState(initialWaybillNo.trim());
   const [result, setResult] = useState<WaybillTrackingResult | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "not-found" | "error">("idle");
   const [validation, setValidation] = useState("");
   const [revealedPhone, setRevealedPhone] = useState<string | null>(null);
   const [revealState, setRevealState] = useState<"idle" | "loading" | "error" | "forbidden" | "not-found">("idle");
+  const autoTrackedWaybills = useRef(new Set<string>());
+  const trackingRequestId = useRef(0);
   const route = useMemo(() => result ? deriveTrackingRoute(result.timeline) : [], [result]);
   const timeline = useMemo(() => result ? newestTrackingEvents(result.timeline) : [], [result]);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (state === "loading") return;
-    const normalized = waybillNo.trim();
-    if (!WAYBILL_PATTERN.test(normalized)) {
-      setValidation("Masukkan satu nomor resi yang valid.");
-      return;
-    }
+  const runTracking = useCallback(async (normalized: string) => {
+    const requestId = ++trackingRequestId.current;
     setValidation("");
     setResult(null);
     setRevealedPhone(null);
@@ -60,14 +69,44 @@ export function WaybillTrackingClient({ canRevealSensitive = false }: { canRevea
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ waybillNo: normalized }),
       });
-      if (response.status === 404) return setState("not-found");
-      if (!response.ok) return setState("error");
+      if (response.status === 404) {
+        if (requestId === trackingRequestId.current) setState("not-found");
+        return;
+      }
+      if (!response.ok) {
+        if (requestId === trackingRequestId.current) setState("error");
+        return;
+      }
       const payload = await response.json() as { data: WaybillTrackingResult };
+      if (requestId !== trackingRequestId.current) return;
       setResult(payload.data);
       setState("idle");
     } catch {
-      setState("error");
+      if (requestId === trackingRequestId.current) setState("error");
     }
+  }, []);
+
+  useEffect(() => {
+    const normalized = initialWaybillNo.trim();
+    setWaybillNo(normalized);
+    if (!normalized) return;
+    if (!WAYBILL_PATTERN.test(normalized)) {
+      setValidation("Masukkan satu nomor resi yang valid.");
+      return;
+    }
+    const autoWaybill = registerAutoTrackingWaybill(autoTrackedWaybills.current, normalized);
+    if (autoWaybill) void runTracking(autoWaybill);
+  }, [initialWaybillNo, runTracking]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (state === "loading") return;
+    const normalized = waybillNo.trim();
+    if (!WAYBILL_PATTERN.test(normalized)) {
+      setValidation("Masukkan satu nomor resi yang valid.");
+      return;
+    }
+    await runTracking(normalized);
   }
 
   const latestStatus = result?.latest.status || result?.latest.scanTypeName || "-";

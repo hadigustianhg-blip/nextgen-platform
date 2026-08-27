@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { matchesMonitoringDetailSearch } from "./monitoring-detail-search";
 import { CloudDownload, RefreshCw, Search, X } from "lucide-react";
 import {
@@ -106,6 +107,10 @@ const number = (value: string | number, maximumFractionDigits = 0) =>
     Number(value),
   );
 const percent = (value: number) => `${number(value, 2)}%`;
+
+export function buildTrackingWaybillHref(waybill: string) {
+  return `/dashboard/checking/tracking?waybillNo=${encodeURIComponent(waybill)}`;
+}
 
 export function MonitoringDailyClient({
   outlets,
@@ -631,7 +636,7 @@ function MonitoringDetailModal({
                   <th className="px-4 py-3">{isDelivery ? "Status / TTD" : "Settlement"}</th><th className="px-4 py-3 text-right">{isDelivery ? "Berat" : "Omset"}</th><th className="px-4 py-3 text-right">{isDelivery ? "Aktivitas Terakhir" : "Berat"}</th>
                 </tr></thead>
                 <tbody className="divide-y divide-slate-100">{rows.length ? rows.map((row) => <tr key={`${row.kind}-${row.waybill}`}>
-                  <td className="px-4 py-3 font-semibold text-slate-900">{row.waybill}</td><td className="px-4 py-3">{row.businessDate}</td><td className="px-4 py-3">{row.team}</td><td className="px-4 py-3">{row.customer || "—"}</td>{isDelivery && <td className="max-w-[280px] whitespace-normal px-4 py-3 leading-snug">{row.receiverAddress || "-"}</td>}
+                  <td className="px-4 py-3 font-semibold"><Link href={buildTrackingWaybillHref(row.waybill)} title="Lihat Tracking" className="text-blue-700 hover:underline">{row.waybill}</Link></td><td className="px-4 py-3">{row.businessDate}</td><td className="px-4 py-3">{row.team}</td><td className="px-4 py-3">{row.customer || "—"}</td>{isDelivery && <td className="max-w-[280px] whitespace-normal px-4 py-3 leading-snug">{row.receiverAddress || "-"}</td>}
                   <td className="px-4 py-3">{isDelivery ? <><span>{row.status}</span><span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-semibold ${row.ttd ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{row.ttd ? "TTD" : "Pending"}</span></> : row.settlement || "—"}</td>
                   <td className="px-4 py-3 text-right">{isDelivery ? `${number(row.weight, 3)} Kg` : money(row.revenue ?? "0")}</td><td className="px-4 py-3 text-right">{isDelivery ? new Date(row.lastActivityAt).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) : `${number(row.weight, 3)} Kg`}</td>
                 </tr>) : <EmptyRow columns={isDelivery ? 8 : 7} message="Tidak ada data yang sesuai." />}</tbody>

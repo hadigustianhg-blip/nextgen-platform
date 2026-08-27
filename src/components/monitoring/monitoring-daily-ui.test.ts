@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { buildTrackingWaybillHref } from "./monitoring-daily-client";
 
 describe("Monitoring Daily UI contract", () => {
   it("keeps one split monitoring page with all requested metrics", async () => {
@@ -90,5 +91,15 @@ describe("Monitoring Daily UI contract", () => {
     expect(source).toContain("Alamat Penerima");
     expect(source).toContain("Cari Waybill / Customer / Team / Alamat");
     expect(source).toContain('row.receiverAddress || "-"');
+  });
+
+  it("links only the unchanged detail waybill value to safely encoded Tracking Resi", async () => {
+    const source = await readFile(new URL("./monitoring-daily-client.tsx", import.meta.url), "utf8");
+    expect(buildTrackingWaybillHref("WB/123 ?")).toBe("/dashboard/checking/tracking?waybillNo=WB%2F123%20%3F");
+    expect(source).toContain('title="Lihat Tracking"');
+    expect(source).toContain("{row.waybill}</Link>");
+    expect(source.match(/buildTrackingWaybillHref\(row\.waybill\)/g)).toHaveLength(1);
+    expect(source).toContain("row.receiverAddress || \"-\"");
+    expect(source).toContain("result.summary.totalPending");
   });
 });
