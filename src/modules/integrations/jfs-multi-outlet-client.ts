@@ -20,6 +20,17 @@ export type ScraperOperation =
 
 export type ScopedConnectionOperation = "SCOPED_RECONNECT" | "SCOPED_TEST_CONNECTION";
 
+export class ScopedJfsConnectionError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code: string,
+  ) {
+    super(message);
+    this.name = "ScopedJfsConnectionError";
+  }
+}
+
 type ScopedConnectionInput = {
   account: string;
   password: string;
@@ -63,7 +74,11 @@ export async function executeScopedJfsConnection(
   });
   const payload = await response.json().catch(() => null);
   if (!response.ok || !payload?.success || !payload.data?.connected) {
-    throw new Error(payload?.error || `Scoped JFS connection failed (${response.status})`);
+    throw new ScopedJfsConnectionError(
+      typeof payload?.message === "string" ? payload.message : "Scoped JFS connection failed",
+      response.status,
+      typeof payload?.error === "string" ? payload.error : "JFS_SCOPED_CONNECTION_FAILED",
+    );
   }
   return payload.data as {
     connected: true;
