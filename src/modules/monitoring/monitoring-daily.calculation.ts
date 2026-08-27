@@ -170,7 +170,7 @@ export function buildDeliveryRows(
     );
 }
 
-type SyncSourceResult = {
+export type SyncSourceResult = {
   success: boolean;
   processed?: number;
   received?: number;
@@ -179,9 +179,61 @@ type SyncSourceResult = {
   updated?: number;
   duplicateIgnored?: number;
   error?: string;
+  code?: string;
+  status?: number | null;
+  message?: string;
 };
 
-type SyncSourceCounts = Omit<SyncSourceResult, "success" | "error">;
+type SyncSourceCounts = Omit<SyncSourceResult, "success" | "error" | "code" | "status" | "message">;
+
+export function extractSyncErrorDetails(type: "DISPATCH" | "PICKUP", err: any) {
+  const status =
+    err?.diagnostic?.httpStatus ??
+    err?.status ??
+    err?.httpStatus ??
+    err?.response?.status ??
+    err?.statusCode ??
+    null;
+
+  const rawCode =
+    err?.diagnostic?.code ??
+    err?.code ??
+    err?.errorCode ??
+    err?.response?.data?.error ??
+    err?.name ??
+    "SYNC_ERROR";
+
+  const code = String(rawCode);
+
+  const rawMessage =
+    err?.diagnostic?.bodyPreview ??
+    err?.message ??
+    err?.errorMessage ??
+    err?.response?.data?.message ??
+    String(err);
+
+  const message = String(rawMessage).replace(
+    /("?(?:token|authtoken|authorization|cookie|password|authkey|x-auth-key)"?\s*[:=]\s*)[^,\s<]+/gi,
+    "$1[REDACTED]"
+  );
+
+  const middlewarePath =
+    err?.diagnostic?.endpoint ??
+    err?.diagnostic?.target ??
+    err?.middlewarePath ??
+    err?.endpoint ??
+    err?.target ??
+    err?.config?.url ??
+    err?.response?.config?.url ??
+    (type === "DISPATCH" ? "/dispatch" : "/pickup");
+
+  return {
+    status,
+    code,
+    message,
+    middlewarePath: String(middlewarePath),
+  };
+}
 
 export async function orchestrateMonitoringSync(
   syncDispatch: () => Promise<SyncSourceCounts>,
@@ -195,18 +247,28 @@ export async function orchestrateMonitoringSync(
   let pickup: SyncSourceResult;
   try {
     dispatch = { success: true, ...(await syncDispatch()) };
-  } catch {
+  } catch (err: unknown) {
+    const errorDetails = extractSyncErrorDetails("DISPATCH", err);
+    console.error(`[MONITORING_SYNC][DISPATCH]`, errorDetails);
     dispatch = {
       success: false,
       error: "Sinkronisasi Dispatch gagal.",
+      code: errorDetails.code,
+      status: errorDetails.status,
+      message: errorDetails.message,
     };
   }
   try {
     pickup = { success: true, ...(await syncPickup()) };
-  } catch {
+  } catch (err: unknown) {
+    const errorDetails = extractSyncErrorDetails("PICKUP", err);
+    console.error(`[MONITORING_SYNC][PICKUP]`, errorDetails);
     pickup = {
       success: false,
       error: "Sinkronisasi Pickup gagal.",
+      code: errorDetails.code,
+      status: errorDetails.status,
+      message: errorDetails.message,
     };
   }
   return {
