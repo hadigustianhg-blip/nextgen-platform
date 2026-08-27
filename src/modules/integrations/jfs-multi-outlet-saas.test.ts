@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { executeTrustedMultiOutletScraper } from "./jfs-multi-outlet-client";
+import { executeScopedJfsConnection, executeTrustedMultiOutletScraper } from "./jfs-multi-outlet-client";
 import { mapConcurrent } from "./bounded-concurrency";
 import { encryptCredential, decryptCredential } from "./credential-crypto";
 import { maskAccount } from "./jfs-credential.service";
@@ -78,6 +78,25 @@ describe("SaaS Multi-Tenant / Multi-Outlet Integration Test Suite", () => {
     expect(callB[1].headers["X-JFS-Outlet-Id"]).toBe("outlet-uuid-B1");
     expect(callB[1].headers["X-JFS-Outlet-Code"]).toBe("OUTLET_B1_CODE");
     expect(callB[1].headers["X-JFS-Account"]).toBe("accountB1");
+  });
+
+  it("scoped reconnect/test use server scope and never call legacy login", async () => {
+    const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      success: true, data: { connected: true, networkCode: "NET-A", sessionStatus: "ACTIVE" },
+    }), { status: 200 }));
+    for (const [operation, path] of [
+      ["SCOPED_RECONNECT", "/scoped/reconnect"],
+      ["SCOPED_TEST_CONNECTION", "/scoped/test-connection"],
+    ] as const) {
+      await executeScopedJfsConnection(scopeTenantA, operation, {
+        account: "account-a", password: "password-a", outletCode: "OUTLET-A", networkCode: "NET-A", fetcher,
+      });
+      const [url, init] = fetcher.mock.calls.at(-1)!;
+      expect(url).toBe(`https://middleware.test.internal${path}`);
+      expect(url).not.toContain("/jfs-auth/login");
+      expect(init.headers["X-JFS-Tenant-Id"]).toBe(scopeTenantA.tenantId);
+      expect(init.headers["X-JFS-Outlet-Id"]).toBe(scopeTenantA.outletId);
+    }
   });
 
   it("3 & 4. Verifies credential isolation and encryption response safety", () => {
@@ -176,5 +195,37 @@ describe("SaaS Multi-Tenant / Multi-Outlet Integration Test Suite", () => {
       await executeTrustedMultiOutletScraper(scopeTenantA, item.op, { fetcher: mockFetcher });
       expect(mockFetcher.mock.calls[0][0]).toBe(`https://middleware.test.internal${item.expectedPath}`);
     }
+  });
+
+  it("routes waybill tracking with scoped headers and the operation-only body", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, data: { waybillNo: "JT123", latest: {}, timeline: [] } }), { status: 200 }));
+    (prisma.integrationCredential.findUnique as any).mockResolvedValue({
+      connectionStatus: "CONNECTED", isActive: true, networkCode: "NET-A",
+      accountEncrypted: encryptCredential({ account: "account-a" }),
+      passwordEncrypted: encryptCredential({ password: "password-a" }),
+      outlet: { code: "OUTLET-A" },
+    });
+    await executeTrustedMultiOutletScraper(scopeTenantA, "WAYBILL_TRACKING", { waybillNo: "JT123", fetcher });
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe("https://middleware.test.internal/waybill-tracking");
+    expect(init.headers["X-JFS-Tenant-Id"]).toBe("tenant-uuid-A");
+    expect(init.headers["X-JFS-Outlet-Id"]).toBe("outlet-uuid-A1");
+    expect(init.headers["X-JFS-Network-Code"]).toBe("NET-A");
+    expect(JSON.parse(init.body)).toEqual({ waybillNo: "JT123" });
+  });
+
+  it("routes waybill detail through the same scoped client without caller scope in its body", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, data: { waybillNo: "JT123", customerName: "Customer" } }), { status: 200 }));
+    (prisma.integrationCredential.findUnique as any).mockResolvedValue({
+      connectionStatus: "CONNECTED", isActive: true, networkCode: "NET-A",
+      accountEncrypted: encryptCredential({ account: "account-a" }), passwordEncrypted: encryptCredential({ password: "password-a" }),
+      outlet: { code: "OUTLET-A" },
+    });
+    await executeTrustedMultiOutletScraper(scopeTenantA, "WAYBILL_DETAIL", { waybillNo: "JT123", fetcher });
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe("https://middleware.test.internal/waybill-detail");
+    expect(init.headers["X-JFS-Tenant-Id"]).toBe(scopeTenantA.tenantId);
+    expect(init.headers["X-JFS-Outlet-Id"]).toBe(scopeTenantA.outletId);
+    expect(JSON.parse(init.body)).toEqual({ waybillNo: "JT123" });
   });
 });

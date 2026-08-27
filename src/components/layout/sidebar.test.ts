@@ -222,18 +222,48 @@ describe("pickup navigation", () => {
     );
   });
 
-  it("exposes Penjadwalan Pickup under Quality Control", async () => {
+  it("moves Penjadwalan Pickup under Pengecekan without changing route, permission, or active matching", async () => {
     const source = await readFile(
       new URL("./sidebar.tsx", import.meta.url),
       "utf8",
     );
-    expect(source).toContain(
-      'href="/dashboard/quality-control/pickup-scheduling"',
-    );
-    expect(source).toContain('label="Penjadwalan Pickup"');
-    expect(source).toContain(
-      'active={pathname.startsWith("/dashboard/quality-control/pickup-scheduling")}',
-    );
+    const checking = source.slice(source.indexOf('title={collapsed ? "Pengecekan"'), source.indexOf('title={collapsed ? "Quality Control"'));
+    const qualityControl = source.slice(source.indexOf('title={collapsed ? "Quality Control"'), source.indexOf('title={collapsed ? "Finance & HR"'));
+    expect(checking).toContain('href="/dashboard/quality-control/pickup-scheduling"');
+    expect(checking).toContain('label="Penjadwalan Pickup"');
+    expect(checking).toContain('active={pathname.startsWith("/dashboard/quality-control/pickup-scheduling")}');
+    expect(qualityControl).not.toContain("Penjadwalan Pickup");
+    expect(source).toContain('canAccessResource(roles, "QUALITY_CONTROL", "READ")');
+    expect(source.match(/label="Penjadwalan Pickup"/g)).toHaveLength(1);
+    expect(source).toContain('const checkingActive = pathname.startsWith("/dashboard/checking/") || pickupSchedulingActive');
+    expect(source).toContain('const qualityControlActive = pathname.startsWith("/dashboard/quality-control/") && !pickupSchedulingActive');
+  });
+
+  it("adds a permission-filtered Pengecekan group without changing Monitoring children", async () => {
+    const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
+    expect(source).toContain('aria-controls="checking-submenu"');
+    expect(source).toContain('canAccessResource(roles, "WAYBILL_TRACKING", "READ")');
+    expect(source).toContain('href="/dashboard/checking/tracking"');
+    expect(source).toContain('label="Tracking Resi"');
+    expect(source.indexOf("Pengecekan")).toBeGreaterThan(source.indexOf("Monitoring"));
+    expect(source).toContain('label="Monitoring Daily"');
+    expect(source).toContain('label="Monitoring Monthly"');
+  });
+
+  it("orders Settlement, Payment, Pengecekan, and Quality Control with checking children in order", async () => {
+    const source = await readFile(new URL("./sidebar.tsx", import.meta.url), "utf8");
+    const settlement = source.indexOf('title={collapsed ? "Settlement Center"');
+    const payment = source.indexOf('title={collapsed ? "Payment"');
+    const checking = source.indexOf('title={collapsed ? "Pengecekan"');
+    const qualityControl = source.indexOf('title={collapsed ? "Quality Control"');
+    expect(settlement).toBeLessThan(payment);
+    expect(payment).toBeLessThan(checking);
+    expect(checking).toBeLessThan(qualityControl);
+    const checkingSource = source.slice(checking, qualityControl);
+    expect(checkingSource.indexOf('label="Tracking Resi"')).toBeLessThan(checkingSource.indexOf('label="Penjadwalan Pickup"'));
+    expect(checkingSource).toContain('canReadWaybillTracking && <SidebarChild');
+    expect(checkingSource).toContain('canReadPickupScheduling && <SidebarChild');
+    expect(source).toContain('canAccessResource(roles, "WAYBILL_TRACKING", "READ")');
   });
 
   it("exposes Rincian Operasional under persistent Finance & HR", async () => {

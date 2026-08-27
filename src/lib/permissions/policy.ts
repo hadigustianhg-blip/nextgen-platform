@@ -4,6 +4,7 @@ import type { RoleCode } from "./roles";
 export const permissionResources = [
   "DASHBOARD",
   "MONITORING",
+  "WAYBILL_TRACKING",
   "DELIVERY_SETTLEMENT",
   "PICKUP_SETTLEMENT",
   "OPERATIONAL_SETTLEMENT",
@@ -57,6 +58,7 @@ const settingsResources = new Set<PermissionResource>(permissionResources.filter
 const operationalResources = new Set<PermissionResource>([
   "DASHBOARD",
   "MONITORING",
+  "WAYBILL_TRACKING",
   "DELIVERY_SETTLEMENT",
   "PICKUP_SETTLEMENT",
   "OPERATIONAL_SETTLEMENT",

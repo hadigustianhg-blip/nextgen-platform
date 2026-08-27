@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/db/prisma";
+import { executeTrustedMultiOutletScraper } from "@/modules/integrations/jfs-multi-outlet-client";
 import { selectLatestDispatchRecords } from "@/modules/delivery-settlement/dispatch-deduplication";
 import { isBelumDiterima } from "./problem-waybill-delivery.service";
 
@@ -112,6 +113,7 @@ export async function getProblemWaybillSensitiveDetail(input: {
   actorId: string;
   waybill: string;
   fetcher?: typeof fetch;
+  executeScoped?: typeof executeTrustedMultiOutletScraper;
 }) {
   const audit = (result: "SUCCESS" | "FAILED") =>
     prisma.auditLog.create({
@@ -153,13 +155,55 @@ export async function getProblemWaybillSensitiveDetail(input: {
     throw new SensitiveDetailError("STATUS_CHANGED");
   }
   try {
-    const raw = await fetchSensitiveDetail(row.waybillNo, { fetcher: input.fetcher });
+    const result = await (input.executeScoped ?? executeTrustedMultiOutletScraper)(
+      { tenantId: input.tenantId, outletId: input.outletId },
+      "SENSITIVE_DETAIL",
+      { waybillNo: row.waybillNo, fetcher: input.fetcher },
+    );
+    const raw = result?.data;
     const detail = normalizeSensitiveDetail(raw, {
       waybill: row.waybillNo,
       currentStatus: "Belum diterima",
     });
     await audit("SUCCESS");
     return detail;
+  } catch (error) {
+    await audit("FAILED");
+    throw error;
+  }
+}
+
+export async function revealTrackingReceiverPhone(input: {
+  tenantId: string;
+  outletId: string;
+  actorId: string;
+  waybill: string;
+  executeScoped?: typeof executeTrustedMultiOutletScraper;
+}) {
+  const audit = (result: "SUCCESS" | "FAILED") => prisma.auditLog.create({
+    data: {
+      tenantId: input.tenantId,
+      outletId: input.outletId,
+      actorId: input.actorId,
+      action: "CREATE",
+      entityType: "WAYBILL_TRACKING_SENSITIVE_VIEW",
+      entityId: input.waybill,
+      metadata: { result },
+    },
+  });
+  try {
+    const result = await (input.executeScoped ?? executeTrustedMultiOutletScraper)(
+      { tenantId: input.tenantId, outletId: input.outletId },
+      "SENSITIVE_DETAIL",
+      { waybillNo: input.waybill },
+    );
+    const detail = normalizeSensitiveDetail(result?.data, {
+      waybill: input.waybill,
+      currentStatus: "",
+    });
+    if (!detail.receiverPhone) throw new SensitiveDetailError("NOT_FOUND");
+    await audit("SUCCESS");
+    return { waybillNo: detail.waybill, receiverPhone: detail.receiverPhone };
   } catch (error) {
     await audit("FAILED");
     throw error;

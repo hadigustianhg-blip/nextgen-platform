@@ -16,6 +16,7 @@ import {
   LogOut,
   Menu,
   PackageCheck,
+  PackageSearch,
   ReceiptText,
   Settings,
   ShieldCheck,
@@ -45,6 +46,7 @@ const storageKeys = {
 
 export type SidebarGroup =
   | "monitoring"
+  | "checking"
   | "settlement"
   | "payment"
   | "quality-control"
@@ -53,6 +55,7 @@ export type SidebarGroup =
 
 const sidebarGroups: SidebarGroup[] = [
   "monitoring",
+  "checking",
   "settlement",
   "payment",
   "quality-control",
@@ -92,25 +95,29 @@ const readStoredBoolean = (key: string, fallback: boolean) => {
 export function Sidebar({ roles }: { roles: readonly string[] }) {
   const pathname = usePathname();
   const monitoringActive = pathname.startsWith("/dashboard/monitoring/");
+  const pickupSchedulingActive = pathname.startsWith("/dashboard/quality-control/pickup-scheduling");
+  const checkingActive = pathname.startsWith("/dashboard/checking/") || pickupSchedulingActive;
   const settlementActive = pathname.startsWith("/dashboard/settlement/");
   const paymentActive = pathname.startsWith("/dashboard/payment/");
-  const qualityControlActive = pathname.startsWith("/dashboard/quality-control/");
+  const qualityControlActive = pathname.startsWith("/dashboard/quality-control/") && !pickupSchedulingActive;
   const financeActive = pathname.startsWith("/dashboard/finance/") || pathname.startsWith("/dashboard/hr/");
   const settingsActive = pathname.startsWith("/dashboard/settings/");
   const [collapsed, setCollapsed] = useState(false);
   const activeGroup: SidebarGroup | null = monitoringActive
     ? "monitoring"
-    : settlementActive
-      ? "settlement"
-      : paymentActive
-        ? "payment"
-        : qualityControlActive
-          ? "quality-control"
-          : financeActive
-            ? "finance"
-            : settingsActive
-              ? "settings"
-              : null;
+    : checkingActive
+      ? "checking"
+      : settlementActive
+        ? "settlement"
+        : paymentActive
+          ? "payment"
+          : qualityControlActive
+            ? "quality-control"
+            : financeActive
+              ? "finance"
+              : settingsActive
+                ? "settings"
+                : null;
   const [accordionState, setAccordionState] = useState<SidebarAccordionState>({
     pathname,
     openGroupId: activeGroup,
@@ -150,6 +157,7 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
   }, [openGroupId, storageReady]);
 
   const monitoringVisible = openGroupId === "monitoring";
+  const checkingVisible = openGroupId === "checking";
   const settlementVisible = openGroupId === "settlement";
   const paymentVisible = openGroupId === "payment";
   const qualityControlVisible = openGroupId === "quality-control";
@@ -162,6 +170,8 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
   const canReadSalaryRecap = canAccessResource(roles, "SALARY_RECAP", "READ");
   const canReadAttendance = canAccessResource(roles, "ATTENDANCE", "READ");
   const canReadLeave = canAccessResource(roles, "LEAVE_MANAGEMENT", "READ");
+  const canReadWaybillTracking = canAccessResource(roles, "WAYBILL_TRACKING", "READ");
+  const canReadPickupScheduling = canAccessResource(roles, "QUALITY_CONTROL", "READ");
   const toggleGroup = (group: SidebarGroup) => {
     setAccordionState(toggleSidebarGroup(pathname, openGroupId, group));
   };
@@ -408,6 +418,46 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
             )}
           </div>
 
+          {(canReadWaybillTracking || canReadPickupScheduling) && <div className="pt-1">
+            <button
+              type="button"
+              title={collapsed ? "Pengecekan" : undefined}
+              aria-expanded={checkingVisible}
+              aria-controls="checking-submenu"
+              onClick={() => toggleGroup("checking")}
+              className={[
+                "group flex h-11 w-full items-center gap-3 rounded-[14px] px-3 text-[13.5px] font-semibold tracking-[-0.01em] text-slate-300 outline-none transition-[background-color,color,box-shadow] duration-200 hover:bg-white/[0.075] hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] focus-visible:ring-2 focus-visible:ring-blue-300 aria-expanded:bg-white/[0.07] aria-expanded:text-white aria-expanded:ring-1 aria-expanded:ring-inset aria-expanded:ring-white/[0.055]",
+                itemLayout,
+              ].join(" ")}
+            >
+              <span className="grid size-8 shrink-0 place-items-center rounded-[11px] bg-white/[0.045] text-blue-100/80 ring-1 ring-inset ring-white/[0.045] transition duration-200 group-hover:bg-white/10 group-hover:text-white"><PackageSearch size={18} /></span>
+              <span className={labelClass}>Pengecekan</span>
+              <ChevronDown size={15} className={`${labelClass} ml-auto transition-transform ${checkingVisible ? "rotate-180" : ""}`} />
+            </button>
+            {checkingVisible && <div id="checking-submenu" className={`ml-7 border-l border-blue-300/[0.16] py-1.5 pl-1.5 ${submenuLayout}`}>
+              {canReadWaybillTracking && <SidebarChild
+                href="/dashboard/checking/tracking"
+                label="Tracking Resi"
+                active={pathname.startsWith("/dashboard/checking/tracking")}
+                collapsed={collapsed}
+                labelClass={labelClass}
+                layoutClass={childLayout}
+                onNavigate={closeMobile}
+                icon={<PackageSearch size={17} />}
+              />}
+              {canReadPickupScheduling && <SidebarChild
+                href="/dashboard/quality-control/pickup-scheduling"
+                label="Penjadwalan Pickup"
+                active={pathname.startsWith("/dashboard/quality-control/pickup-scheduling")}
+                collapsed={collapsed}
+                labelClass={labelClass}
+                layoutClass={childLayout}
+                onNavigate={closeMobile}
+                icon={<CalendarDays size={17} />}
+              />}
+            </div>}
+          </div>}
+
           <div className="pt-1">
             <button type="button" title={collapsed ? "Quality Control" : undefined}
               aria-expanded={qualityControlVisible} aria-controls="quality-control-submenu"
@@ -430,10 +480,6 @@ export function Sidebar({ roles }: { roles: readonly string[] }) {
                 active={pathname.startsWith("/dashboard/quality-control/problem-waybill-delivery")}
                 collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
                 onNavigate={closeMobile} icon={<Truck size={17}/>} />
-              <SidebarChild href="/dashboard/quality-control/pickup-scheduling" label="Penjadwalan Pickup"
-                active={pathname.startsWith("/dashboard/quality-control/pickup-scheduling")}
-                collapsed={collapsed} labelClass={labelClass} layoutClass={childLayout}
-                onNavigate={closeMobile} icon={<CalendarDays size={17}/>} />
             </div>}
           </div>
 

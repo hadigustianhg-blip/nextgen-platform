@@ -18,6 +18,7 @@ import {
   fetchSensitiveDetail,
   getProblemWaybillSensitiveDetail,
   normalizeSensitiveDetail,
+  revealTrackingReceiverPhone,
 } from "./problem-waybill-delivery-sensitive.service";
 import {
   isBelumDiterima,
@@ -209,17 +210,51 @@ describe("Problem Waybill sensitive detail", () => {
       id: "raw-1", waybillNo: "WB000001", deliveryStatusRaw: "Belum Diterima",
       sourceFetchedAt: new Date(), dispatchAt: null, updatedAt: new Date(), createdAt: new Date(),
     }]);
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({
-      success: true, data: { waybillNo: "WB000001", receiverName: "Private", receiverMobilePhone: "081234567890" },
-    }), { status: 200 }));
+    const executeScoped = vi.fn(async () => ({
+      data: { waybillNo: "WB000001", receiverName: "Private", receiverMobilePhone: "081234567890" },
+    }));
     await getProblemWaybillSensitiveDetail({
       tenantId: "tenant-1", outletId: "outlet-1", actorId: "user-1",
-      waybill: "WB000001", fetcher,
+      waybill: "WB000001", executeScoped: executeScoped as never,
     });
     const serialized = JSON.stringify(db.auditLog.create.mock.calls[0][0]);
     expect(serialized).toContain("PROBLEM_WAYBILL_SENSITIVE_VIEW");
     expect(serialized).not.toContain("Private");
     expect(serialized).not.toContain("081234567890");
+  });
+
+  it("reuses scoped sensitive detail for tracking and returns only receiver phone", async () => {
+    const executeScoped = vi.fn(async () => ({
+      data: {
+        waybillNo: "WB000001", receiverName: "Private", receiverMobilePhone: "081234567890",
+        receiverDetailedAddress: "Private address", senderMobilePhone: "089999999999",
+      },
+    }));
+    const result = await revealTrackingReceiverPhone({
+      tenantId: "tenant-1", outletId: "outlet-1", actorId: "user-1",
+      waybill: "WB000001", executeScoped: executeScoped as never,
+    });
+    expect(executeScoped).toHaveBeenCalledWith(
+      { tenantId: "tenant-1", outletId: "outlet-1" },
+      "SENSITIVE_DETAIL",
+      { waybillNo: "WB000001" },
+    );
+    expect(result).toEqual({ waybillNo: "WB000001", receiverPhone: "081234567890" });
+    expect(Object.keys(result)).toEqual(["waybillNo", "receiverPhone"]);
+    const audit = JSON.stringify(db.auditLog.create.mock.calls[0][0]);
+    expect(audit).toContain("WAYBILL_TRACKING_SENSITIVE_VIEW");
+    expect(audit).not.toMatch(/Private|081234567890|089999999999/);
+  });
+
+  it("fails closed when scoped sensitive detail has no receiver phone", async () => {
+    const executeScoped = vi.fn(async () => ({ data: { waybillNo: "WB000001", receiverName: "Private" } }));
+    await expect(revealTrackingReceiverPhone({
+      tenantId: "tenant-1", outletId: "outlet-1", actorId: "user-1",
+      waybill: "WB000001", executeScoped: executeScoped as never,
+    })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(db.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ metadata: { result: "FAILED" } }),
+    }));
   });
 });
 
