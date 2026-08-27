@@ -43,11 +43,12 @@ async function callMiddlewareLogin(account: string, password: string): Promise<{
       "JFS_MIDDLEWARE_URL_NOT_CONFIGURED",
     );
   }
-  const authKey =
+  const authKey = (
     process.env.JFS_MIDDLEWARE_AUTH_KEY ||
     process.env.JFS_AUTH_KEY ||
     process.env.SECRET_INTERNAL_AUTH_KEY ||
-    "";
+    ""
+  ).trim();
 
   const url = `${middlewareBaseUrl.replace(/\/+$/, "")}/jfs-auth/login`;
 
@@ -65,10 +66,27 @@ async function callMiddlewareLogin(account: string, password: string): Promise<{
     if (!res.ok) {
       const errorJson = await res.json().catch(() => ({}));
       const code = errorJson?.error || errorJson?.code || "JFS_LOGIN_FAILED";
+      const message = errorJson?.message;
+
       if (res.status === 401) {
-        throw new JfsIntegrationError("Account atau password JFS tidak valid.", 401, "JFS_LOGIN_FAILED");
+        if (code === "UNAUTHORIZED") {
+          throw new JfsIntegrationError(
+            message || "Autentikasi internal middleware JFS gagal (X-Auth-Key mismatch).",
+            401,
+            "UNAUTHORIZED"
+          );
+        }
+        throw new JfsIntegrationError(
+          message || "Account atau password JFS tidak valid.",
+          401,
+          "JFS_LOGIN_FAILED"
+        );
       }
-      throw new JfsIntegrationError("Gagal menghubungi layanan login JFS.", res.status, code);
+      throw new JfsIntegrationError(
+        message || "Gagal menghubungi layanan login JFS.",
+        res.status,
+        code
+      );
     }
 
     const data = await res.json();
