@@ -9,6 +9,40 @@ import {
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 
+function extractUpstreamStatus(message: string): number | undefined {
+  const match = message.match(/\bstatus\s+(\d{3})\b/i) || message.match(/\b(\d{3})\b/);
+  if (match) {
+    const code = parseInt(match[1], 10);
+    if (code >= 400 && code <= 599) return code;
+  }
+  return undefined;
+}
+
+function inferCoarseStage(error: unknown, knownCode?: string): string {
+  if (knownCode === "WAYBILL_TRACKING_NOT_FOUND") return "NOT_FOUND";
+  if (!error) return "UNKNOWN";
+  if (error instanceof Error) {
+    const name = error.name;
+    const msg = error.message;
+    if (name === "ZodError" || msg.includes("ZodError") || msg.includes("invalid_type")) {
+      return "RESPONSE_SCHEMA_PARSE_ERROR";
+    }
+    if (msg.includes("JFS_MIDDLEWARE_BASE_URL") || msg.includes("configured")) {
+      return "MIDDLEWARE_CONFIG_MISSING";
+    }
+    if (msg.includes("outlet") || msg.includes("credential")) {
+      return "CREDENTIAL_MISSING";
+    }
+    if (msg.includes("Upstream middleware request failed") || msg.includes("status")) {
+      return "UPSTREAM_MIDDLEWARE_HTTP_ERROR";
+    }
+    if (name.includes("Fetch") || msg.includes("fetch") || msg.includes("network")) {
+      return "UPSTREAM_NETWORK_ERROR";
+    }
+  }
+  return "UNKNOWN";
+}
+
 export async function POST(request: Request) {
   const session = await getSession();
   if (!session) {
@@ -35,6 +69,22 @@ export async function POST(request: Request) {
   } catch (error) {
     const known = error instanceof WaybillTrackingServiceError ? error : null;
     const notFound = known?.code === "WAYBILL_TRACKING_NOT_FOUND";
+
+    const errorType = error instanceof Error ? error.name : typeof error;
+    const serviceCode = known ? known.code : "UNKNOWN";
+    const status = known ? known.status : 502;
+    const upstreamStatus = error instanceof Error ? extractUpstreamStatus(error.message) : undefined;
+    const stage = inferCoarseStage(error, known?.code);
+
+    console.error("[NEXTGEN][WAYBILL_TRACKING] request failed", {
+      source: "WAYBILL_TRACKING_API",
+      errorType,
+      serviceCode,
+      status,
+      stage,
+      ...(upstreamStatus ? { upstreamStatus } : {}),
+    });
+
     return NextResponse.json({
       error: {
         code: notFound ? "WAYBILL_TRACKING_NOT_FOUND" : "TRACKING_UNAVAILABLE",

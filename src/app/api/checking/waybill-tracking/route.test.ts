@@ -58,13 +58,47 @@ describe("POST /api/checking/waybill-tracking", () => {
     expect(await response.json()).toEqual({ error: { code: "WAYBILL_TRACKING_NOT_FOUND", message: "Resi tidak ditemukan." } });
   });
 
-  it("does not leak upstream failures", async () => {
-    mocks.getRealtimeWaybillTracking.mockRejectedValue(new Error("AuthToken=secret phone=08123456789"));
+  it("does not leak upstream failures and emits exactly one safe diagnostic log", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.getRealtimeWaybillTracking.mockRejectedValue(
+      new Error("Upstream middleware request failed with status 502: AuthToken=secret password=123 phone=08123456789 address=Jakarta X-Auth-Key=secretkey"),
+    );
     const response = await POST(request({ waybillNo: "JT500" }));
     expect(response.status).toBe(502);
-    const text = JSON.stringify(await response.json());
-    expect(text).toContain("Tracking belum dapat diperiksa.");
-    expect(text).not.toContain("AuthToken");
-    expect(text).not.toContain("08123456789");
+
+    const body = await response.json();
+    expect(body).toEqual({
+      error: { code: "TRACKING_UNAVAILABLE", message: "Tracking belum dapat diperiksa." },
+    });
+
+    expect(consoleSpy).toHaveBeenCalledTimes(1);
+    const [msg, metadata] = consoleSpy.mock.calls[0];
+    expect(msg).toBe("[NEXTGEN][WAYBILL_TRACKING] request failed");
+    expect(metadata).toEqual({
+      source: "WAYBILL_TRACKING_API",
+      errorType: "Error",
+      serviceCode: "UNKNOWN",
+      status: 502,
+      stage: "UPSTREAM_MIDDLEWARE_HTTP_ERROR",
+      upstreamStatus: 502,
+    });
+
+    const serializedLog = JSON.stringify(metadata);
+    expect(serializedLog).not.toContain("AuthToken");
+    expect(serializedLog).not.toContain("password");
+    expect(serializedLog).not.toContain("08123456789");
+    expect(serializedLog).not.toContain("Jakarta");
+    expect(serializedLog).not.toContain("X-Auth-Key");
+    expect(serializedLog).not.toContain("secretkey");
+
+    consoleSpy.mockRestore();
+  });
+
+  it("does not emit diagnostic error log on successful tracking", async () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await POST(request({ waybillNo: "JT123" }));
+    expect(response.status).toBe(200);
+    expect(consoleSpy).not.toHaveBeenCalled();
+    consoleSpy.mockRestore();
   });
 });
