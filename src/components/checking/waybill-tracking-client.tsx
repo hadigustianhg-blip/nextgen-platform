@@ -97,6 +97,7 @@ export function WaybillTrackingClient() {
       {!result && state === "idle" && <StateCard title="Masukkan nomor resi untuk melihat perjalanan paket." />}
 
       {result && <>
+        <ShipmentDetail result={result} />
         <section className="rounded-[var(--nextgen-radius-panel)] border border-blue-100 bg-gradient-to-br from-white to-blue-50/60 p-5 shadow-sm">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <Summary label="Nomor Resi" value={result.waybillNo} />
@@ -139,6 +140,50 @@ export function WaybillTrackingClient() {
 
 function Summary({ label, value }: { label: string; value: string }) {
   return <div><p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p><p className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</p></div>;
+}
+
+function ShipmentDetail({ result }: { result: WaybillTrackingResult }) {
+  if (!result.detail) {
+    return <section className="rounded-[var(--nextgen-radius-panel)] border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-lg font-bold text-slate-950">Ringkasan Kiriman</h2>
+      <p className="mt-3 text-sm text-slate-500">Rincian kiriman belum tersedia.</p>
+    </section>;
+  }
+  const detail = result.detail;
+  return <div className="space-y-4">
+    <section className="rounded-[var(--nextgen-radius-panel)] border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-lg font-bold text-slate-950">Ringkasan Kiriman</h2>
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <Summary label="Nomor Resi" value={detail.waybillNo} />
+        <OptionalSummary label="Customer" value={detail.customerName} />
+        <OptionalSummary label="Nama Barang" value={detail.goods.name} />
+        <Summary label="Jumlah Koli" value={String(detail.goods.packageNumber)} />
+        <Summary label="COD" value={new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(detail.codMoney)} />
+      </div>
+    </section>
+    <section>
+      <h2 className="text-lg font-bold text-slate-950">Informasi Pengirim &amp; Penerima</h2>
+      <div className="mt-3 grid gap-4 lg:grid-cols-2">
+        <PartyCard title="Pengirim" fields={[["Nama", detail.sender.name], ["Kota Asal", detail.sender.city]]} />
+        <PartyCard title="Penerima" fields={[["Nama", detail.receiver.name], ["Nomor Telepon", detail.receiver.mobileMasked], ["Alamat", detail.receiver.address]]} />
+      </div>
+    </section>
+  </div>;
+}
+
+function OptionalSummary({ label, value }: { label: string; value: string }) {
+  return value ? <Summary label={label} value={value} /> : null;
+}
+
+function PartyCard({ title, fields }: { title: string; fields: Array<[string, string]> }) {
+  const visible = fields.filter(([, value]) => value);
+  return <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-blue-700">{title}</h3>
+    <dl className="mt-4 space-y-3">{visible.map(([label, value]) => <div key={label}>
+      <dt className="text-xs font-medium text-slate-500">{label}</dt>
+      <dd className="mt-1 whitespace-pre-wrap break-words text-sm font-medium leading-6 text-slate-800">{value}</dd>
+    </div>)}</dl>
+  </article>;
 }
 
 function StateCard({ title, detail }: { title: string; detail?: string }) {

@@ -213,4 +213,19 @@ describe("SaaS Multi-Tenant / Multi-Outlet Integration Test Suite", () => {
     expect(init.headers["X-JFS-Network-Code"]).toBe("NET-A");
     expect(JSON.parse(init.body)).toEqual({ waybillNo: "JT123" });
   });
+
+  it("routes waybill detail through the same scoped client without caller scope in its body", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, data: { waybillNo: "JT123", customerName: "Customer" } }), { status: 200 }));
+    (prisma.integrationCredential.findUnique as any).mockResolvedValue({
+      connectionStatus: "CONNECTED", isActive: true, networkCode: "NET-A",
+      accountEncrypted: encryptCredential({ account: "account-a" }), passwordEncrypted: encryptCredential({ password: "password-a" }),
+      outlet: { code: "OUTLET-A" },
+    });
+    await executeTrustedMultiOutletScraper(scopeTenantA, "WAYBILL_DETAIL", { waybillNo: "JT123", fetcher });
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe("https://middleware.test.internal/waybill-detail");
+    expect(init.headers["X-JFS-Tenant-Id"]).toBe(scopeTenantA.tenantId);
+    expect(init.headers["X-JFS-Outlet-Id"]).toBe(scopeTenantA.outletId);
+    expect(JSON.parse(init.body)).toEqual({ waybillNo: "JT123" });
+  });
 });

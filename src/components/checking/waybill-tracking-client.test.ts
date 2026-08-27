@@ -20,9 +20,11 @@ describe("waybill tracking UI", () => {
   it("contains all stable empty/loading/success/not-found/error and submission contracts", async () => {
     const source = await readFile(new URL("./waybill-tracking-client.tsx", import.meta.url), "utf8");
     for (const contract of ["Masukkan nomor resi untuk melihat perjalanan paket.", "Mengecek perjalanan resi...", "Resi tidak ditemukan.", "Tracking belum dapat diperiksa.", "Status Terakhir", "Riwayat Perjalanan"]) expect(source).toContain(contract);
+    for (const detailContract of ["Ringkasan Kiriman", "Informasi Pengirim &amp; Penerima", "Customer", "Nama Barang", "Jumlah Koli", "COD", "Nomor Telepon", "Alamat", "Rincian kiriman belum tersedia."]) expect(source).toContain(detailContract);
     expect(source).toContain('onSubmit={submit}');
     expect(source).toContain('disabled={state === "loading"}');
     expect(source).toContain('if (state === "loading") return');
     expect(source).not.toMatch(/staffContact|AuthToken|phoneNumber/);
+    expect(source).not.toContain('href={`tel:');
   });
 });

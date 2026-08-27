@@ -27,7 +27,24 @@ const trackingResponseSchema = z.object({
   timeline: z.array(trackingEventSchema),
 }).strip();
 
-export type WaybillTrackingResult = z.infer<typeof trackingResponseSchema>;
+const waybillDetailSchema = z.object({
+  waybillNo: z.string(),
+  customerName: z.string().catch(""),
+  sender: z.object({ name: z.string().catch(""), city: z.string().catch("") }).strip(),
+  receiver: z.object({
+    name: z.string().catch(""),
+    mobileMasked: z.string().catch(""),
+    address: z.string().catch(""),
+  }).strip(),
+  goods: z.object({ name: z.string().catch(""), packageNumber: z.number().finite().catch(0) }).strip(),
+  codMoney: z.number().finite().catch(0),
+}).strip();
+
+export type WaybillDetail = z.infer<typeof waybillDetailSchema>;
+export type WaybillTrackingResult = z.infer<typeof trackingResponseSchema> & {
+  detail: WaybillDetail | null;
+  detailStatus: "AVAILABLE" | "NOT_FOUND" | "UNAVAILABLE";
+};
 
 export class WaybillTrackingServiceError extends Error {
   constructor(
@@ -46,16 +63,43 @@ function removePhoneNumbers(value: string) {
     .trim();
 }
 
+function safeMaskedPhone(value: string) {
+  return /[xX*•]/.test(value) && !/\d{7,}/.test(value) ? value : "";
+}
+
 export async function getRealtimeWaybillTracking(
   scope: { tenantId: string; outletId: string },
   waybillNo: string,
   execute = executeTrustedMultiOutletScraper,
 ): Promise<WaybillTrackingResult> {
   try {
-    const payload = await execute(scope, "WAYBILL_TRACKING", { waybillNo });
-    const result = trackingResponseSchema.parse(payload);
+    const [trackingOutcome, detailOutcome] = await Promise.allSettled([
+      execute(scope, "WAYBILL_TRACKING", { waybillNo }),
+      execute(scope, "WAYBILL_DETAIL", { waybillNo }),
+    ]);
+    if (trackingOutcome.status === "rejected") throw trackingOutcome.reason;
+    const result = trackingResponseSchema.parse(trackingOutcome.value);
+    let detail: WaybillDetail | null = null;
+    let detailStatus: WaybillTrackingResult["detailStatus"] = "UNAVAILABLE";
+    if (detailOutcome.status === "fulfilled") {
+      const parsedDetail = waybillDetailSchema.safeParse(detailOutcome.value);
+      if (parsedDetail.success) {
+        detail = {
+          ...parsedDetail.data,
+          receiver: {
+            ...parsedDetail.data.receiver,
+            mobileMasked: safeMaskedPhone(parsedDetail.data.receiver.mobileMasked),
+          },
+        };
+        detailStatus = "AVAILABLE";
+      }
+    } else if (detailOutcome.reason instanceof Error && detailOutcome.reason.message.includes("WAYBILL_DETAIL_NOT_FOUND")) {
+      detailStatus = "NOT_FOUND";
+    }
     return {
       ...result,
+      detail,
+      detailStatus,
       timeline: result.timeline.map((event) => ({
         ...event,
         description: removePhoneNumbers(event.description),
