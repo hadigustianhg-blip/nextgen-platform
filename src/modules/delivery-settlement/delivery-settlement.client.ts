@@ -89,9 +89,7 @@ export async function fetchDeliverySource(
 ) {
   const startedAt = Date.now();
 
-  const isSum001a = !options.scope || options.scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
-
-  if (options.scope && !isSum001a) {
+  if (options.scope) {
     const op = endpoint === "/jfs-dispatch" ? "DISPATCH" : "COD";
     try {
       const result = await executeTrustedMultiOutletScraper(options.scope, op, {
