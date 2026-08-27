@@ -95,10 +95,11 @@ const readStoredBoolean = (key: string, fallback: boolean) => {
 export function Sidebar({ roles }: { roles: readonly string[] }) {
   const pathname = usePathname();
   const monitoringActive = pathname.startsWith("/dashboard/monitoring/");
-  const checkingActive = pathname.startsWith("/dashboard/checking/");
+  const pickupSchedulingActive = pathname.startsWith("/dashboard/quality-control/pickup-scheduling");
+  const checkingActive = pathname.startsWith("/dashboard/checking/") || pickupSchedulingActive;
   const settlementActive = pathname.startsWith("/dashboard/settlement/");
   const paymentActive = pathname.startsWith("/dashboard/payment/");
-  const qualityControlActive = pathname.startsWith("/dashboard/quality-control/");
+  const qualityControlActive = pathname.startsWith("/dashboard/quality-control/") && !pickupSchedulingActive;
   const financeActive = pathname.startsWith("/dashboard/finance/") || pathname.startsWith("/dashboard/hr/");
   const settingsActive = pathname.startsWith("/dashboard/settings/");
   const [collapsed, setCollapsed] = useState(false);

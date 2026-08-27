@@ -235,6 +235,8 @@ describe("pickup navigation", () => {
     expect(qualityControl).not.toContain("Penjadwalan Pickup");
     expect(source).toContain('canAccessResource(roles, "QUALITY_CONTROL", "READ")');
     expect(source.match(/label="Penjadwalan Pickup"/g)).toHaveLength(1);
+    expect(source).toContain('const checkingActive = pathname.startsWith("/dashboard/checking/") || pickupSchedulingActive');
+    expect(source).toContain('const qualityControlActive = pathname.startsWith("/dashboard/quality-control/") && !pickupSchedulingActive');
   });
 
   it("adds a permission-filtered Pengecekan group without changing Monitoring children", async () => {
