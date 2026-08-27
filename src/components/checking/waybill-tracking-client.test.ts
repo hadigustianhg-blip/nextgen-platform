@@ -27,4 +27,21 @@ describe("waybill tracking UI", () => {
     expect(source).not.toMatch(/staffContact|AuthToken|phoneNumber/);
     expect(source).not.toContain('href={`tel:');
   });
+
+  it("keeps phone reveal explicit, transient, scoped, and fail-safe", async () => {
+    const source = await readFile(new URL("./waybill-tracking-client.tsx", import.meta.url), "utf8");
+    const revealFunction = source.slice(source.indexOf("async function revealPhone"), source.indexOf("return ("));
+    expect(source.slice(0, source.indexOf("async function revealPhone"))).not.toContain("/api/checking/waybill-tracking/reveal");
+    expect(revealFunction).toContain('fetch("/api/checking/waybill-tracking/reveal"');
+    expect(revealFunction).toContain('JSON.stringify({ waybillNo: result.waybillNo })');
+    expect(revealFunction).not.toMatch(/tenantId|outletId|networkCode|AuthToken/);
+    expect(source).toContain('onClick={onReveal}');
+    expect(source).toContain('disabled={revealState === "loading"}');
+    expect(source).toContain('if (!result || revealState === "loading") return');
+    expect(source).toContain('revealedPhone || maskedPhone');
+    expect(source).toContain('setRevealedPhone(null)');
+    expect(source).toContain('target="_blank" rel="noopener noreferrer"');
+    expect(source).toContain("Nomor WhatsApp tidak valid.");
+    expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB/);
+  });
 });

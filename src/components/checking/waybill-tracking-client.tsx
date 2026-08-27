@@ -1,8 +1,8 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { MapPin, PackageSearch, Route, Search } from "lucide-react";
-import type { WaybillTrackingResult } from "@/modules/checking";
+import { Eye, LoaderCircle, MapPin, MessageCircle, PackageSearch, Route, Search } from "lucide-react";
+import { buildTrackingWhatsAppUrl, type WaybillTrackingResult } from "@/modules/checking";
 
 const WAYBILL_PATTERN = /^[A-Za-z0-9]{1,100}$/;
 
@@ -31,11 +31,13 @@ export function formatTrackingTimestamp(value: string) {
   }).format(date).replace("pukul", "·")} WIB`;
 }
 
-export function WaybillTrackingClient() {
+export function WaybillTrackingClient({ canRevealSensitive = false }: { canRevealSensitive?: boolean }) {
   const [waybillNo, setWaybillNo] = useState("");
   const [result, setResult] = useState<WaybillTrackingResult | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "not-found" | "error">("idle");
   const [validation, setValidation] = useState("");
+  const [revealedPhone, setRevealedPhone] = useState<string | null>(null);
+  const [revealState, setRevealState] = useState<"idle" | "loading" | "error" | "forbidden" | "not-found">("idle");
   const route = useMemo(() => result ? deriveTrackingRoute(result.timeline) : [], [result]);
   const timeline = useMemo(() => result ? newestTrackingEvents(result.timeline) : [], [result]);
 
@@ -49,6 +51,8 @@ export function WaybillTrackingClient() {
     }
     setValidation("");
     setResult(null);
+    setRevealedPhone(null);
+    setRevealState("idle");
     setState("loading");
     try {
       const response = await fetch("/api/checking/waybill-tracking", {
@@ -68,6 +72,26 @@ export function WaybillTrackingClient() {
 
   const latestStatus = result?.latest.status || result?.latest.scanTypeName || "-";
   const latestTime = result?.latest.scanTime || result?.latest.uploadTime || "";
+
+  async function revealPhone() {
+    if (!result || revealState === "loading") return;
+    setRevealState("loading");
+    try {
+      const response = await fetch("/api/checking/waybill-tracking/reveal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ waybillNo: result.waybillNo }),
+      });
+      if (response.status === 403) return setRevealState("forbidden");
+      if (response.status === 404) return setRevealState("not-found");
+      if (!response.ok) return setRevealState("error");
+      const payload = await response.json() as { data: { waybillNo: string; receiverPhone: string } };
+      setRevealedPhone(payload.data.receiverPhone);
+      setRevealState("idle");
+    } catch {
+      setRevealState("error");
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -97,7 +121,8 @@ export function WaybillTrackingClient() {
       {!result && state === "idle" && <StateCard title="Masukkan nomor resi untuk melihat perjalanan paket." />}
 
       {result && <>
-        <ShipmentDetail result={result} />
+        <ShipmentDetail result={result} canRevealSensitive={canRevealSensitive} revealedPhone={revealedPhone}
+          revealState={revealState} onReveal={() => void revealPhone()} />
         <section className="rounded-[var(--nextgen-radius-panel)] border border-blue-100 bg-gradient-to-br from-white to-blue-50/60 p-5 shadow-sm">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <Summary label="Nomor Resi" value={result.waybillNo} />
@@ -142,7 +167,13 @@ function Summary({ label, value }: { label: string; value: string }) {
   return <div><p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p><p className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</p></div>;
 }
 
-function ShipmentDetail({ result }: { result: WaybillTrackingResult }) {
+function ShipmentDetail({ result, canRevealSensitive, revealedPhone, revealState, onReveal }: {
+  result: WaybillTrackingResult;
+  canRevealSensitive: boolean;
+  revealedPhone: string | null;
+  revealState: "idle" | "loading" | "error" | "forbidden" | "not-found";
+  onReveal: () => void;
+}) {
   if (!result.detail) {
     return <section className="rounded-[var(--nextgen-radius-panel)] border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="text-lg font-bold text-slate-950">Ringkasan Kiriman</h2>
@@ -165,7 +196,8 @@ function ShipmentDetail({ result }: { result: WaybillTrackingResult }) {
       <h2 className="text-lg font-bold text-slate-950">Informasi Pengirim &amp; Penerima</h2>
       <div className="mt-3 grid gap-4 lg:grid-cols-2">
         <PartyCard title="Pengirim" fields={[["Nama", detail.sender.name], ["Kota Asal", detail.sender.city]]} />
-        <PartyCard title="Penerima" fields={[["Nama", detail.receiver.name], ["Nomor Telepon", detail.receiver.mobileMasked], ["Alamat", detail.receiver.address]]} />
+        <ReceiverCard name={detail.receiver.name} maskedPhone={detail.receiver.mobileMasked} address={detail.receiver.address}
+          canRevealSensitive={canRevealSensitive} revealedPhone={revealedPhone} revealState={revealState} onReveal={onReveal} />
       </div>
     </section>
   </div>;
@@ -183,6 +215,44 @@ function PartyCard({ title, fields }: { title: string; fields: Array<[string, st
       <dt className="text-xs font-medium text-slate-500">{label}</dt>
       <dd className="mt-1 whitespace-pre-wrap break-words text-sm font-medium leading-6 text-slate-800">{value}</dd>
     </div>)}</dl>
+  </article>;
+}
+
+function ReceiverCard({ name, maskedPhone, address, canRevealSensitive, revealedPhone, revealState, onReveal }: {
+  name: string; maskedPhone: string; address: string; canRevealSensitive: boolean; revealedPhone: string | null;
+  revealState: "idle" | "loading" | "error" | "forbidden" | "not-found"; onReveal: () => void;
+}) {
+  const whatsappUrl = buildTrackingWhatsAppUrl(revealedPhone);
+  const errorMessage = revealState === "forbidden"
+    ? "Anda tidak memiliki akses untuk melihat nomor penerima."
+    : revealState === "not-found"
+      ? "Nomor penerima tidak tersedia."
+      : revealState === "error"
+        ? "Nomor penerima belum dapat ditampilkan."
+        : "";
+  return <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-blue-700">Penerima</h3>
+    <dl className="mt-4 space-y-3">
+      {name && <div><dt className="text-xs font-medium text-slate-500">Nama</dt><dd className="mt-1 text-sm font-medium text-slate-800">{name}</dd></div>}
+      {(revealedPhone || maskedPhone) && <div>
+        <dt className="text-xs font-medium text-slate-500">Nomor Telepon</dt>
+        <dd className="mt-1 text-sm font-medium text-slate-800">{revealedPhone || maskedPhone}</dd>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {!revealedPhone && canRevealSensitive && <button type="button" onClick={onReveal} disabled={revealState === "loading"}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 disabled:cursor-wait disabled:opacity-60">
+            {revealState === "loading" ? <LoaderCircle size={14} className="animate-spin" /> : <Eye size={14} />}
+            {revealState === "loading" ? "Memuat nomor..." : "Tampilkan Nomor"}
+          </button>}
+          {revealedPhone && whatsappUrl && <a href={whatsappUrl} target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">
+            <MessageCircle size={14} />WhatsApp
+          </a>}
+        </div>
+        {revealedPhone && !whatsappUrl && <p className="mt-2 text-xs font-medium text-red-600">Nomor WhatsApp tidak valid.</p>}
+        {errorMessage && <p className="mt-2 text-xs font-medium text-red-600">{errorMessage}</p>}
+      </div>}
+      {address && <div><dt className="text-xs font-medium text-slate-500">Alamat</dt><dd className="mt-1 whitespace-pre-wrap break-words text-sm font-medium leading-6 text-slate-800">{address}</dd></div>}
+    </dl>
   </article>;
 }
 

@@ -172,3 +172,40 @@ export async function getProblemWaybillSensitiveDetail(input: {
     throw error;
   }
 }
+
+export async function revealTrackingReceiverPhone(input: {
+  tenantId: string;
+  outletId: string;
+  actorId: string;
+  waybill: string;
+  executeScoped?: typeof executeTrustedMultiOutletScraper;
+}) {
+  const audit = (result: "SUCCESS" | "FAILED") => prisma.auditLog.create({
+    data: {
+      tenantId: input.tenantId,
+      outletId: input.outletId,
+      actorId: input.actorId,
+      action: "CREATE",
+      entityType: "WAYBILL_TRACKING_SENSITIVE_VIEW",
+      entityId: input.waybill,
+      metadata: { result },
+    },
+  });
+  try {
+    const result = await (input.executeScoped ?? executeTrustedMultiOutletScraper)(
+      { tenantId: input.tenantId, outletId: input.outletId },
+      "SENSITIVE_DETAIL",
+      { waybillNo: input.waybill },
+    );
+    const detail = normalizeSensitiveDetail(result?.data, {
+      waybill: input.waybill,
+      currentStatus: "",
+    });
+    if (!detail.receiverPhone) throw new SensitiveDetailError("NOT_FOUND");
+    await audit("SUCCESS");
+    return { waybillNo: detail.waybill, receiverPhone: detail.receiverPhone };
+  } catch (error) {
+    await audit("FAILED");
+    throw error;
+  }
+}
