@@ -15,6 +15,11 @@ import {
   nextgenControlClass,
   nextgenNeutralButtonClass,
 } from "@/components/ui";
+import {
+  applySelectedKasbon,
+  selectedKasbonTotal,
+  toggleKasbonSelection,
+} from "./salary-closing-kasbon-selection";
 
 type Component = {
   id: string;
@@ -37,6 +42,7 @@ type Allocation = {
   amount: string;
   status: string;
   operationalExpense: {
+    id: string;
     operationalDate: string;
     description: string | null;
     amount: string;
@@ -208,8 +214,7 @@ export function SalaryClosingDetailClient({
   }>>({});
   const [kasbonOpen, setKasbonOpen] = useState(false);
   const [eligibleKasbon, setEligibleKasbon] = useState<EligibleKasbon[]>([]);
-  const [selectedKasbonId, setSelectedKasbonId] = useState("");
-  const [kasbonAmount, setKasbonAmount] = useState("");
+  const [selectedKasbonIds, setSelectedKasbonIds] = useState<string[]>([]);
   const [adjustmentType, setAdjustmentType] =
     useState<"ADDITION" | "DEDUCTION" | null>(null);
   const [category, setCategory] = useState("");
@@ -397,9 +402,12 @@ export function SalaryClosingDetailClient({
         { cache: "no-store" },
       );
       if (!response.ok) throw new Error();
-      setEligibleKasbon((await response.json()).data);
-      setSelectedKasbonId("");
-      setKasbonAmount("");
+      const allocatedIds = new Set(employee.kasbonAllocations.map((row) =>
+        row.operationalExpense.id
+      ));
+      setEligibleKasbon(((await response.json()).data as EligibleKasbon[])
+        .filter((row) => !allocatedIds.has(row.id)));
+      setSelectedKasbonIds([]);
       setKasbonOpen(true);
     } catch {
       setError("Daftar Kasbon gagal dimuat.");
@@ -409,26 +417,29 @@ export function SalaryClosingDetailClient({
   }
 
   async function saveKasbon() {
-    if (!selectedEmployee || actionLoading) return;
+    if (!selectedEmployee || actionLoading || !selectedKasbonIds.length) return;
     setActionLoading(true);
     try {
-      const response = await fetch(
-        `/api/finance/salary/closings/${closingId}/employees/${selectedEmployee.id}/kasbon-allocations`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            operationalExpenseId: selectedKasbonId,
-            amount: Number(kasbonAmount),
-          }),
-        },
-      );
-      const result = await response.json();
-      if (!response.ok) throw new Error(
-        result.error?.message || "Potongan Kasbon gagal disimpan.",
-      );
+      await applySelectedKasbon(selectedKasbonIds, eligibleKasbon, async (kasbon) => {
+        const response = await fetch(
+          `/api/finance/salary/closings/${closingId}/employees/${selectedEmployee.id}/kasbon-allocations`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              operationalExpenseId: kasbon.id,
+              amount: Number(kasbon.remainingAmount),
+            }),
+          },
+        );
+        const result = await response.json();
+        if (!response.ok) throw new Error(
+          result.error?.message || "Potongan Kasbon gagal disimpan.",
+        );
+      });
+      setSelectedKasbonIds([]);
       setKasbonOpen(false);
-      setNotice("Potongan Kasbon berhasil disimpan.");
+      setNotice("Potongan Kasbon berhasil diterapkan.");
       await loadClosing();
     } catch (cause) {
       setError(cause instanceof Error
@@ -915,41 +926,48 @@ export function SalaryClosingDetailClient({
       <ModalCard className="max-w-2xl">
         <div className="flex items-center justify-between border-b p-5">
           <h2 className="text-xl font-bold">Atur Potongan Kasbon</h2>
-          <button type="button" onClick={() => setKasbonOpen(false)}><X/></button>
+          <button type="button" onClick={() => {
+            setSelectedKasbonIds([]);
+            setKasbonOpen(false);
+          }}><X/></button>
         </div>
         <div className="space-y-4 p-5">
-          <label className="block text-sm font-semibold">Kasbon
-            <select value={selectedKasbonId}
-              onChange={(event) => {
-                setSelectedKasbonId(event.target.value);
-                const selected = eligibleKasbon.find((row) =>
-                  row.id === event.target.value
-                );
-                setKasbonAmount(selected?.remainingAmount ?? "");
-              }}
-              className={`${nextgenControlClass} mt-1 w-full`}>
-              <option value="">Pilih Kasbon</option>
-              {eligibleKasbon.map((row) => <option key={row.id} value={row.id}>
-                {row.operationalDate.slice(0, 10)} · {row.description || "Kasbon"} · Sisa {rupiah(row.remainingAmount)}
-              </option>)}
-            </select>
-          </label>
-          <label className="block text-sm font-semibold">Potongan Periode Ini
-            <input type="number" min="1" value={kasbonAmount}
-              onChange={(event) => setKasbonAmount(event.target.value)}
-              className={`${nextgenControlClass} mt-1 w-full`}/>
-          </label>
+          <fieldset>
+            <legend className="text-sm font-semibold">Kasbon</legend>
+            <div className="mt-2 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-2">
+              {eligibleKasbon.map((row) => {
+                const checked = selectedKasbonIds.includes(row.id);
+                return <label key={row.id}
+                  className="flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2.5 text-sm hover:bg-slate-50">
+                  <input type="checkbox" checked={checked}
+                    onChange={() => setSelectedKasbonIds((current) =>
+                      toggleKasbonSelection(current, row.id)
+                    )}
+                    className="mt-0.5 size-4 shrink-0 accent-blue-600"/>
+                  <span>{row.operationalDate.slice(0, 10)} · {row.description || "Kasbon"} · Sisa {rupiah(row.remainingAmount)}</span>
+                </label>;
+              })}
+            </div>
+          </fieldset>
+          {!!selectedKasbonIds.length && <p className="text-xs font-medium text-slate-600">
+            {selectedKasbonIds.length} kasbon dipilih · Total dipilih {rupiah(
+              selectedKasbonTotal(selectedKasbonIds, eligibleKasbon)
+            )}
+          </p>}
           {!eligibleKasbon.length && <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
             Tidak ada Kasbon aktif untuk team dan periode ini.
           </p>}
         </div>
         <div className="flex justify-end gap-2 border-t p-4">
-          <button type="button" onClick={() => setKasbonOpen(false)}
+          <button type="button" onClick={() => {
+            setSelectedKasbonIds([]);
+            setKasbonOpen(false);
+          }}
             className={nextgenNeutralButtonClass}>Batal</button>
-          <button type="button" disabled={actionLoading || !selectedKasbonId}
+          <button type="button" disabled={actionLoading || !selectedKasbonIds.length}
             onClick={() => void saveKasbon()} className={nextgenButtonClass}>
             {actionLoading && <LoaderCircle className="animate-spin" size={16}/>}
-            Simpan Potongan
+            Terapkan Kasbon
           </button>
         </div>
       </ModalCard>
