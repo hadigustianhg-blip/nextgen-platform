@@ -70,6 +70,20 @@ export function previousJakartaCashflowDate(now: Date) {
 
 const count = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : 0;
 const errorCode = (error: unknown) => error instanceof Error && error.message ? error.message : "UNKNOWN";
+const safeSourceDiagnostic = (error: unknown, outletId: string, businessDate: string) => {
+  const diagnostic = error && typeof error === "object" && "diagnostic" in error
+    ? (error as { diagnostic?: Record<string, unknown> }).diagnostic
+    : undefined;
+  if (!diagnostic) return "";
+  const sourceName = diagnostic.sourceName === "JFS_IBK" ? "JFS_IBK" : "UNKNOWN";
+  const middlewarePath = diagnostic.middlewarePath === "/ibk" ? "/ibk" : "UNKNOWN";
+  const status = typeof diagnostic.status === "number" ? diagnostic.status : "null";
+  const code = typeof diagnostic.code === "string" && /^[A-Z0-9_]+$/.test(diagnostic.code)
+    ? diagnostic.code
+    : "UNKNOWN";
+  return ` sourceName=${sourceName} middlewarePath=${middlewarePath} status=${status}`
+    + ` sourceCode=${code} outletId=${outletId} businessDate=${businessDate}`;
+};
 
 export async function runJfsCashflowCron(
   configuredIds: string[],
@@ -111,7 +125,8 @@ export async function runJfsCashflowCron(
           dependencies.log(`[CASHFLOW JFS CRON] Outlet skipped outletId=${outlet.id} code=ALREADY_RUNNING`);
         } else {
           summary.failed += 1;
-          dependencies.error(`[CASHFLOW JFS CRON] Outlet failed outletId=${outlet.id} code=${code}`);
+          dependencies.error(`[CASHFLOW JFS CRON] Outlet failed outletId=${outlet.id} code=${code}`
+            + safeSourceDiagnostic(error, outlet.id, businessDate));
         }
       }
     }

@@ -183,10 +183,11 @@ describe("JFS Cashflow source contract", () => {
 describe("JFS Cashflow persistence", () => {
   it("stores Decimal, scope, business date, and run links", async () => {
     const db = store();
+    const fetchSource = vi.fn(async () => sourceResult());
     const result = await runJfsCashflowSync({
       tenantId: "tenant-1", outletId: "outlet-1", actorId: "user-1",
-      startDate: "2026-08-01", endDate: "2026-08-01", triggerSource: "MANUAL",
-      store: db as never, fetchSource: vi.fn(async () => sourceResult()),
+      startDate: "2026-08-01", endDate: "2026-08-01", triggerSource: "CRON",
+      store: db as never, fetchSource,
       now: () => new Date("2026-08-01T16:00:00.000Z"), requestId: "request-1",
     });
     expect(result).toMatchObject({ fetchedCount: 1, createdCount: 1, updatedCount: 0 });
@@ -195,7 +196,12 @@ describe("JFS Cashflow persistence", () => {
     expect((record.businessDate as Date).toISOString()).toContain("2026-08-01");
     expect(Prisma.Decimal.isDecimal(record.amount)).toBe(true);
     expect(record.firstSeenRunId).toBe("run-1");
-    expect(memory.runs[0]).toMatchObject({ status: "SUCCESS", triggerSource: "MANUAL" });
+    expect(memory.runs[0]).toMatchObject({ status: "SUCCESS", triggerSource: "CRON" });
+    expect(fetchSource).toHaveBeenCalledWith({
+      startDate: "2026-08-01",
+      endDate: "2026-08-01",
+      scope: { tenantId: "tenant-1", outletId: "outlet-1" },
+    });
   });
 
   it("is idempotent and updates changed source without deleting history", async () => {

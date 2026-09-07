@@ -10,6 +10,7 @@ import {
   runJfsCashflowCronFromEnv,
   validateCashflowCronEnv,
 } from "./sync-jfs-cashflow";
+import { JfsCashflowError } from "../src/modules/finance/jfs-cashflow.core";
 
 afterEach(() => { process.exitCode = undefined; });
 
@@ -122,6 +123,22 @@ describe("Cashflow JFS cron execution", () => {
       expect(deps.disconnect).toHaveBeenCalledOnce();
     },
   );
+
+  it("logs only safe scoped source diagnostics for an IBK failure", async () => {
+    const deps = dependencies({
+      syncOutlet: vi.fn(async () => {
+        throw new JfsCashflowError("SOURCE_UNAVAILABLE", false, {
+          sourceName: "JFS_IBK", middlewarePath: "/ibk", status: 502, code: "UPSTREAM_HTTP_ERROR",
+        });
+      }),
+    });
+    await runJfsCashflowCron([OUTLET_1], deps);
+    expect(deps.error).toHaveBeenCalledWith(
+      `[CASHFLOW JFS CRON] Outlet failed outletId=${OUTLET_1} code=SOURCE_UNAVAILABLE`
+      + ` sourceName=JFS_IBK middlewarePath=/ibk status=502 sourceCode=UPSTREAM_HTTP_ERROR`
+      + ` outletId=${OUTLET_1} businessDate=2026-08-01`,
+    );
+  });
 
   it("continues after one outlet fails", async () => {
     const deps = dependencies({

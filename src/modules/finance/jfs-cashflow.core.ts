@@ -27,6 +27,12 @@ export class JfsCashflowError extends Error {
   constructor(
     public readonly code: "SOURCE_UNAVAILABLE" | "INVALID_RESPONSE" | "ALREADY_RUNNING" | "MIDDLEWARE_NOT_CONFIGURED",
     public readonly retryable = false,
+    public readonly diagnostic?: {
+      sourceName: "JFS_IBK";
+      middlewarePath: "/ibk" | "/jfs-ibk-report";
+      status: number | null;
+      code: string;
+    },
   ) {
     super(code);
   }
@@ -37,6 +43,28 @@ const transientStatuses = new Set([502, 503, 504]);
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const dateOnly = (value: string) => new Date(`${value}T00:00:00.000Z`);
+
+function scopedSourceErrorCode(error: unknown): string {
+  const explicitCode = (error as { code?: unknown })?.code;
+  if (typeof explicitCode === "string" && explicitCode.trim()) return explicitCode.trim();
+  if (isSecurityFailure(error)) return "SECURITY_FAILURE";
+  if (!(error instanceof Error)) return "SCOPED_SOURCE_FAILED";
+
+  const jsonStart = error.message.indexOf("{");
+  if (jsonStart < 0) return "SCOPED_SOURCE_FAILED";
+  try {
+    const payload = JSON.parse(error.message.slice(jsonStart)) as {
+      error?: unknown;
+      code?: unknown;
+    };
+    const safeCode = typeof payload.error === "string" ? payload.error : payload.code;
+    return typeof safeCode === "string" && /^[A-Z0-9_:-]{1,80}$/.test(safeCode)
+      ? safeCode
+      : "SCOPED_SOURCE_FAILED";
+  } catch {
+    return "SCOPED_SOURCE_FAILED";
+  }
+}
 
 function direction(value: unknown): JfsCashflowDirection | null {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -129,9 +157,7 @@ export async function fetchJfsCashflow(input: {
   wait?: (milliseconds: number) => Promise<unknown>;
   scope?: SettingsScope;
 }) {
-  const isSum001a = !input.scope || input.scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
-
-  if (input.scope && !isSum001a) {
+  if (input.scope) {
     try {
       const result = await executeTrustedMultiOutletScraper(input.scope, "IBK", {
         startDate: input.startDate,
@@ -153,9 +179,14 @@ export async function fetchJfsCashflow(input: {
       };
     } catch (err) {
       if (err instanceof JfsCashflowError) throw err;
-      if (isSecurityFailure(err)) throw err;
-      console.warn(`[MultiOutletFallback] IBK multi-outlet fetch failed, falling back to legacy GET /jfs-ibk-report:`, err instanceof Error ? err.message : err);
-      // Fallback to legacy GET for unconfigured or degraded outlets
+      const statusMatch = err instanceof Error ? err.message.match(/status\s+(\d{3})/i) : null;
+      const upstreamCode = scopedSourceErrorCode(err);
+      throw new JfsCashflowError("SOURCE_UNAVAILABLE", false, {
+        sourceName: "JFS_IBK",
+        middlewarePath: "/ibk",
+        status: statusMatch ? Number(statusMatch[1]) : null,
+        code: upstreamCode,
+      });
     }
   }
 
@@ -317,6 +348,9 @@ export async function runJfsCashflowSync(input: {
     const source = await (input.fetchSource || fetchJfsCashflow)({
       startDate: input.startDate,
       endDate: input.endDate,
+      scope: input.triggerSource === "CRON"
+        ? { tenantId: input.tenantId, outletId: input.outletId }
+        : undefined,
     });
     const uniqueRecords = aggregateJfsCashflowRecords(source.records);
     let createdCount = 0;
