@@ -71,6 +71,39 @@ describe("Create Invoice interface", () => {
     expect(source).not.toContain("Pilih minimal satu resi terlebih dahulu.");
   });
 
+  it("keeps the first selected source recipient when opening and enriching a draft", async () => {
+    const source = await readFile(
+      new URL("./create-invoice-client.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain("const loadedItems = await selectSeller");
+    expect(source).toContain("draftSelectedIds.has(item.id)");
+    expect(source).toContain(
+      "setRecipientName(representative?.recipientName || invoice.recipientName || \"\")",
+    );
+    expect(source).toContain(
+      "setAddress(representative?.address || invoice.addressSnapshot || \"\")",
+    );
+    expect(source.match(/setRecipientName\(invoice\.recipientName \|\| ""\)/g))
+      .toHaveLength(1);
+    expect(source.match(/setAddress\(invoice\.addressSnapshot \|\| ""\)/g))
+      .toHaveLength(1);
+
+    const enrichment = source.slice(
+      source.indexOf("async function showSelectedRecipientDetail"),
+      source.indexOf("function focusWaybillTable"),
+    );
+    expect(enrichment).not.toContain("setRecipientName(");
+    expect(enrichment).toContain("setWhatsapp(result.data.recipientPhone || whatsapp)");
+    expect(enrichment).toContain("setRecipientCity(result.data.recipientCity || \"\")");
+    expect(enrichment).toContain("setAddress((current) => current)");
+
+    expect(source).toContain('{recipientName || "—"}');
+    expect(source).toContain('{whatsapp || "—"}');
+    expect(source).toContain('{recipientCity || "—"}');
+    expect(source).toContain("<td className=\"px-3 py-3\">{item.sellerName}</td>");
+  });
+
   it("always replaces the seller address with recipient city after detail succeeds", async () => {
     expect(billingAddressAfterRecipient("", "Kab Sumedang")).toBe("Kab Sumedang");
     expect(billingAddressAfterRecipient("   ", " Kab Sumedang ")).toBe(

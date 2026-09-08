@@ -261,7 +261,7 @@ export function CreateInvoiceClient({
     seller: Seller,
     range = { startDate, endDate },
     existingInvoiceId?: string,
-  ) {
+  ): Promise<SourceItem[] | null> {
     setSelectedSeller(seller);
     setSelectedIds(new Set());
     setDraftId(null);
@@ -289,22 +289,25 @@ export function CreateInvoiceClient({
         throw new Error(payload.message || payload.error?.message ||
           "Data resi seller tidak dapat dimuat.");
       }
-      setItems(payload.data);
+      const loadedItems: SourceItem[] = payload.data;
+      setItems(loadedItems);
       setCustomerName(seller.customerName);
-      setRecipientName(payload.data[0]?.recipientName || "");
-      setCompanyName(payload.data[0]?.companyName || "");
-      setWhatsapp(payload.data[0]?.whatsapp || "");
-      setEmail(payload.data[0]?.email || "");
-      setAddress(payload.data[0]?.address || "");
+      setRecipientName(loadedItems[0]?.recipientName || "");
+      setCompanyName(loadedItems[0]?.companyName || "");
+      setWhatsapp(loadedItems[0]?.whatsapp || "");
+      setEmail(loadedItems[0]?.email || "");
+      setAddress(loadedItems[0]?.address || "");
       setRecipientCity("");
       setRecipientDetailWaybill("");
       setRecipientLoadedId("");
       setRecipientHelper("");
+      return loadedItems;
     } catch (cause) {
       setItems([]);
       setItemsError(cause instanceof Error
         ? cause.message
         : "Data resi seller tidak dapat dimuat.");
+      return null;
     } finally {
       setDetailLoading(false);
     }
@@ -474,18 +477,23 @@ export function CreateInvoiceClient({
       setInvoiceDate(isoDate(invoice.invoiceDate));
       setDueDate(isoDate(invoice.dueDate));
       setNotes(invoice.notes || "");
-      await selectSeller(seller, {
+      const loadedItems = await selectSeller(seller, {
         startDate: isoDate(invoice.periodStart),
         endDate: isoDate(invoice.periodEnd),
       }, invoice.id);
       setDraftId(invoice.id);
-      setSelectedIds(new Set(invoice.items.map((item) => item.masterPickupId)));
+      const draftSelectedIds = new Set(
+        invoice.items.map((item) => item.masterPickupId),
+      );
+      setSelectedIds(draftSelectedIds);
       setCustomerName(invoice.customerNameSnapshot);
-      setRecipientName(invoice.recipientName || "");
+      const representative = loadedItems?.find((item) =>
+        draftSelectedIds.has(item.id)) ?? loadedItems?.[0];
+      setRecipientName(representative?.recipientName || invoice.recipientName || "");
       setCompanyName(invoice.companyNameSnapshot || "");
       setWhatsapp(invoice.whatsappSnapshot || "");
       setEmail(invoice.emailSnapshot || "");
-      setAddress(invoice.addressSnapshot || "");
+      setAddress(representative?.address || invoice.addressSnapshot || "");
       setRecipientCity(invoice.recipientCity || "");
       setSelectedBankAccountId(availableBankAccounts.find((account) =>
         account.bankName === invoice.transferBankName &&
@@ -535,6 +543,8 @@ export function CreateInvoiceClient({
             ...result.data,
           }
         : current);
+      setWhatsapp(result.data.recipientPhone || whatsapp);
+      setRecipientCity(result.data.recipientCity || "");
       setRecipientLoadedId(invoice.id);
       setNotice("Detail penerima ditampilkan.");
       await loadInvoices();
@@ -567,7 +577,6 @@ export function CreateInvoiceClient({
       if (!response.ok) {
         throw new Error(invoiceRecipientDetailErrorMessage(result.error?.code));
       }
-      setRecipientName(result.data.recipientName || recipientName);
       setWhatsapp(result.data.recipientPhone || whatsapp);
       setRecipientCity(result.data.recipientCity || "");
       setAddress((current) => current);
@@ -986,11 +995,11 @@ export function CreateInvoiceClient({
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
               <div><p className="text-xs text-slate-500">Nama Penerima</p>
-                <p className="font-semibold">{currentInvoice.recipientName || "—"}</p></div>
+                <p className="font-semibold">{recipientName || "—"}</p></div>
               <div><p className="text-xs text-slate-500">Nomor WhatsApp</p>
-                <p className="font-semibold">{currentInvoice.recipientPhone || "—"}</p></div>
+                <p className="font-semibold">{whatsapp || "—"}</p></div>
               <div><p className="text-xs text-slate-500">Kota/Kabupaten</p>
-                <p className="font-semibold">{currentInvoice.recipientCity || "—"}</p></div>
+                <p className="font-semibold">{recipientCity || "—"}</p></div>
             </div>
             <div className="mt-4 flex flex-wrap gap-3">
               <button type="button"
