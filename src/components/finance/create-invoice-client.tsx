@@ -16,7 +16,7 @@ import {
   invoiceDraftErrorMessage, invoicePdfErrorMessage, invoiceWhatsappDisabledReason,
   invoiceWhatsappErrorMessage, selectableInvoiceItems, sumMoney,
   buildRecipientWhatsappMessage, buildRecipientWhatsappUrl,
-  billingAddressAfterRecipient, getFirstSelectedWaybill,
+  getFirstSelectedWaybill,
   invoiceRecipientDetailErrorMessage, invoiceVoidReasonError,
 } from "./invoice.view";
 
@@ -33,6 +33,7 @@ type SourceItem = {
   id: string;
   customerKey: string;
   sellerName: string;
+  recipientName: string | null;
   companyName: string | null;
   address: string | null;
   whatsapp: string | null;
@@ -158,6 +159,7 @@ export function CreateInvoiceClient({
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [invoiceStatus, setInvoiceStatus] = useState("");
   const [customerName, setCustomerName] = useState("");
+  const [recipientName, setRecipientName] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [email, setEmail] = useState("");
@@ -264,6 +266,7 @@ export function CreateInvoiceClient({
     setSelectedIds(new Set());
     setDraftId(null);
     setCustomerName(seller.customerName);
+    setRecipientName("");
     setWhatsapp("");
     setAddress("");
     setRecipientCity("");
@@ -288,6 +291,7 @@ export function CreateInvoiceClient({
       }
       setItems(payload.data);
       setCustomerName(seller.customerName);
+      setRecipientName(payload.data[0]?.recipientName || "");
       setCompanyName(payload.data[0]?.companyName || "");
       setWhatsapp(payload.data[0]?.whatsapp || "");
       setEmail(payload.data[0]?.email || "");
@@ -340,13 +344,14 @@ export function CreateInvoiceClient({
 
   function updateSelectedIds(next: Set<string>) {
     const nextWaybill = getFirstSelectedWaybill(items, next);
+    const representative = items.find((item) => next.has(item.id)) ?? items[0];
+    setRecipientName(representative?.recipientName || "");
+    setAddress(representative?.address || "");
     if (nextWaybill !== firstSelectedWaybill && recipientDetailWaybill) {
       setRecipientDetailWaybill("");
       setRecipientLoadedId("");
       setRecipientCity("");
-      setCustomerName(selectedSeller?.customerName ?? "");
       setWhatsapp(items[0]?.whatsapp || "");
-      setAddress(items[0]?.address || "");
       setRecipientHelper(nextWaybill
         ? `Pilihan resi berubah. Ambil ulang detail dari resi ${nextWaybill}.`
         : "Centang minimal satu resi pada daftar di bawah.");
@@ -363,7 +368,7 @@ export function CreateInvoiceClient({
       whatsapp: whatsapp || null,
       email: email || null,
       address: address || null,
-      recipientName: customerName || null,
+      recipientName: recipientName || null,
       recipientPhone: whatsapp || null,
       recipientCity: recipientCity || null,
       bankAccountId: selectedBankAccountId || null,
@@ -455,6 +460,7 @@ export function CreateInvoiceClient({
       setSelectedSeller(seller);
       setDraftId(invoice.id);
       setCustomerName(invoice.customerNameSnapshot);
+      setRecipientName(invoice.recipientName || "");
       setCompanyName(invoice.companyNameSnapshot || "");
       setWhatsapp(invoice.whatsappSnapshot || "");
       setEmail(invoice.emailSnapshot || "");
@@ -475,6 +481,7 @@ export function CreateInvoiceClient({
       setDraftId(invoice.id);
       setSelectedIds(new Set(invoice.items.map((item) => item.masterPickupId)));
       setCustomerName(invoice.customerNameSnapshot);
+      setRecipientName(invoice.recipientName || "");
       setCompanyName(invoice.companyNameSnapshot || "");
       setWhatsapp(invoice.whatsappSnapshot || "");
       setEmail(invoice.emailSnapshot || "");
@@ -526,7 +533,6 @@ export function CreateInvoiceClient({
         ? {
             ...current,
             ...result.data,
-            addressSnapshot: result.data.recipientCity || null,
           }
         : current);
       setRecipientLoadedId(invoice.id);
@@ -561,11 +567,10 @@ export function CreateInvoiceClient({
       if (!response.ok) {
         throw new Error(invoiceRecipientDetailErrorMessage(result.error?.code));
       }
-      setCustomerName(result.data.recipientName || customerName);
+      setRecipientName(result.data.recipientName || recipientName);
       setWhatsapp(result.data.recipientPhone || whatsapp);
       setRecipientCity(result.data.recipientCity || "");
-      setAddress((current) =>
-        billingAddressAfterRecipient(current, result.data.recipientCity));
+      setAddress((current) => current);
       setRecipientDetailWaybill(result.data.waybillNo);
       setRecipientLoadedId("form");
       setRecipientHelper(
@@ -828,7 +833,7 @@ export function CreateInvoiceClient({
               Informasi Customer
             </p>
             <div className="grid gap-3 md:grid-cols-2">
-              <input aria-label="Nama Customer/Penerima" value={customerName}
+              <input aria-label="Nama Customer/Seller" value={customerName}
                 onChange={(event) => setCustomerName(event.target.value)}
                 className={nextgenControlClass}/>
               <input aria-label="Nama Perusahaan" placeholder="Nama perusahaan (opsional)"
@@ -840,7 +845,10 @@ export function CreateInvoiceClient({
               <input aria-label="Email" placeholder="Email (opsional)" value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 className={nextgenControlClass}/>
-              <textarea aria-label="Alamat" placeholder="Alamat penagihan" value={address}
+              <input aria-label="Nama Penerima" placeholder="Nama penerima"
+                value={recipientName} onChange={(event) => setRecipientName(event.target.value)}
+                className={nextgenControlClass}/>
+              <textarea aria-label="Alamat Penerima" placeholder="Alamat penerima" value={address}
                 onChange={(event) => setAddress(event.target.value)}
                 className={`${nextgenControlClass} md:col-span-2`}/>
               <input aria-label="Kota/Kabupaten" placeholder="Kota/Kabupaten"
@@ -1043,10 +1051,10 @@ export function CreateInvoiceClient({
               Seluruh resi seller ini sedang digunakan pada draft atau invoice lain.
             </AppCard> : <TableCard>
               <div className="max-h-[420px] overflow-auto">
-                <table className="w-full min-w-[980px] text-left text-sm">
+                <table className="w-full min-w-[1280px] text-left text-sm">
                   <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase text-slate-500">
                     <tr><th className="px-3 py-3">Pilih</th>
-                      {["No", "Tanggal", "No Resi", "Staff Pickup", "Pengirim", "Berat", "Jumlah Ongkir", "Diskon", "Final Ongkir", "Status Invoice"]
+                      {["No", "Tanggal", "No Resi", "Staff Pickup", "Pengirim", "Penerima", "Alamat Penerima", "Berat", "Jumlah Ongkir", "Diskon", "Final Ongkir", "Status Invoice"]
                         .map((label) => <th key={label} className="px-3 py-3">{label}</th>)}
                     </tr>
                   </thead>
@@ -1060,6 +1068,8 @@ export function CreateInvoiceClient({
                     <td className="px-3 py-3 font-mono">{item.waybillNumber}</td>
                     <td className="px-3 py-3">{item.pickupStaff || "—"}</td>
                     <td className="px-3 py-3">{item.sellerName}</td>
+                    <td className="px-3 py-3">{item.recipientName || "—"}</td>
+                    <td className="max-w-72 whitespace-normal px-3 py-3 leading-5">{item.address || "—"}</td>
                     <td className="px-3 py-3">{item.weight}</td>
                     <td className="px-3 py-3">{money(item.freightAmount)}</td>
                     <td className="px-3 py-3">{money(item.discountAmount)}</td>

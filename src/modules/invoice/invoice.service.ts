@@ -123,6 +123,7 @@ const invoiceSourceInclude = {
     select: {
       settlementRaw: true,
       senderName: true,
+      receiverName: true,
       receiverAddress: true,
       weight: true,
     },
@@ -168,6 +169,7 @@ function mapSource(row: Prisma.MasterPickupGetPayload<{
     pickupSettlementRevisionId: row.settlementRevisions[0]?.id ?? null,
     customerKey: seller.customerKey,
     sellerName: seller.customerName,
+    recipientName: row.rawPickup.receiverName,
     companyName: null,
     address: row.rawPickup.receiverAddress,
     whatsapp: null,

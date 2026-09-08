@@ -183,9 +183,10 @@ describe("Invoice recipient detail", () => {
         recipientName: "Recipient Test",
         recipientPhone: "087777376950",
         recipientCity: "Kab. Test",
-        addressSnapshot: "Kab. Test",
       },
     });
+    expect(db.invoice.updateMany.mock.calls[0][0].data)
+      .not.toHaveProperty("addressSnapshot");
     expect(result).toEqual({
       waybillNo: "201680658475",
       recipientName: "Recipient Test",
