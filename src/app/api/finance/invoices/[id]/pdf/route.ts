@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/prisma";
 import {
-  canExportInvoice, createInvoicePdf, getInvoice,
+  canExportInvoice, createInvoicePdf, getInvoiceForPdf,
   invoicePdfFilename, invoiceScope,
 } from "@/modules/invoice";
 
@@ -45,7 +45,7 @@ export async function GET(_: Request, context: Context) {
   if (!scope) return NextResponse.json({ error: { code: "OUTLET_REQUIRED" } }, { status: 400 });
 
   try {
-    const invoice = await getInvoice(scope, invoiceId);
+    const invoice = await getInvoiceForPdf(scope, invoiceId);
     if (!invoice) {
       return pdfError(404, "INVOICE_NOT_FOUND", "Invoice tidak ditemukan.");
     }
@@ -105,7 +105,18 @@ export async function GET(_: Request, context: Context) {
       phase,
       bankAccountCount: accounts.length,
     });
-    const pdf = await createInvoicePdf(invoice, accounts, {
+    const firstRecipient = invoice.status === "DRAFT"
+      ? invoice.items[0]?.masterPickup.rawPickup
+      : null;
+    const pdfInvoice = invoice.status === "DRAFT" ? {
+      ...invoice,
+      recipientName: firstRecipient?.receiverName?.trim()
+        || invoice.recipientName
+        || invoice.customerNameSnapshot,
+      addressSnapshot: firstRecipient?.receiverAddress?.trim()
+        || invoice.addressSnapshot,
+    } : invoice;
+    const pdf = await createInvoicePdf(pdfInvoice, accounts, {
       onPhase(nextPhase) {
         phase = nextPhase;
         console.info("[invoice.pdf]", {

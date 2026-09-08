@@ -685,6 +685,30 @@ export async function getInvoice(scope: Scope, invoiceId: string) {
   });
 }
 
+export async function getInvoiceForPdf(scope: Scope, invoiceId: string) {
+  return prisma.invoice.findFirst({
+    where: { id: invoiceId, ...scope },
+    include: {
+      ...invoiceInclude,
+      items: {
+        ...invoiceInclude.items,
+        include: {
+          masterPickup: {
+            select: {
+              rawPickup: {
+                select: {
+                  receiverName: true,
+                  receiverAddress: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
 export function invoiceJsonSafe(value: unknown): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value === "bigint") return value.toString();

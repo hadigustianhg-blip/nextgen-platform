@@ -10,7 +10,7 @@ vi.mock("@/lib/auth/session", () => ({
   })),
 }));
 const mocks = vi.hoisted(() => ({
-  getInvoice: vi.fn(),
+  getInvoiceForPdf: vi.fn(),
   createPdf: vi.fn(),
   auditCreate: vi.fn(),
 }));
@@ -20,7 +20,7 @@ vi.mock("@/lib/db/prisma", () => ({
 vi.mock("@/modules/invoice", () => ({
   canExportInvoice: () => true,
   invoiceScope: () => ({ tenantId: "tenant-1", outletId: "outlet-1" }),
-  getInvoice: mocks.getInvoice,
+  getInvoiceForPdf: mocks.getInvoiceForPdf,
   createInvoicePdf: mocks.createPdf,
   invoicePdfFilename: () => "Invoice_DRAFT_Seller.pdf",
 }));
@@ -45,7 +45,12 @@ const invoice = (status = "DRAFT") => ({
   grandTotal: { toString: () => "100000" },
   tenant: { name: "Tenant" },
   outlet: { code: "OUT001", name: "Outlet" },
-  items: [{ id: "item-1" }],
+  items: [{
+    id: "item-1",
+    masterPickup: {
+      rawPickup: { receiverName: null, receiverAddress: null },
+    },
+  }],
 });
 
 const context = {
@@ -54,7 +59,7 @@ const context = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getInvoice.mockResolvedValue(invoice());
+  mocks.getInvoiceForPdf.mockResolvedValue(invoice());
   mocks.createPdf.mockImplementation(async (_invoice, _accounts, options) => {
     for (const phase of [
       "pdf_start",
@@ -75,7 +80,7 @@ beforeEach(() => {
 
 describe("GET /api/finance/invoices/[id]/pdf", () => {
   it("returns 404 when the scoped invoice is not found", async () => {
-    mocks.getInvoice.mockResolvedValueOnce(null);
+    mocks.getInvoiceForPdf.mockResolvedValueOnce(null);
     const response = await GET(new Request("http://localhost"), context);
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({
@@ -88,7 +93,7 @@ describe("GET /api/finance/invoices/[id]/pdf", () => {
   it.each(["DRAFT", "ISSUED", "VOID"])(
     "generates a complete PDF response for %s",
     async (status) => {
-      mocks.getInvoice.mockResolvedValueOnce(invoice(status));
+      mocks.getInvoiceForPdf.mockResolvedValueOnce(invoice(status));
       const response = await GET(new Request("http://localhost"), context);
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe("application/pdf");
@@ -114,8 +119,83 @@ describe("GET /api/finance/invoices/[id]/pdf", () => {
     );
   });
 
+  it("hydrates a legacy draft recipient from the first invoice waybill", async () => {
+    mocks.getInvoiceForPdf.mockResolvedValueOnce({
+      ...invoice(),
+      customerNameSnapshot: "PLAZA ASIA SUMEDANG",
+      recipientName: "PLAZA ASIA SUMEDANG",
+      addressSnapshot: "Alamat seller",
+      items: [{
+        id: "item-1",
+        masterPickup: { rawPickup: {
+          receiverName: "NAMA PENERIMA TEST",
+          receiverAddress: "ALAMAT PENERIMA TEST",
+        } },
+      }],
+    });
+
+    const response = await GET(new Request("http://localhost"), context);
+
+    expect(response.status).toBe(200);
+    expect(mocks.createPdf).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientName: "NAMA PENERIMA TEST",
+        addressSnapshot: "ALAMAT PENERIMA TEST",
+      }),
+      [],
+      expect.any(Object),
+    );
+  });
+
+  it("keeps existing draft snapshots when the first waybill recipient is empty", async () => {
+    mocks.getInvoiceForPdf.mockResolvedValueOnce({
+      ...invoice(),
+      recipientName: "Penerima Snapshot",
+      addressSnapshot: "Alamat Snapshot",
+    });
+
+    const response = await GET(new Request("http://localhost"), context);
+
+    expect(response.status).toBe(200);
+    expect(mocks.createPdf).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientName: "Penerima Snapshot",
+        addressSnapshot: "Alamat Snapshot",
+      }),
+      [],
+      expect.any(Object),
+    );
+  });
+
+  it("does not hydrate a paid invoice from mutable pickup recipient data", async () => {
+    mocks.getInvoiceForPdf.mockResolvedValueOnce({
+      ...invoice("PAID"),
+      recipientName: "Penerima Final",
+      addressSnapshot: "Alamat Final",
+      items: [{
+        id: "item-1",
+        masterPickup: { rawPickup: {
+          receiverName: "Penerima Raw Berubah",
+          receiverAddress: "Alamat Raw Berubah",
+        } },
+      }],
+    });
+
+    const response = await GET(new Request("http://localhost"), context);
+
+    expect(response.status).toBe(200);
+    expect(mocks.createPdf).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientName: "Penerima Final",
+        addressSnapshot: "Alamat Final",
+      }),
+      [],
+      expect.any(Object),
+    );
+  });
+
   it("renders only the immutable payment account snapshot stored on the invoice", async () => {
-    mocks.getInvoice.mockResolvedValueOnce({
+    mocks.getInvoiceForPdf.mockResolvedValueOnce({
       ...invoice(),
       transferBankName: "Bank Outlet",
       transferAccountNumber: "123456789",
@@ -135,7 +215,7 @@ describe("GET /api/finance/invoices/[id]/pdf", () => {
   });
 
   it("rejects incomplete PDF data with a specific contract", async () => {
-    mocks.getInvoice.mockResolvedValueOnce({ ...invoice(), items: [] });
+    mocks.getInvoiceForPdf.mockResolvedValueOnce({ ...invoice(), items: [] });
     const incompleteResponse = await GET(new Request("http://localhost"), context);
     expect(incompleteResponse.status).toBe(422);
     expect(await incompleteResponse.json()).toMatchObject({
@@ -144,7 +224,7 @@ describe("GET /api/finance/invoices/[id]/pdf", () => {
   });
 
   it("returns a specific error when outlet identity is incomplete", async () => {
-    mocks.getInvoice.mockResolvedValueOnce({
+    mocks.getInvoiceForPdf.mockResolvedValueOnce({
       ...invoice(),
       outlet: { code: "OUT001", name: "" },
     });
