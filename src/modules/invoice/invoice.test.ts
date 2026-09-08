@@ -38,6 +38,7 @@ import {
   createOutletBankAccount,
   getActiveOutletBankAccounts,
   getInvoice,
+  getInvoicePreview,
   getInvoiceOutletSettings,
   invoiceJsonSafe,
   normalizeSellerName,
@@ -658,6 +659,77 @@ describe("Invoice persistence and PDF contracts", () => {
       createdAt: "2026-07-30T00:00:00.000Z",
       auditId: "12",
     });
+  });
+
+  it("hydrates a draft preview recipient from its first invoice item raw pickup", async () => {
+    db.invoice.findFirst.mockResolvedValueOnce({
+      id: "invoice-1",
+      status: "DRAFT",
+      customerNameSnapshot: "PLAZA ASIA SUMEDANG",
+      recipientName: "PLAZA ASIA SUMEDANG",
+      addressSnapshot: "Alamat seller",
+      items: [{
+        sellerNameSnapshot: "PLAZA ASIA SUMEDANG",
+        masterPickup: { rawPickup: {
+          receiverName: "PENERIMA TEST",
+          receiverAddress: "JL PENERIMA TEST NO 1",
+        } },
+      }],
+    });
+
+    await expect(getInvoicePreview(scope, "invoice-1")).resolves.toMatchObject({
+      recipientName: "PENERIMA TEST",
+      addressSnapshot: "JL PENERIMA TEST NO 1",
+      items: [{ sellerNameSnapshot: "PLAZA ASIA SUMEDANG" }],
+    });
+    expect(db.invoice.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "invoice-1", ...scope },
+      include: expect.objectContaining({
+        items: expect.objectContaining({
+          include: {
+            masterPickup: {
+              select: {
+                rawPickup: {
+                  select: { receiverName: true, receiverAddress: true },
+                },
+              },
+            },
+          },
+        }),
+      }),
+    }));
+  });
+
+  it("keeps draft recipient snapshots when raw pickup recipient data is empty", async () => {
+    db.invoice.findFirst.mockResolvedValueOnce({
+      status: "DRAFT",
+      customerNameSnapshot: "Seller",
+      recipientName: "Penerima Snapshot",
+      addressSnapshot: "Alamat Snapshot",
+      items: [{ masterPickup: { rawPickup: {
+        receiverName: " ", receiverAddress: null,
+      } } }],
+    });
+
+    await expect(getInvoicePreview(scope, "invoice-1")).resolves.toMatchObject({
+      recipientName: "Penerima Snapshot",
+      addressSnapshot: "Alamat Snapshot",
+    });
+  });
+
+  it("does not hydrate paid invoice snapshots from mutable raw pickup data", async () => {
+    const paid = {
+      status: "PAID",
+      recipientName: "Penerima Final",
+      addressSnapshot: "Alamat Final",
+      items: [{ masterPickup: { rawPickup: {
+        receiverName: "Penerima Raw Berubah",
+        receiverAddress: "Alamat Raw Berubah",
+      } } }],
+    };
+    db.invoice.findFirst.mockResolvedValueOnce(paid);
+
+    await expect(getInvoicePreview(scope, "invoice-1")).resolves.toBe(paid);
   });
 
   it("returns specific WhatsApp errors for draft, missing, and invalid numbers", async () => {

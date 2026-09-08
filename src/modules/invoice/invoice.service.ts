@@ -685,8 +685,8 @@ export async function getInvoice(scope: Scope, invoiceId: string) {
   });
 }
 
-export async function getInvoiceForPdf(scope: Scope, invoiceId: string) {
-  return prisma.invoice.findFirst({
+export async function getInvoicePreview(scope: Scope, invoiceId: string) {
+  const invoice = await prisma.invoice.findFirst({
     where: { id: invoiceId, ...scope },
     include: {
       ...invoiceInclude,
@@ -707,6 +707,17 @@ export async function getInvoiceForPdf(scope: Scope, invoiceId: string) {
       },
     },
   });
+  if (!invoice || invoice.status !== "DRAFT") return invoice;
+
+  const firstRecipient = invoice.items[0]?.masterPickup.rawPickup;
+  return {
+    ...invoice,
+    recipientName: firstRecipient?.receiverName?.trim()
+      || invoice.recipientName
+      || invoice.customerNameSnapshot,
+    addressSnapshot: firstRecipient?.receiverAddress?.trim()
+      || invoice.addressSnapshot,
+  };
 }
 
 export function invoiceJsonSafe(value: unknown): unknown {

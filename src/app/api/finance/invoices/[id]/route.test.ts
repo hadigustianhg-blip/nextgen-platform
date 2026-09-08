@@ -9,7 +9,7 @@ vi.mock("@/lib/auth/session", () => ({
     roles: ["ADMIN"],
   })),
 }));
-const mocks = vi.hoisted(() => ({ getInvoice: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getInvoicePreview: vi.fn() }));
 vi.mock("@/modules/invoice", async () => {
   const actual = await vi.importActual<typeof import("@/modules/invoice")>(
     "@/modules/invoice",
@@ -18,7 +18,7 @@ vi.mock("@/modules/invoice", async () => {
     ...actual,
     canReadInvoice: () => true,
     invoiceScope: () => ({ tenantId: "tenant-1", outletId: "outlet-1" }),
-    getInvoice: mocks.getInvoice,
+    getInvoicePreview: mocks.getInvoicePreview,
   };
 });
 
@@ -27,8 +27,13 @@ import { GET } from "./route";
 
 describe("GET /api/finance/invoices/[id]", () => {
   it("returns a tenant-scoped, JSON-safe invoice detail response", async () => {
-    mocks.getInvoice.mockResolvedValueOnce({
+    mocks.getInvoicePreview.mockResolvedValueOnce({
       id: "invoice-1",
+      status: "DRAFT",
+      customerNameSnapshot: "PLAZA ASIA SUMEDANG",
+      recipientName: "PENERIMA TEST",
+      addressSnapshot: "JL PENERIMA TEST NO 1",
+      items: [{ sellerNameSnapshot: "PLAZA ASIA SUMEDANG" }],
       grandTotal: new Prisma.Decimal("90000.50"),
       invoiceDate: new Date("2026-07-30T00:00:00.000Z"),
       diagnosticBigInt: 12n,
@@ -38,7 +43,7 @@ describe("GET /api/finance/invoices/[id]", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mocks.getInvoice).toHaveBeenCalledWith({
+    expect(mocks.getInvoicePreview).toHaveBeenCalledWith({
       tenantId: "tenant-1",
       outletId: "outlet-1",
     }, "invoice-1");
@@ -46,6 +51,11 @@ describe("GET /api/finance/invoices/[id]", () => {
       success: true,
       data: {
         id: "invoice-1",
+        status: "DRAFT",
+        customerNameSnapshot: "PLAZA ASIA SUMEDANG",
+        recipientName: "PENERIMA TEST",
+        addressSnapshot: "JL PENERIMA TEST NO 1",
+        items: [{ sellerNameSnapshot: "PLAZA ASIA SUMEDANG" }],
         grandTotal: "90000.5",
         invoiceDate: "2026-07-30T00:00:00.000Z",
         diagnosticBigInt: "12",
@@ -54,7 +64,7 @@ describe("GET /api/finance/invoices/[id]", () => {
   });
 
   it("returns 404 for an invoice outside the active scope", async () => {
-    mocks.getInvoice.mockResolvedValueOnce(null);
+    mocks.getInvoicePreview.mockResolvedValueOnce(null);
     const response = await GET(new Request("http://localhost"), {
       params: Promise.resolve({ id: "other-tenant-invoice" }),
     });
