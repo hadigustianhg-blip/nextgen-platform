@@ -119,9 +119,11 @@ describe("GET /api/finance/invoices/[id]/pdf", () => {
     );
   });
 
-  it("renders the draft recipient hydrated by the shared preview service", async () => {
+  it.each(["DRAFT", "ISSUED"])(
+    "renders the %s recipient hydrated by the shared preview service",
+    async (status) => {
     mocks.getInvoicePreview.mockResolvedValueOnce({
-      ...invoice(),
+      ...invoice(status),
       customerNameSnapshot: "PLAZA ASIA SUMEDANG",
       recipientName: "NAMA PENERIMA TEST",
       addressSnapshot: "ALAMAT PENERIMA TEST",
@@ -167,9 +169,11 @@ describe("GET /api/finance/invoices/[id]/pdf", () => {
     );
   });
 
-  it("does not hydrate a paid invoice from mutable pickup recipient data", async () => {
+  it.each(["PAID", "VOID"])(
+    "does not hydrate a %s invoice from mutable pickup recipient data",
+    async (status) => {
     mocks.getInvoicePreview.mockResolvedValueOnce({
-      ...invoice("PAID"),
+      ...invoice(status),
       recipientName: "Penerima Final",
       addressSnapshot: "Alamat Final",
       items: [{

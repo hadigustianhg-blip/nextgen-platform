@@ -598,7 +598,7 @@ export async function issueInvoice(context: Context, invoiceId: string) {
     return await prisma.$transaction(async (tx) => {
       const invoice = await tx.invoice.findFirst({
         where: { id: invoiceId, tenantId: context.tenantId, outletId: context.outletId },
-        include: { items: true },
+        include: invoiceInclude,
       });
       if (!invoice) throw new InvoiceServiceError("INVOICE_NOT_FOUND", 404);
       if (invoice.status !== "DRAFT") throw new InvoiceServiceError("INVOICE_LOCKED", 409);
@@ -649,9 +649,19 @@ export async function issueInvoice(context: Context, invoiceId: string) {
         "INV", outletCode, String(year), String(month).padStart(2, "0"),
         String(sequence.lastValue).padStart(4, "0"),
       ].join("/");
+      const firstSource = sources.find(({ row }) =>
+        row.id === invoice.items[0]?.masterPickupId);
+      const receiverName = firstSource?.row.rawPickup.receiverName?.trim();
+      const receiverAddress = firstSource?.row.rawPickup.receiverAddress?.trim();
       const issued = await tx.invoice.update({
         where: { id: invoiceId },
-        data: { invoiceNumber, status: "ISSUED", issuedAt: new Date() },
+        data: {
+          invoiceNumber,
+          status: "ISSUED",
+          issuedAt: new Date(),
+          ...(receiverName ? { recipientName: receiverName } : {}),
+          ...(receiverAddress ? { addressSnapshot: receiverAddress } : {}),
+        },
         include: invoiceInclude,
       });
       await tx.auditLog.create({ data: {
@@ -707,7 +717,7 @@ export async function getInvoicePreview(scope: Scope, invoiceId: string) {
       },
     },
   });
-  if (!invoice || invoice.status !== "DRAFT") return invoice;
+  if (!invoice || !["DRAFT", "ISSUED"].includes(invoice.status)) return invoice;
 
   const firstRecipient = invoice.items[0]?.masterPickup.rawPickup;
   return {

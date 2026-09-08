@@ -27,6 +27,7 @@ const tx = vi.hoisted(() => ({
     update: vi.fn(),
   },
   invoiceItem: { createMany: vi.fn(), updateMany: vi.fn() },
+  invoiceSequence: { upsert: vi.fn() },
   auditLog: { create: vi.fn() },
 }));
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
@@ -44,6 +45,7 @@ import {
   normalizeSellerName,
   normalizeWhatsappNumber,
   prepareInvoiceWhatsapp,
+  issueInvoice,
   sellerIdentity,
   updateOutletBankAccount,
   voidInvoice,
@@ -661,10 +663,12 @@ describe("Invoice persistence and PDF contracts", () => {
     });
   });
 
-  it("hydrates a draft preview recipient from its first invoice item raw pickup", async () => {
+  it.each(["DRAFT", "ISSUED"])(
+    "hydrates a %s preview recipient from its first invoice item raw pickup",
+    async (status) => {
     db.invoice.findFirst.mockResolvedValueOnce({
       id: "invoice-1",
-      status: "DRAFT",
+      status,
       customerNameSnapshot: "PLAZA ASIA SUMEDANG",
       recipientName: "PLAZA ASIA SUMEDANG",
       addressSnapshot: "Alamat seller",
@@ -717,9 +721,11 @@ describe("Invoice persistence and PDF contracts", () => {
     });
   });
 
-  it("does not hydrate paid invoice snapshots from mutable raw pickup data", async () => {
-    const paid = {
-      status: "PAID",
+  it.each(["PAID", "VOID"])(
+    "does not hydrate %s invoice snapshots from mutable raw pickup data",
+    async (status) => {
+    const immutableInvoice = {
+      status,
       recipientName: "Penerima Final",
       addressSnapshot: "Alamat Final",
       items: [{ masterPickup: { rawPickup: {
@@ -727,9 +733,55 @@ describe("Invoice persistence and PDF contracts", () => {
         receiverAddress: "Alamat Raw Berubah",
       } } }],
     };
-    db.invoice.findFirst.mockResolvedValueOnce(paid);
+    db.invoice.findFirst.mockResolvedValueOnce(immutableInvoice);
 
-    await expect(getInvoicePreview(scope, "invoice-1")).resolves.toBe(paid);
+    await expect(getInvoicePreview(scope, "invoice-1")).resolves.toBe(immutableInvoice);
+  });
+
+  it("stores the first item raw recipient snapshot when issuing a draft", async () => {
+    tx.invoice.findFirst.mockResolvedValueOnce({
+      id: "invoice-1",
+      status: "DRAFT",
+      customerKey: "name:plaza asia sumedang",
+      invoiceDate: new Date("2026-09-08T00:00:00.000Z"),
+      grandTotal: decimal(90000),
+      transferBankName: "Bank",
+      transferAccountNumber: "123",
+      transferAccountHolder: "Outlet",
+      items: [{
+        masterPickupId: "11111111-1111-4111-8111-111111111111",
+        freightAmount: decimal(100000),
+        discountAmount: decimal(10000),
+        obligationAmount: decimal(90000),
+      }],
+    });
+    tx.masterPickup.findMany.mockResolvedValueOnce([pickup({
+      senderName: "PLAZA ASIA SUMEDANG",
+      rawPickup: {
+        settlementRaw: "Tunai",
+        senderName: "PLAZA ASIA SUMEDANG",
+        receiverName: "IBU IRNABAG GUDANG",
+        receiverAddress: "DS SAMBUNG PARI KEC MANGKUBUMI KAB TASIKMALAYA",
+        weight: decimal("2.5"),
+      },
+    })]);
+    tx.invoiceSequence.upsert.mockResolvedValueOnce({ lastValue: 1 });
+    tx.invoice.update.mockResolvedValueOnce({ id: "invoice-1", status: "ISSUED" });
+
+    await expect(issueInvoice({
+      ...scope,
+      actorId: "33333333-3333-4333-8333-333333333333",
+      outletCode: "SUM001A",
+    }, "invoice-1")).resolves.toMatchObject({ status: "ISSUED" });
+
+    expect(tx.invoice.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "invoice-1" },
+      data: expect.objectContaining({
+        status: "ISSUED",
+        recipientName: "IBU IRNABAG GUDANG",
+        addressSnapshot: "DS SAMBUNG PARI KEC MANGKUBUMI KAB TASIKMALAYA",
+      }),
+    }));
   });
 
   it("returns specific WhatsApp errors for draft, missing, and invalid numbers", async () => {
