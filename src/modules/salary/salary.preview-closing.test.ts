@@ -33,6 +33,7 @@ const input = {
   endDate: "2026-08-31",
   notes: "Closing Agustus",
   requestId: "11111111-1111-4111-8111-111111111111",
+  employeeIds: ["22222222-2222-4222-8222-222222222222"],
 };
 
 beforeEach(() => {
@@ -59,6 +60,8 @@ describe("create Salary Closing from preview", () => {
       periodStart: input.startDate,
       periodEnd: input.endDate,
       notes: input.notes,
+      employeeIds: input.employeeIds,
+      requestId: input.requestId,
     }, { activeStatusesOnly: true });
     expect(mocks.generate).toHaveBeenCalledWith(tx, context, "closing-1");
     expect(mocks.audit).toHaveBeenCalledWith({

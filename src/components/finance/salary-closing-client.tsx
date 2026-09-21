@@ -83,6 +83,15 @@ type Preview = {
   data: PreviewRow[];
 };
 
+type EligibleEmployee = {
+  employeeId: string;
+  name: string;
+  division: string;
+  profileName: string;
+  profileCode: string;
+  profileVersion: number;
+};
+
 const divisionLabel: Record<string, string> = {
   ADMIN: "Admin",
   ADMIN_OPS: "Admin Ops",
@@ -134,6 +143,12 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
   const [closingNotes, setClosingNotes] = useState("");
   const [closingRequestId, setClosingRequestId] = useState("");
   const [closingSaving, setClosingSaving] = useState(false);
+  const [draftConfirmOpen, setDraftConfirmOpen] = useState(false);
+  const [eligibleEmployees, setEligibleEmployees] = useState<EligibleEmployee[]>([]);
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<Set<string>>(new Set());
+  const [eligibleLoading, setEligibleLoading] = useState(false);
+  const [teamSearch, setTeamSearch] = useState("");
+  const [draftRequestId, setDraftRequestId] = useState("");
 
   async function loadClosings() {
     setLoading(true);
@@ -243,6 +258,30 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
     }
   }
 
+  async function openDraftConfirmation() {
+    if (saving || eligibleLoading) return;
+    setEligibleLoading(true);
+    setError("");
+    try {
+      const query = new URLSearchParams({ startDate: periodStart, endDate: periodEnd });
+      const response = await fetch(`/api/finance/salary/closings/eligible-employees?${query}`, {
+        cache: "no-store",
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error?.message || "Team eligible gagal dimuat.");
+      const employees = result.data as EligibleEmployee[];
+      setEligibleEmployees(employees);
+      setSelectedEmployeeIds(new Set(employees.map((employee) => employee.employeeId)));
+      setTeamSearch("");
+      setDraftRequestId(crypto.randomUUID());
+      setDraftConfirmOpen(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Team eligible gagal dimuat.");
+    } finally {
+      setEligibleLoading(false);
+    }
+  }
+
   async function createDraft() {
     if (saving) return;
     setSaving(true);
@@ -255,6 +294,8 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
           periodStart,
           periodEnd,
           notes: notes || null,
+          employeeIds: [...selectedEmployeeIds],
+          requestId: draftRequestId,
         }),
       });
       const result = await response.json();
@@ -262,6 +303,7 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
         result.error?.message || "Draft salary closing gagal dibuat.",
       );
       setNotice(`Draft ${result.data.closingNumber} berhasil dibuat.`);
+      setDraftConfirmOpen(false);
       setNotes("");
       await loadClosings();
     } catch (cause) {
@@ -372,10 +414,10 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
           <input value={notes} onChange={(event) => setNotes(event.target.value)}
             className={`${nextgenControlClass} mt-1`}/>
         </label>
-        <button type="button" disabled={saving}
-          onClick={() => void createDraft()} className={`${nextgenButtonClass} self-end`}>
-          {saving ? <LoaderCircle className="animate-spin" size={17}/> : <Plus size={17}/>}
-          {saving ? "Membuat..." : "Buat Draft Closing"}
+        <button type="button" disabled={saving || eligibleLoading}
+          onClick={() => void openDraftConfirmation()} className={`${nextgenButtonClass} self-end`}>
+          {eligibleLoading ? <LoaderCircle className="animate-spin" size={17}/> : <Plus size={17}/>}
+          {eligibleLoading ? "Memuat Team..." : "Buat Draft Closing"}
         </button>
       </div>
     </SectionCard>}
@@ -531,6 +573,75 @@ export function SalaryClosingClient({ canManage }: { canManage: boolean }) {
             className={nextgenButtonClass}>
             {closingSaving && <LoaderCircle className="animate-spin" size={17}/>}
             {closingSaving ? "Membuat Closing..." : "Buat Closing"}
+          </button>
+        </div>
+      </ModalCard>
+    </div>}
+    {draftConfirmOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4">
+      <ModalCard className="max-w-2xl">
+        <div className="flex items-center justify-between border-b p-5">
+          <div>
+            <p className="text-sm text-slate-500">Periode Closing</p>
+            <h2 className="text-xl font-bold">Konfirmasi Draft Salary Closing</h2>
+          </div>
+          <button type="button" disabled={saving} aria-label="Tutup konfirmasi draft"
+            onClick={() => setDraftConfirmOpen(false)}><X/></button>
+        </div>
+        <div className="space-y-4 p-5">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Periode Closing</p>
+            <p className="mt-1 font-bold">{periodStart} s/d {periodEnd}</p>
+            <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Catatan</p>
+            <p className="mt-1 text-sm">{notes || "—"}</p>
+          </div>
+          <label className="block text-sm font-semibold text-slate-700">Cari Team
+            <input value={teamSearch} disabled={saving}
+              onChange={(event) => setTeamSearch(event.target.value)}
+              className={`${nextgenControlClass} mt-1`} placeholder="Cari nama team"/>
+          </label>
+          <label className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 font-semibold">
+            <input type="checkbox" disabled={saving || !eligibleEmployees.length}
+              checked={eligibleEmployees.length > 0 && selectedEmployeeIds.size === eligibleEmployees.length}
+              onChange={(event) => setSelectedEmployeeIds(event.target.checked
+                ? new Set(eligibleEmployees.map((employee) => employee.employeeId))
+                : new Set())}/>
+            Pilih Semua
+          </label>
+          <div className="max-h-[42vh] space-y-2 overflow-y-auto">
+            {eligibleEmployees.filter((employee) => employee.name
+              .toLocaleLowerCase("id-ID").includes(teamSearch.trim().toLocaleLowerCase("id-ID")))
+              .map((employee) => <label key={employee.employeeId}
+                className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 p-3">
+                <input type="checkbox" className="mt-1" disabled={saving}
+                  checked={selectedEmployeeIds.has(employee.employeeId)}
+                  onChange={(event) => setSelectedEmployeeIds((current) => {
+                    const next = new Set(current);
+                    if (event.target.checked) next.add(employee.employeeId);
+                    else next.delete(employee.employeeId);
+                    return next;
+                  })}/>
+                <span>
+                  <span className="block font-semibold text-slate-900">{employee.name}</span>
+                  <span className="block text-sm text-slate-600">
+                    {divisionLabel[employee.division] ?? employee.division}
+                  </span>
+                  <span className="block text-sm text-slate-600">
+                    Salary Profile: {employee.profileName} ({employee.profileCode} v{employee.profileVersion})
+                  </span>
+                </span>
+              </label>)}
+            {!eligibleEmployees.length && <p className="py-8 text-center text-sm text-slate-500">
+              Tidak ada team eligible untuk periode ini.
+            </p>}
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 border-t p-4">
+          <button type="button" disabled={saving} onClick={() => setDraftConfirmOpen(false)}
+            className={nextgenNeutralButtonClass}>Batal</button>
+          <button type="button" disabled={saving || selectedEmployeeIds.size === 0}
+            onClick={() => void createDraft()} className={nextgenButtonClass}>
+            {saving && <LoaderCircle className="animate-spin" size={17}/>}
+            {saving ? "Membuat Draft..." : `Buat Draft (${selectedEmployeeIds.size} Team)`}
           </button>
         </div>
       </ModalCard>

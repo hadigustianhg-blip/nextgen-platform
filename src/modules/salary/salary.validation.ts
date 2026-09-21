@@ -119,6 +119,15 @@ export const salaryClosingSchema = z.object({
   periodStart: date,
   periodEnd: date,
   notes: z.string().trim().max(1000).nullable().optional(),
+  employeeIds: z.array(z.string().uuid()).min(1).superRefine((values, context) => {
+    if (new Set(values).size !== values.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Team yang dipilih tidak boleh duplikat.",
+      });
+    }
+  }),
+  requestId: z.string().uuid(),
 }).refine((value) => value.periodEnd >= value.periodStart, {
   path: ["periodEnd"],
   message: "Tanggal akhir tidak boleh sebelum tanggal awal.",
@@ -150,6 +159,11 @@ export const salaryPreviewClosingSchema = salaryPreviewQuerySchema.and(
   z.object({
     notes: z.string().trim().max(1000).nullable().optional(),
     requestId: z.string().uuid(),
+    employeeIds: z.array(z.string().uuid()).min(1).superRefine((values, context) => {
+      if (new Set(values).size !== values.length) {
+        context.addIssue({ code: "custom", message: "Team yang dipilih tidak boleh duplikat." });
+      }
+    }).optional(),
   }),
 );
 

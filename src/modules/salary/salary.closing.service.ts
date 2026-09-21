@@ -168,10 +168,25 @@ export async function generateSalaryClosingInTransaction(
       throw new SalaryError("SALARY_CLOSING_LOCKED", 409);
     }
 
+    const selectedRoster = closing.snapshotCapturedAt
+      ? []
+      : await tx.salaryClosingEmployee.findMany({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          salaryClosingId: closing.id,
+          status: "DRAFT",
+        },
+        select: { employeeId: true },
+      });
+    const selectedEmployeeIds = selectedRoster.length
+      ? selectedRoster.map((employee) => employee.employeeId)
+      : undefined;
     const employees = await captureSalaryClosingSnapshots(
       tx,
       context,
       closing,
+      selectedEmployeeIds,
     );
     const { pickups, dispatches, kasbons } =
       await loadSalaryOperationalSnapshots(tx, context, closing.id);
@@ -370,13 +385,13 @@ export async function generateSalaryClosingInTransaction(
         ))
       .map((employee) => employee.id);
 
-    const activeEmployeeIds = new Set([
-      ...pickupByEmployee.keys(),
-      ...dispatchByEmployee.keys(),
-      ...warningEmployeeIds,
-      ...kasbonEmployeeIds,
-      ...configuredEmployeeIds,
-    ]);
+    const activeEmployeeIds = new Set(selectedEmployeeIds ?? [
+        ...pickupByEmployee.keys(),
+        ...dispatchByEmployee.keys(),
+        ...warningEmployeeIds,
+        ...kasbonEmployeeIds,
+        ...configuredEmployeeIds,
+      ]);
     const profileSnapshots = new Map<string, {
       profile: typeof employees[number]["assignments"][number]["salaryProfile"];
       assignment: typeof employees[number]["assignments"][number];

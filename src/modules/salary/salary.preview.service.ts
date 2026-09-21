@@ -23,6 +23,9 @@ const zero = () => new Prisma.Decimal(0);
 
 type PreviewEmployee = Awaited<ReturnType<typeof loadSalaryPreviewSources>>["employees"][number];
 type PreviewAssignment = PreviewEmployee["assignments"][number];
+type SalaryPreviewClient = Pick<Prisma.TransactionClient,
+  "salaryEmployee" | "masterPickup" | "operationalExpense" | "rawDispatch"
+>;
 
 const settingForCalculation = (
   assignment: PreviewAssignment,
@@ -56,9 +59,10 @@ async function loadSalaryPreviewSources(
   scope: SalaryScope,
   periodStart: Date,
   periodEnd: Date,
+  client: SalaryPreviewClient = prisma,
 ) {
   const [employees, pickups, dispatches, kasbons] = await Promise.all([
-    prisma.salaryEmployee.findMany({
+    client.salaryEmployee.findMany({
       where: {
         tenantId: scope.tenantId,
         outletId: scope.outletId,
@@ -73,7 +77,7 @@ async function loadSalaryPreviewSources(
       },
       orderBy: { name: "asc" },
     }),
-    prisma.masterPickup.findMany({
+    client.masterPickup.findMany({
       where: {
         tenantId: scope.tenantId,
         outletId: scope.outletId,
@@ -89,8 +93,9 @@ async function loadSalaryPreviewSources(
       periodStart,
       periodEnd,
       status: SALARY_DISPATCH_STATUS,
+      client,
     }),
-    prisma.operationalExpense.findMany({
+    client.operationalExpense.findMany({
       where: {
         tenantId: scope.tenantId,
         outletId: scope.outletId,
@@ -108,6 +113,7 @@ async function loadSalaryPreviewSources(
 export async function getSalaryMonthlyPreview(
   scope: SalaryScope,
   input: { startDate: string; endDate: string },
+  client: SalaryPreviewClient = prisma,
 ) {
   const periodStart = dateOnly(input.startDate);
   const periodEnd = dateOnly(input.endDate);
@@ -115,6 +121,7 @@ export async function getSalaryMonthlyPreview(
     scope,
     periodStart,
     periodEnd,
+    client,
   );
   const matchEmployee = createSalaryEmployeeMatcher(employees);
   const employeeById = new Map(employees.map((employee) => [
@@ -125,6 +132,7 @@ export async function getSalaryMonthlyPreview(
   const dispatchesByEmployee = new Map<string, SalaryDispatchSource[]>();
   const touchedEmployeeIds = new Set<string>();
   const mappedEmployeeIds = new Set<string>();
+  const profileByEmployeeId = new Map<string, PreviewAssignment["salaryProfile"]>();
 
   for (const source of pickups) {
     const match = matchEmployee(source.staffName, "PICKUP");
@@ -141,6 +149,7 @@ export async function getSalaryMonthlyPreview(
       : null;
     if (!setting) continue;
     mappedEmployeeIds.add(employee.id);
+    profileByEmployeeId.set(employee.id, resolved.assignment!.salaryProfile);
     pickupsByEmployee.set(employee.id, [
       ...(pickupsByEmployee.get(employee.id) ?? []),
       {
@@ -173,6 +182,7 @@ export async function getSalaryMonthlyPreview(
       : null;
     if (!setting) continue;
     mappedEmployeeIds.add(employee.id);
+    profileByEmployeeId.set(employee.id, resolved.assignment!.salaryProfile);
     dispatchesByEmployee.set(employee.id, [
       ...(dispatchesByEmployee.get(employee.id) ?? []),
       {
@@ -190,7 +200,18 @@ export async function getSalaryMonthlyPreview(
 
   for (const kasbon of kasbons) {
     const match = matchEmployee(kasbon.teamName, "PICKUP");
-    if (match.employeeId) touchedEmployeeIds.add(match.employeeId);
+    if (!match.employeeId) continue;
+    touchedEmployeeIds.add(match.employeeId);
+    const employee = employeeById.get(match.employeeId)!;
+    const resolved = resolveSalaryAssignmentOnDate(
+      employee.assignments,
+      kasbon.operationalDate,
+      employee.division,
+    );
+    if (resolved.assignment && settingForCalculation(resolved.assignment)) {
+      mappedEmployeeIds.add(employee.id);
+      profileByEmployeeId.set(employee.id, resolved.assignment.salaryProfile);
+    }
   }
 
   for (const employee of employees) {
@@ -211,6 +232,7 @@ export async function getSalaryMonthlyPreview(
     ) {
       touchedEmployeeIds.add(employee.id);
       mappedEmployeeIds.add(employee.id);
+      profileByEmployeeId.set(employee.id, resolution.assignment!.salaryProfile);
     }
   }
 
@@ -228,6 +250,7 @@ export async function getSalaryMonthlyPreview(
       const net = calculated.systemIncomeTotal
         .plus(addition)
         .minus(totalDeduction);
+      const profile = profileByEmployeeId.get(employee.id) ?? null;
       return {
         employeeId: employee.id,
         name: employee.name,
@@ -243,6 +266,10 @@ export async function getSalaryMonthlyPreview(
         profileStatus: mappedEmployeeIds.has(employee.id)
           ? "MAPPED"
           : "UNMAPPED",
+        profileId: profile?.id ?? null,
+        profileName: profile?.name ?? null,
+        profileCode: profile?.code ?? null,
+        profileVersion: profile?.version ?? null,
         components: calculated.components.map((component) => ({
           code: component.code,
           name: component.name,
@@ -289,4 +316,26 @@ export async function getSalaryMonthlyPreview(
     },
     data: rows,
   };
+}
+
+export async function listEligibleSalaryClosingEmployees(
+  scope: SalaryScope,
+  input: { startDate: string; endDate: string },
+  client: SalaryPreviewClient = prisma,
+) {
+  const preview = await getSalaryMonthlyPreview(scope, input, client);
+  return preview.data.flatMap((employee) =>
+    employee.profileStatus === "MAPPED" && employee.profileId &&
+      employee.profileName && employee.profileCode && employee.profileVersion != null
+      ? [{
+        employeeId: employee.employeeId,
+        name: employee.name,
+        division: employee.division,
+        salaryProfileId: employee.profileId,
+        profileName: employee.profileName,
+        profileCode: employee.profileCode,
+        profileVersion: employee.profileVersion,
+      }]
+      : []
+  );
 }

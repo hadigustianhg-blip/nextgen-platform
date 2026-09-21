@@ -17,6 +17,7 @@ import {
 import { SalaryError } from "./salary.api";
 import { refreshClosingEmployeeTotals } from "./salary.closing.service";
 import { normalizeSalaryEmployeeName } from "./salary.calculation";
+import { listEligibleSalaryClosingEmployees } from "./salary.preview.service";
 
 export type SalaryScope = { tenantId: string; outletId: string };
 export type SalaryContext = SalaryScope & {
@@ -1051,34 +1052,98 @@ export async function getSalaryClosing(scope: SalaryScope, id: string) {
 
 export async function createSalaryClosing(
   context: SalaryContext,
-  input: { periodStart: string; periodEnd: string; notes?: string | null },
+  input: {
+    periodStart: string;
+    periodEnd: string;
+    notes?: string | null;
+    employeeIds?: string[];
+    requestId?: string;
+  },
 ) {
-  return prisma.$transaction((tx) => createSalaryClosingInTransaction(
-    tx,
-    context,
-    input,
-  ), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  const execute = () => prisma.$transaction((tx) => createSalaryClosingInTransaction(
+      tx,
+      context,
+      input,
+    ), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  try {
+    return await execute();
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2034") {
+      throw error;
+    }
+    return execute();
+  }
 }
 
 export async function createSalaryClosingInTransaction(
   tx: Prisma.TransactionClient,
   context: SalaryContext,
-  input: { periodStart: string; periodEnd: string; notes?: string | null },
+  input: {
+    periodStart: string;
+    periodEnd: string;
+    notes?: string | null;
+    employeeIds?: string[];
+    requestId?: string;
+  },
   options: { activeStatusesOnly?: boolean } = {},
 ) {
     const start = calendarDate(input.periodStart);
     const end = calendarDate(input.periodEnd);
-    const overlap = await tx.salaryClosing.findFirst({
-      where: {
-        tenantId: context.tenantId,
-        outletId: context.outletId,
-        status: options.activeStatusesOnly
-          ? { in: ["DRAFT", "CLOSED"] }
-          : { not: "VOID" },
-        periodStart: { lte: end },
-        periodEnd: { gte: start },
-      },
-    });
+    if (input.requestId) {
+      const previousRequest = await tx.salaryAudit.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          entityType: "SALARY_CLOSING_REQUEST",
+          metadata: { path: ["requestId"], equals: input.requestId },
+        },
+        select: { entityId: true },
+      });
+      if (previousRequest) {
+        const existing = await tx.salaryClosing.findFirst({
+          where: {
+            id: previousRequest.entityId,
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+          },
+        });
+        if (existing) return existing;
+      }
+    }
+
+    const eligible = input.employeeIds
+      ? await listEligibleSalaryClosingEmployees(context, {
+        startDate: input.periodStart,
+        endDate: input.periodEnd,
+      }, tx)
+      : [];
+    const eligibleById = new Map(eligible.map((employee) => [employee.employeeId, employee]));
+    if (input.employeeIds?.some((employeeId) => !eligibleById.has(employeeId))) {
+      throw new SalaryError("SALARY_EMPLOYEE_NOT_ELIGIBLE", 409);
+    }
+
+    const overlap = input.employeeIds
+      ? await tx.salaryClosing.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          status: { not: "VOID" },
+          periodStart: { lte: end },
+          periodEnd: { gte: start },
+          employees: { some: { employeeId: { in: input.employeeIds } } },
+        },
+      })
+      : await tx.salaryClosing.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          status: options.activeStatusesOnly
+            ? { in: ["DRAFT", "CLOSED"] }
+            : { not: "VOID" },
+          periodStart: { lte: end },
+          periodEnd: { gte: start },
+        },
+      });
     if (overlap) {
       throw new SalaryError("SALARY_CLOSING_OVERLAP", 409, {
         closingNumber: overlap.closingNumber,
@@ -1119,6 +1184,25 @@ export async function createSalaryClosingInTransaction(
       notes: input.notes || null,
       createdByUserId: context.actorId,
     } });
+    if (input.employeeIds) {
+      await tx.salaryClosingEmployee.createMany({
+        data: input.employeeIds.map((employeeId) => {
+          const employee = eligibleById.get(employeeId)!;
+          return {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            salaryClosingId: closing.id,
+            employeeId,
+            employeeNameSnapshot: employee.name,
+            divisionSnapshot: employee.division,
+            salaryProfileId: employee.salaryProfileId,
+            salaryProfileCodeSnapshot: employee.profileCode,
+            salaryProfileVersionSnapshot: employee.profileVersion,
+            status: "DRAFT" as const,
+          };
+        }),
+      });
+    }
     await tx.salaryAudit.create({ data: {
       tenantId: context.tenantId,
       outletId: context.outletId,
@@ -1133,6 +1217,18 @@ export async function createSalaryClosingInTransaction(
         status: "DRAFT",
       },
     } });
+    if (input.requestId) {
+      await tx.salaryAudit.create({ data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryClosingId: closing.id,
+        actorId: context.actorId,
+        action: "CREATE",
+        entityType: "SALARY_CLOSING_REQUEST",
+        entityId: closing.id,
+        metadata: { requestId: input.requestId },
+      } });
+    }
     return closing;
 }
 

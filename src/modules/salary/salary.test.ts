@@ -8,6 +8,7 @@ const db = vi.hoisted(() => ({
   salaryEmployee: { findMany: vi.fn() },
   salaryClosing: { findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
   $transaction: vi.fn(),
+  eligible: vi.fn(),
 }));
 const tx = vi.hoisted(() => ({
   salaryProfile: {
@@ -22,7 +23,7 @@ const tx = vi.hoisted(() => ({
   salaryEmployeeAlias: { updateMany: vi.fn(), deleteMany: vi.fn() },
   teamMembership: { updateMany: vi.fn() },
   salaryEmployeeSnapshot: { findFirst: vi.fn() },
-  salaryClosingEmployee: { findFirst: vi.fn() },
+  salaryClosingEmployee: { findFirst: vi.fn(), createMany: vi.fn() },
   salaryClosingSourceRecord: { findFirst: vi.fn() },
   employeeSalaryAssignment: {
     create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(),
@@ -30,9 +31,12 @@ const tx = vi.hoisted(() => ({
   },
   salaryClosing: { create: vi.fn(), findFirst: vi.fn() },
   salaryClosingSequence: { upsert: vi.fn() },
-  salaryAudit: { create: vi.fn() },
+  salaryAudit: { create: vi.fn(), findFirst: vi.fn() },
 }));
 vi.mock("@/lib/db/prisma", () => ({ prisma: db }));
+vi.mock("./salary.preview.service", () => ({
+  listEligibleSalaryClosingEmployees: db.eligible,
+}));
 
 import {
   SALARY_DELIVERY_SOURCE,
@@ -124,6 +128,9 @@ beforeEach(() => {
   tx.employeeSalaryAssignment.findFirst.mockResolvedValue(null);
   tx.employeeSalaryAssignment.findMany.mockResolvedValue([]);
   tx.salaryAudit.create.mockResolvedValue({ id: "audit-1" });
+  tx.salaryAudit.findFirst.mockResolvedValue(null);
+  tx.salaryClosingEmployee.createMany.mockResolvedValue({ count: 1 });
+  db.eligible.mockResolvedValue([]);
   db.salaryClosing.count.mockResolvedValue(0);
 });
 
@@ -815,6 +822,78 @@ describe("Salary profile removal", () => {
 });
 
 describe("Salary closing foundation", () => {
+  const selectiveInput = {
+    periodStart: "2026-09-01",
+    periodEnd: "2026-09-30",
+    employeeIds: ["11111111-1111-4111-8111-111111111111"],
+    requestId: "22222222-2222-4222-8222-222222222222",
+  };
+  const eligibleEmployee = {
+    employeeId: selectiveInput.employeeIds[0],
+    name: "Team A",
+    division: "DRIVER",
+    salaryProfileId: "33333333-3333-4333-8333-333333333333",
+    profileName: "Driver",
+    profileCode: "DRIVER",
+    profileVersion: 1,
+  };
+
+  it("persists only the revalidated selected roster with date-only values", async () => {
+    db.eligible.mockResolvedValueOnce([eligibleEmployee]);
+    tx.salaryClosing.findFirst.mockResolvedValueOnce(null);
+    tx.salaryClosingSequence.upsert.mockResolvedValueOnce({ lastValue: 1 });
+    tx.salaryClosing.create.mockImplementationOnce(async ({ data }) => ({ id: "closing-selective", ...data }));
+    await createSalaryClosing(context, selectiveInput);
+    expect(db.eligible).toHaveBeenCalledWith(context, {
+      startDate: "2026-09-01", endDate: "2026-09-30",
+    }, tx);
+    expect(tx.salaryClosing.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      periodStart: new Date("2026-09-01T00:00:00.000Z"),
+      periodEnd: new Date("2026-09-30T00:00:00.000Z"),
+    }) });
+    expect(tx.salaryClosingEmployee.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ employeeId: eligibleEmployee.employeeId, status: "DRAFT" })],
+    });
+  });
+
+  it("rejects the whole request when an employee is inactive, foreign, or otherwise ineligible", async () => {
+    db.eligible.mockResolvedValueOnce([]);
+    await expect(createSalaryClosing(context, selectiveInput)).rejects.toMatchObject({
+      code: "SALARY_EMPLOYEE_NOT_ELIGIBLE", status: 409,
+    });
+    expect(tx.salaryClosing.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an overlapping closing only when a selected employee intersects", async () => {
+    db.eligible.mockResolvedValueOnce([eligibleEmployee]);
+    tx.salaryClosing.findFirst.mockResolvedValueOnce({
+      id: "overlap", closingNumber: "SAL/CLS/OUT001/2026/09/0001",
+    });
+    await expect(createSalaryClosing(context, selectiveInput)).rejects.toMatchObject({
+      code: "SALARY_CLOSING_OVERLAP",
+    });
+    expect(tx.salaryClosing.findFirst).toHaveBeenCalledWith({ where: expect.objectContaining({
+      tenantId: scope.tenantId,
+      outletId: scope.outletId,
+      employees: { some: { employeeId: { in: selectiveInput.employeeIds } } },
+    }) });
+  });
+
+  it("allows the same period when no selected employee intersects", async () => {
+    db.eligible.mockResolvedValueOnce([eligibleEmployee]);
+    tx.salaryClosing.findFirst.mockResolvedValueOnce(null);
+    tx.salaryClosingSequence.upsert.mockResolvedValueOnce({ lastValue: 2 });
+    tx.salaryClosing.create.mockResolvedValueOnce({ id: "different-team" });
+    await expect(createSalaryClosing(context, selectiveInput)).resolves.toEqual({ id: "different-team" });
+  });
+
+  it("returns the first draft for a repeated requestId without creating another", async () => {
+    tx.salaryAudit.findFirst.mockResolvedValueOnce({ entityId: "closing-existing" });
+    tx.salaryClosing.findFirst.mockResolvedValueOnce({ id: "closing-existing", status: "DRAFT" });
+    await expect(createSalaryClosing(context, selectiveInput)).resolves.toMatchObject({ id: "closing-existing" });
+    expect(tx.salaryClosing.create).not.toHaveBeenCalled();
+  });
+
   it("checks only active statuses for the preview fast path and reports the overlap number", async () => {
     tx.salaryClosing.findFirst.mockResolvedValueOnce({
       id: "existing",

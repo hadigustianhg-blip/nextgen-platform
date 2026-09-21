@@ -11,6 +11,7 @@ import {
   getActiveDispatchRecords,
 } from "@/modules/delivery-settlement/active-dispatch-dataset";
 import { SALARY_DISPATCH_STATUS } from "./salary.domain";
+import { createSalaryEmployeeMatcher } from "./salary.calculation";
 import type { SalaryContext } from "./salary.service";
 
 type Transaction = Prisma.TransactionClient;
@@ -165,12 +166,13 @@ export async function captureSalaryClosingSnapshots(
     periodEnd: Date;
     snapshotCapturedAt: Date | null;
   },
+  selectedEmployeeIds?: string[],
 ) {
   if (closing.snapshotCapturedAt) {
     return loadSalarySnapshotEmployees(tx, context, closing.id);
   }
 
-  const [employees, pickups, dispatches, kasbons] = await Promise.all([
+  const [allEmployees, allPickups, allDispatches, allKasbons] = await Promise.all([
     tx.salaryEmployee.findMany({
       where: {
         tenantId: context.tenantId,
@@ -232,6 +234,30 @@ export async function captureSalaryClosingSnapshots(
       orderBy: [{ operationalDate: "asc" }, { id: "asc" }],
     }),
   ]);
+
+  const selected = selectedEmployeeIds ? new Set(selectedEmployeeIds) : null;
+  const employees = selected
+    ? allEmployees.filter((employee) => selected.has(employee.id))
+    : allEmployees;
+  const matchEmployee = createSalaryEmployeeMatcher(allEmployees);
+  const pickups = selected
+    ? allPickups.filter((pickup) => {
+      const match = matchEmployee(pickup.staffName, "PICKUP");
+      return !match.employeeId || selected.has(match.employeeId);
+    })
+    : allPickups;
+  const dispatches = selected
+    ? allDispatches.filter((dispatch) => {
+      const match = matchEmployee(dispatch.courierNameRaw, "DISPATCH");
+      return !match.employeeId || selected.has(match.employeeId);
+    })
+    : allDispatches;
+  const kasbons = selected
+    ? allKasbons.filter((kasbon) => {
+      const match = matchEmployee(kasbon.teamName, "PICKUP");
+      return Boolean(match.employeeId && selected.has(match.employeeId));
+    })
+    : allKasbons;
 
   if (employees.length) {
     await tx.salaryEmployeeSnapshot.createMany({

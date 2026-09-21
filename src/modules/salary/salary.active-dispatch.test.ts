@@ -390,6 +390,65 @@ describe("Salary snapshot architecture", () => {
     expect(operationalExpenseFindMany).not.toHaveBeenCalled();
   });
 
+  it("keeps only selected employee sources and kasbon without false unmatched data", async () => {
+    const selectedId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const otherId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const employees = [
+      { id: selectedId, name: "Team Selected", division: "DRIVER", whatsapp: null, status: "ACTIVE", aliases: [], assignments: [] },
+      { id: otherId, name: "Team Other", division: "DRIVER", whatsapp: null, status: "ACTIVE", aliases: [], assignments: [] },
+    ];
+    const pickup = (id: string, staffName: string) => ({
+      id, operationalDate: new Date("2026-08-01T00:00:00.000Z"), waybillNo: id,
+      staffName, freightAmount: decimal(10_000), syncStatus: "NORMALIZED",
+      normalizationVersion: 1, sourceSyncedAt: new Date("2026-08-01T12:00:00.000Z"),
+      rawPickup: { settlementRaw: "DFOD" },
+    });
+    const createEmployees = vi.fn().mockResolvedValue({ count: 1 });
+    const createPickups = vi.fn().mockResolvedValue({ count: 1 });
+    const createDispatches = vi.fn().mockResolvedValue({ count: 1 });
+    const createKasbons = vi.fn().mockResolvedValue({ count: 1 });
+    const tx = {
+      salaryEmployee: { findMany: vi.fn().mockResolvedValue(employees) },
+      masterPickup: { findMany: vi.fn().mockResolvedValue([
+        pickup("pickup-selected", "Team Selected"),
+        pickup("pickup-other", "Team Other"),
+      ]) },
+      rawDispatch: { findMany: vi.fn().mockResolvedValue([
+        dispatchRecord("dispatch-selected", { courierNameRaw: "Team Selected" }),
+        dispatchRecord("dispatch-other", { courierNameRaw: "Team Other" }),
+      ]) },
+      operationalExpense: { findMany: vi.fn().mockResolvedValue([
+        { id: "kasbon-selected", operationalDate: new Date("2026-08-01T00:00:00.000Z"), teamName: "Team Selected", category: "Kasbon", amount: decimal(100), status: "VALID", description: null },
+        { id: "kasbon-other", operationalDate: new Date("2026-08-01T00:00:00.000Z"), teamName: "Team Other", category: "Kasbon", amount: decimal(100), status: "VALID", description: null },
+      ]) },
+      salaryEmployeeSnapshot: { createMany: createEmployees, findMany: vi.fn().mockResolvedValue([]) },
+      salaryRawPickup: { createMany: createPickups },
+      salaryRawDispatch: { createMany: createDispatches },
+      salaryKasbonSnapshot: { createMany: createKasbons },
+      salaryClosing: { update: vi.fn().mockResolvedValue({}) },
+      salaryAudit: { create: vi.fn().mockResolvedValue({}) },
+    } as unknown as Prisma.TransactionClient;
+    await captureSalaryClosingSnapshots(tx, {
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      outletId: "22222222-2222-4222-8222-222222222222",
+      actorId: "33333333-3333-4333-8333-333333333333",
+      outletCode: "SUM001A",
+    }, {
+      id: "44444444-4444-4444-8444-444444444444",
+      periodStart: new Date("2026-08-01T00:00:00.000Z"),
+      periodEnd: new Date("2026-08-31T00:00:00.000Z"),
+      snapshotCapturedAt: null,
+    }, [selectedId]);
+    expect(createEmployees.mock.calls[0]![0].data.map((row: { salaryEmployeeId: string }) => row.salaryEmployeeId))
+      .toEqual([selectedId]);
+    expect(createPickups.mock.calls[0]![0].data.map((row: { sourceMasterPickupId: string }) => row.sourceMasterPickupId))
+      .toEqual(["pickup-selected"]);
+    expect(createDispatches.mock.calls[0]![0].data.map((row: { sourceMasterDispatchId: string }) => row.sourceMasterDispatchId))
+      .toEqual(["dispatch-selected"]);
+    expect(createKasbons.mock.calls[0]![0].data.map((row: { sourceOperationalExpenseId: string }) => row.sourceOperationalExpenseId))
+      .toEqual(["kasbon-selected"]);
+  });
+
   it("adds only Salary tables and a Salary allocation snapshot link", async () => {
     const migration = await readFile(
       new URL(

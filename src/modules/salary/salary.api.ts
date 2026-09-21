@@ -22,6 +22,8 @@ const messages: Record<string, string> = {
     "Divisi team tidak sesuai dengan salary profile aktif. Tutup atau ganti assignment terlebih dahulu.",
   SALARY_EMPLOYEE_INACTIVE:
     "Team nonaktif tidak dapat menerima Salary Profile baru.",
+  SALARY_EMPLOYEE_NOT_ELIGIBLE:
+    "Satu atau lebih team tidak eligible untuk periode Salary Closing ini.",
   SALARY_ALIAS_CONFLICT:
     "Nama operasional sudah digunakan oleh team lain pada sumber yang sama.",
   SALARY_ASSIGNMENT_OVERLAP: "Periode salary assignment bertumpang tindih.",
