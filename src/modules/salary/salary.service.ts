@@ -6,6 +6,10 @@ import {
 } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import {
+  jakartaOperationalDate,
+  shiftCalendarDate,
+} from "@/lib/dates/jakarta-date";
+import {
   SALARY_DELIVERY_SOURCE,
   SALARY_DISPATCH_STATUS,
   SALARY_PICKUP_SOURCE,
@@ -205,20 +209,6 @@ export async function updateSalaryProfile(
     if (!["DRAFT", "ACTIVE"].includes(existing.status)) {
       throw new SalaryError("SALARY_PROFILE_CONFLICT", 409);
     }
-    const finalizedSnapshot = await tx.salaryClosingProfileSnapshot.findFirst({
-      where: {
-        tenantId: context.tenantId,
-        outletId: context.outletId,
-        salaryProfileId: existing.id,
-        salaryClosing: {
-          status: { in: ["CLOSED", "PROCESSED", "PAID"] },
-        },
-      },
-      select: { id: true },
-    });
-    if (finalizedSnapshot) {
-      throw new SalaryError("SALARY_PROFILE_FINALIZED", 409);
-    }
     await tx.salaryProfile.update({
       where: { id: existing.id },
       data: {
@@ -278,6 +268,138 @@ export async function updateSalaryProfile(
   });
 }
 
+export async function createSalaryProfileVersion(
+  context: SalaryContext,
+  profileId: string,
+  input: ProfileInput,
+) {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const existing = await tx.salaryProfile.findFirst({
+        where: {
+          id: profileId,
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+        },
+        include: { setting: true },
+      });
+      if (!existing) throw new SalaryError("SALARY_PROFILE_NOT_FOUND", 404);
+      if (existing.status !== "ACTIVE") {
+        throw new SalaryError("SALARY_PROFILE_CONFLICT", 409);
+      }
+      const start = calendarDate(input.effectiveFrom);
+      const oldEnd = previousDay(input.effectiveFrom);
+      if (
+        start <= existing.effectiveFrom ||
+        input.version <= existing.version ||
+        (existing.effectiveTo && start > new Date(existing.effectiveTo.getTime() + 86_400_000))
+      ) {
+        throw new SalaryError("SALARY_PROFILE_VERSION_DATE_INVALID", 409);
+      }
+
+      const assignments = await tx.employeeSalaryAssignment.findMany({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          salaryProfileId: existing.id,
+          status: "ACTIVE",
+          effectiveFrom: { lt: start },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: start } }],
+          employee: { status: "ACTIVE" },
+        },
+        select: {
+          id: true,
+          employeeId: true,
+          effectiveFrom: true,
+          effectiveTo: true,
+        },
+      });
+      for (const assignment of assignments) {
+        const overlap = await tx.employeeSalaryAssignment.findFirst({
+          where: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            employeeId: assignment.employeeId,
+            id: { not: assignment.id },
+            effectiveFrom: { lte: assignment.effectiveTo ?? new Date("9999-12-31T00:00:00.000Z") },
+            OR: [{ effectiveTo: null }, { effectiveTo: { gte: start } }],
+          },
+          select: { id: true },
+        });
+        if (overlap) throw new SalaryError("SALARY_ASSIGNMENT_OVERLAP", 409);
+      }
+
+      const profile = await tx.salaryProfile.create({
+        data: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          code: existing.code,
+          name: input.name,
+          division: existing.division,
+          description: input.description || null,
+          effectiveFrom: start,
+          effectiveTo: input.effectiveTo ? calendarDate(input.effectiveTo) : null,
+          version: input.version,
+          status: "ACTIVE",
+          createdByUserId: context.actorId,
+        },
+      });
+      await tx.salaryProfileSetting.create({
+        data: { salaryProfileId: profile.id, ...settingData(context, input) },
+      });
+      await tx.salaryProfile.update({
+        where: { id: existing.id },
+        data: { effectiveTo: oldEnd },
+      });
+      for (const assignment of assignments) {
+        await tx.employeeSalaryAssignment.update({
+          where: { id: assignment.id },
+          data: { effectiveTo: oldEnd, status: "INACTIVE" },
+        });
+        await tx.employeeSalaryAssignment.create({
+          data: {
+            tenantId: context.tenantId,
+            outletId: context.outletId,
+            employeeId: assignment.employeeId,
+            salaryProfileId: profile.id,
+            effectiveFrom: start,
+            effectiveTo: assignment.effectiveTo,
+            status: "ACTIVE",
+            createdByUserId: context.actorId,
+          },
+        });
+      }
+      await tx.salaryAudit.create({ data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        actorId: context.actorId,
+        action: "CREATE_VERSION",
+        entityType: "SALARY_PROFILE",
+        entityId: profile.id,
+        metadata: {
+          previousProfileId: existing.id,
+          effectiveFrom: input.effectiveFrom,
+          previousEffectiveTo: oldEnd.toISOString().slice(0, 10),
+          migratedAssignmentCount: assignments.length,
+        },
+      } });
+      return tx.salaryProfile.findUniqueOrThrow({
+        where: { id: profile.id },
+        include: profileInclude,
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw new SalaryError("SALARY_PROFILE_CONFLICT", 409);
+    }
+    if (error instanceof SalaryError) throw error;
+    throw new SalaryError("SALARY_SAVE_FAILED", 500);
+  }
+}
+
 export async function activateSalaryProfile(
   context: SalaryContext,
   id: string,
@@ -330,7 +452,7 @@ export async function listSalaryTeam(
         ? { name: { contains: input.search, mode: "insensitive" } }
         : {}),
       ...(input.division ? { division: input.division } : {}),
-      ...(input.status ? { status: input.status } : {}),
+      ...(input.status === "" ? {} : { status: input.status ?? "ACTIVE" }),
     },
     include: {
       assignments: {
@@ -491,6 +613,9 @@ export async function updateSalaryEmployee(
         status: input.status,
       },
     });
+    if (existing.status === "ACTIVE" && input.status === "INACTIVE") {
+      await deactivateSalaryEmployee(tx, context, employee);
+    }
     await tx.salaryAudit.create({ data: {
       tenantId: context.tenantId,
       outletId: context.outletId,
@@ -523,6 +648,57 @@ export type SalarySettingRemovalResult = {
   message: string;
 };
 
+async function deactivateSalaryEmployee(
+  tx: Prisma.TransactionClient,
+  context: SalaryContext,
+  employee: { id: string; status: SalaryEmployeeStatus },
+) {
+  const cutoff = calendarDate(shiftCalendarDate(jakartaOperationalDate(), -1));
+  const activeAssignments = await tx.employeeSalaryAssignment.findMany({
+    where: {
+      tenantId: context.tenantId,
+      outletId: context.outletId,
+      employeeId: employee.id,
+      status: "ACTIVE",
+    },
+    select: { id: true, effectiveFrom: true, effectiveTo: true },
+  });
+  await tx.salaryEmployee.update({
+    where: { id: employee.id },
+    data: { status: "INACTIVE" },
+  });
+  await tx.salaryEmployeeAlias.updateMany({
+    where: {
+      tenantId: context.tenantId,
+      outletId: context.outletId,
+      salaryEmployeeId: employee.id,
+      isActive: true,
+    },
+    data: { isActive: false },
+  });
+  await tx.teamMembership.updateMany({
+    where: {
+      tenantId: context.tenantId,
+      outletId: context.outletId,
+      salaryEmployeeId: employee.id,
+      status: "ACTIVE",
+    },
+    data: { status: "INACTIVE", effectiveUntil: new Date() },
+  });
+  for (const assignment of activeAssignments) {
+    const boundedCutoff = cutoff < assignment.effectiveFrom
+      ? assignment.effectiveFrom
+      : cutoff;
+    const effectiveTo = assignment.effectiveTo && assignment.effectiveTo < boundedCutoff
+      ? assignment.effectiveTo
+      : boundedCutoff;
+    await tx.employeeSalaryAssignment.update({
+      where: { id: assignment.id },
+      data: { status: "INACTIVE", effectiveTo },
+    });
+  }
+}
+
 export async function removeSalaryEmployee(
   context: SalaryContext,
   employeeId: string,
@@ -537,109 +713,22 @@ export async function removeSalaryEmployee(
     });
     if (!employee) throw new SalaryError("SALARY_EMPLOYEE_NOT_FOUND", 404);
 
-    const [assignment, employeeSnapshot, closingEmployee, sourceRecord] =
-      await Promise.all([
-        tx.employeeSalaryAssignment.findFirst({
-          where: {
-            tenantId: context.tenantId,
-            outletId: context.outletId,
-            employeeId: employee.id,
-          },
-          select: { id: true },
-        }),
-        tx.salaryEmployeeSnapshot.findFirst({
-          where: {
-            tenantId: context.tenantId,
-            outletId: context.outletId,
-            salaryEmployeeId: employee.id,
-          },
-          select: { id: true },
-        }),
-        tx.salaryClosingEmployee.findFirst({
-          where: {
-            tenantId: context.tenantId,
-            outletId: context.outletId,
-            employeeId: employee.id,
-          },
-          select: { id: true },
-        }),
-        tx.salaryClosingSourceRecord.findFirst({
-          where: {
-            tenantId: context.tenantId,
-            outletId: context.outletId,
-            matchedSalaryEmployeeId: employee.id,
-          },
-          select: { id: true },
-        }),
-      ]);
-    const hasHistory = Boolean(
-      assignment || employeeSnapshot || closingEmployee || sourceRecord,
-    );
-
-    if (hasHistory) {
-      await tx.salaryEmployee.update({
-        where: { id: employee.id },
-        data: { status: "INACTIVE" },
-      });
-      await tx.salaryEmployeeAlias.updateMany({
-        where: {
-          tenantId: context.tenantId,
-          outletId: context.outletId,
-          salaryEmployeeId: employee.id,
-          isActive: true,
-        },
-        data: { isActive: false },
-      });
-      await tx.employeeSalaryAssignment.updateMany({
-        where: {
-          tenantId: context.tenantId,
-          outletId: context.outletId,
-          employeeId: employee.id,
-          status: "ACTIVE",
-        },
-        data: { status: "INACTIVE" },
-      });
-      await tx.salaryAudit.create({
-        data: {
-          tenantId: context.tenantId,
-          outletId: context.outletId,
-          actorId: context.actorId,
-          action: "TEAM_DEACTIVATED",
-          entityType: "SALARY_EMPLOYEE",
-          entityId: employee.id,
-          metadata: { previousStatus: employee.status },
-        },
-      });
-      return {
-        id: employee.id,
-        action: "DEACTIVATED",
-        message: "Data dipertahankan karena sudah memiliki histori.",
-      };
-    }
-
-    await tx.salaryEmployeeAlias.deleteMany({
-      where: {
-        tenantId: context.tenantId,
-        outletId: context.outletId,
-        salaryEmployeeId: employee.id,
-      },
-    });
-    await tx.salaryEmployee.delete({ where: { id: employee.id } });
+    await deactivateSalaryEmployee(tx, context, employee);
     await tx.salaryAudit.create({
       data: {
         tenantId: context.tenantId,
         outletId: context.outletId,
         actorId: context.actorId,
-        action: "TEAM_DELETED",
+        action: "TEAM_DEACTIVATED",
         entityType: "SALARY_EMPLOYEE",
         entityId: employee.id,
-        metadata: { name: employee.name },
+        metadata: { previousStatus: employee.status },
       },
     });
     return {
       id: employee.id,
-      action: "DELETED",
-      message: "Team berhasil dihapus.",
+      action: "DEACTIVATED",
+      message: "Team dinonaktifkan. Seluruh data historis tetap tersimpan.",
     };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
@@ -770,6 +859,9 @@ export async function assignSalaryProfile(
       }),
     ]);
     if (!employee) throw new SalaryError("SALARY_EMPLOYEE_NOT_FOUND", 404);
+    if (employee.status !== "ACTIVE") {
+      throw new SalaryError("SALARY_EMPLOYEE_INACTIVE", 409);
+    }
     if (!profile) throw new SalaryError("SALARY_SCOPE_MISMATCH", 404);
     if (profile.division !== employee.division) {
       throw new SalaryError("SALARY_SCOPE_MISMATCH", 409);

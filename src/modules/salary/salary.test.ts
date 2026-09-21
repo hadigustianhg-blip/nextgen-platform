@@ -20,11 +20,13 @@ const tx = vi.hoisted(() => ({
     create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), delete: vi.fn(),
   },
   salaryEmployeeAlias: { updateMany: vi.fn(), deleteMany: vi.fn() },
+  teamMembership: { updateMany: vi.fn() },
   salaryEmployeeSnapshot: { findFirst: vi.fn() },
   salaryClosingEmployee: { findFirst: vi.fn() },
   salaryClosingSourceRecord: { findFirst: vi.fn() },
   employeeSalaryAssignment: {
-    create: vi.fn(), findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn(),
+    create: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(),
+    update: vi.fn(), updateMany: vi.fn(),
   },
   salaryClosing: { create: vi.fn(), findFirst: vi.fn() },
   salaryClosingSequence: { upsert: vi.fn() },
@@ -44,10 +46,12 @@ import {
   createSalaryClosingInTransaction,
   createSalaryEmployee,
   createSalaryProfile,
+  createSalaryProfileVersion,
   isSalaryEligibleDispatchStatus,
   isSalarySettlement,
   listSalaryClosings,
   listSalaryProfiles,
+  listSalaryTeam,
   removeSalaryEmployee,
   removeSalaryProfile,
   salaryAssignmentSchema,
@@ -117,6 +121,7 @@ beforeEach(() => {
   tx.salaryClosingEmployee.findFirst.mockResolvedValue(null);
   tx.salaryClosingSourceRecord.findFirst.mockResolvedValue(null);
   tx.employeeSalaryAssignment.findFirst.mockResolvedValue(null);
+  tx.employeeSalaryAssignment.findMany.mockResolvedValue([]);
   tx.salaryAudit.create.mockResolvedValue({ id: "audit-1" });
   db.salaryClosing.count.mockResolvedValue(0);
 });
@@ -221,17 +226,7 @@ describe("Salary profile validation and persistence", () => {
       ...profileInput,
       name: "Driver 2026 Revisi",
     });
-    expect(tx.salaryClosingProfileSnapshot.findFirst).toHaveBeenCalledWith({
-      where: {
-        tenantId: scope.tenantId,
-        outletId: scope.outletId,
-        salaryProfileId: "profile-1",
-        salaryClosing: {
-          status: { in: ["CLOSED", "PROCESSED", "PAID"] },
-        },
-      },
-      select: { id: true },
-    });
+    expect(tx.salaryClosingProfileSnapshot.findFirst).not.toHaveBeenCalled();
     expect(tx.salaryAudit.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         actorId: context.actorId,
@@ -245,39 +240,33 @@ describe("Salary profile validation and persistence", () => {
     });
   });
 
-  it("locks a profile used by a final closing without changing its snapshot", async () => {
+  it("edits a profile used by a snapshotted closing without changing its snapshot", async () => {
     tx.salaryProfile.findFirst.mockResolvedValueOnce({
       id: "profile-1",
       ...profileInput,
       status: "ACTIVE",
     });
-    tx.salaryClosingProfileSnapshot.findFirst.mockResolvedValueOnce({
-      id: "snapshot-1",
-    });
     await expect(updateSalaryProfile(context, "profile-1", profileInput))
-      .rejects.toMatchObject({ code: "SALARY_PROFILE_FINALIZED", status: 409 });
-    expect(tx.salaryProfile.update).not.toHaveBeenCalled();
-    expect(tx.salaryProfileSetting.upsert).not.toHaveBeenCalled();
+      .resolves.toMatchObject({ id: "profile-1" });
+    expect(tx.salaryProfile.update).toHaveBeenCalled();
+    expect(tx.salaryProfileSetting.upsert).toHaveBeenCalled();
+    expect(tx.salaryClosingProfileSnapshot).not.toHaveProperty("update");
   });
 });
 
 describe("Salary team and assignment", () => {
-  it("hard deletes an unused scoped team and records TEAM_DELETED", async () => {
+  it("soft deactivates an unused scoped team and never deletes it", async () => {
     tx.salaryEmployee.findFirst.mockResolvedValueOnce({
       id: "employee-1", name: "Team Baru", status: "ACTIVE",
     });
-    tx.salaryEmployee.delete.mockResolvedValueOnce({ id: "employee-1" });
-
     await expect(removeSalaryEmployee(context, "employee-1")).resolves.toEqual({
       id: "employee-1",
-      action: "DELETED",
-      message: "Team berhasil dihapus.",
+      action: "DEACTIVATED",
+      message: "Team dinonaktifkan. Seluruh data historis tetap tersimpan.",
     });
-    expect(tx.salaryEmployee.delete).toHaveBeenCalledWith({
-      where: { id: "employee-1" },
-    });
+    expect(tx.salaryEmployee.delete).not.toHaveBeenCalled();
     expect(tx.salaryAudit.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ action: "TEAM_DELETED" }),
+      data: expect.objectContaining({ action: "TEAM_DEACTIVATED" }),
     });
   });
 
@@ -287,18 +276,30 @@ describe("Salary team and assignment", () => {
     });
     tx.salaryEmployeeSnapshot.findFirst.mockResolvedValueOnce({ id: "snapshot-1" });
     tx.salaryEmployee.update.mockResolvedValueOnce({ id: "employee-1" });
+    tx.employeeSalaryAssignment.findMany.mockResolvedValueOnce([{
+      id: "assignment-1",
+      effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+      effectiveTo: null,
+    }]);
 
     await expect(removeSalaryEmployee(context, "employee-1")).resolves.toEqual({
       id: "employee-1",
       action: "DEACTIVATED",
-      message: "Data dipertahankan karena sudah memiliki histori.",
+      message: "Team dinonaktifkan. Seluruh data historis tetap tersimpan.",
     });
     expect(tx.salaryEmployee.update).toHaveBeenCalledWith({
       where: { id: "employee-1" }, data: { status: "INACTIVE" },
     });
-    expect(tx.employeeSalaryAssignment.updateMany).toHaveBeenCalledWith({
-      where: expect.objectContaining({ employeeId: "employee-1", status: "ACTIVE" }),
-      data: { status: "INACTIVE" },
+    expect(tx.employeeSalaryAssignment.update).toHaveBeenCalledWith({
+      where: { id: "assignment-1" },
+      data: { status: "INACTIVE", effectiveTo: expect.any(Date) },
+    });
+    expect(tx.salaryEmployeeAlias.updateMany).toHaveBeenCalled();
+    expect(tx.teamMembership.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        salaryEmployeeId: "employee-1", status: "ACTIVE",
+      }),
+      data: { status: "INACTIVE", effectiveUntil: expect.any(Date) },
     });
     expect(tx.salaryEmployee.delete).not.toHaveBeenCalled();
     expect(tx.salaryEmployeeSnapshot).not.toHaveProperty("update");
@@ -437,6 +438,30 @@ describe("Salary team and assignment", () => {
     });
   });
 
+  it("rejects a new assignment for an inactive employee", async () => {
+    tx.salaryEmployee.findFirst.mockResolvedValueOnce({
+      id: "employee-1", status: "INACTIVE", division: "DRIVER",
+    });
+    tx.salaryProfile.findFirst.mockResolvedValueOnce({
+      id: "profile-1", status: "ACTIVE", division: "DRIVER",
+    });
+    await expect(assignSalaryProfile(context, "employee-1", {
+      salaryProfileId: "profile-1",
+      effectiveFrom: "2026-08-01",
+    })).rejects.toMatchObject({ code: "SALARY_EMPLOYEE_INACTIVE", status: 409 });
+    expect(tx.employeeSalaryAssignment.create).not.toHaveBeenCalled();
+  });
+
+  it("lists active employees by default and supports inactive/all filters", async () => {
+    db.salaryEmployee.findMany.mockResolvedValue([]);
+    await listSalaryTeam(scope);
+    await listSalaryTeam(scope, { status: "INACTIVE" });
+    await listSalaryTeam(scope, { status: "" });
+    expect(db.salaryEmployee.findMany.mock.calls[0]?.[0].where.status).toBe("ACTIVE");
+    expect(db.salaryEmployee.findMany.mock.calls[1]?.[0].where.status).toBe("INACTIVE");
+    expect(db.salaryEmployee.findMany.mock.calls[2]?.[0].where).not.toHaveProperty("status");
+  });
+
   it("rejects an employee or profile outside the active scope", async () => {
     tx.salaryEmployee.findFirst.mockResolvedValueOnce(null);
     tx.salaryProfile.findFirst.mockResolvedValueOnce({ id: "profile-1" });
@@ -445,7 +470,7 @@ describe("Salary team and assignment", () => {
       effectiveFrom: "2026-08-01",
     })).rejects.toMatchObject({ code: "SALARY_EMPLOYEE_NOT_FOUND" });
     tx.salaryEmployee.findFirst.mockResolvedValueOnce({
-      id: "employee-1", division: "DRIVER",
+      id: "employee-1", status: "ACTIVE", division: "DRIVER",
     });
     tx.salaryProfile.findFirst.mockResolvedValueOnce(null);
     await expect(assignSalaryProfile(context, "employee-1", {
@@ -456,7 +481,7 @@ describe("Salary team and assignment", () => {
 
   it("closes an older active assignment before creating the next version", async () => {
     tx.salaryEmployee.findFirst.mockResolvedValueOnce({
-      id: "employee-1", division: "DRIVER",
+      id: "employee-1", status: "ACTIVE", division: "DRIVER",
     });
     tx.salaryProfile.findFirst.mockResolvedValueOnce({
       id: "profile-2", division: "DRIVER",
@@ -484,7 +509,7 @@ describe("Salary team and assignment", () => {
 
   it("backdates the same active profile to the closing period after submit", async () => {
     tx.salaryEmployee.findFirst.mockResolvedValueOnce({
-      id: "employee-1", division: "DRIVER",
+      id: "employee-1", status: "ACTIVE", division: "DRIVER",
     });
     tx.salaryProfile.findFirst.mockResolvedValueOnce({
       id: "profile-1", division: "DRIVER",
@@ -523,7 +548,7 @@ describe("Salary team and assignment", () => {
 
   it("rejects overlapping historical assignment periods", async () => {
     tx.salaryEmployee.findFirst.mockResolvedValueOnce({
-      id: "employee-1", division: "DRIVER",
+      id: "employee-1", status: "ACTIVE", division: "DRIVER",
     });
     tx.salaryProfile.findFirst.mockResolvedValueOnce({
       id: "profile-2", division: "DRIVER",
@@ -535,6 +560,125 @@ describe("Salary team and assignment", () => {
       salaryProfileId: "profile-2",
       effectiveFrom: "2026-08-01",
     })).rejects.toMatchObject({ code: "SALARY_ASSIGNMENT_OVERLAP" });
+  });
+});
+
+describe("Salary profile versioning", () => {
+  const existingProfile = {
+    id: "profile-1",
+    ...profileInput,
+    status: "ACTIVE",
+    effectiveFrom: new Date("2026-07-01T00:00:00.000Z"),
+    effectiveTo: null,
+    setting: { basicDailySalary: new Prisma.Decimal(100000) },
+  };
+  const versionInput = {
+    ...profileInput,
+    effectiveFrom: "2026-09-15",
+    version: 2,
+    basicDailySalary: 125000,
+  };
+
+  it("creates an active version, closes the old profile, and moves active assignments", async () => {
+    tx.salaryProfile.findFirst.mockResolvedValueOnce(existingProfile);
+    tx.employeeSalaryAssignment.findMany.mockResolvedValueOnce([{
+      id: "assignment-old",
+      employeeId: "employee-active",
+      effectiveFrom: new Date("2026-07-01T00:00:00.000Z"),
+      effectiveTo: null,
+    }]);
+    tx.employeeSalaryAssignment.findFirst.mockResolvedValueOnce(null);
+    tx.salaryProfile.create.mockResolvedValueOnce({
+      id: "profile-2", code: profileInput.code, version: 2,
+      division: "DRIVER",
+    });
+    tx.salaryProfile.findUniqueOrThrow.mockResolvedValueOnce({
+      id: "profile-2", version: 2, setting: { basicDailySalary: 125000 },
+    });
+
+    await expect(createSalaryProfileVersion(context, "profile-1", versionInput))
+      .resolves.toMatchObject({ id: "profile-2", version: 2 });
+    expect(tx.salaryProfile.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        code: profileInput.code,
+        version: 2,
+        status: "ACTIVE",
+        effectiveFrom: new Date("2026-09-15T00:00:00.000Z"),
+      }),
+    });
+    expect(tx.salaryProfileSetting.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        salaryProfileId: "profile-2",
+        basicDailySalary: new Prisma.Decimal(125000),
+      }),
+    });
+    expect(tx.salaryProfile.update).toHaveBeenCalledWith({
+      where: { id: "profile-1" },
+      data: { effectiveTo: new Date("2026-09-14T00:00:00.000Z") },
+    });
+    expect(tx.employeeSalaryAssignment.update).toHaveBeenCalledWith({
+      where: { id: "assignment-old" },
+      data: {
+        effectiveTo: new Date("2026-09-14T00:00:00.000Z"),
+        status: "INACTIVE",
+      },
+    });
+    expect(tx.employeeSalaryAssignment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        employeeId: "employee-active",
+        salaryProfileId: "profile-2",
+        effectiveFrom: new Date("2026-09-15T00:00:00.000Z"),
+        status: "ACTIVE",
+      }),
+    });
+    expect(tx.employeeSalaryAssignment.findMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ employee: { status: "ACTIVE" } }),
+      select: expect.any(Object),
+    });
+  });
+
+  it("rejects an invalid effective date before writing anything", async () => {
+    tx.salaryProfile.findFirst.mockResolvedValueOnce(existingProfile);
+    await expect(createSalaryProfileVersion(context, "profile-1", {
+      ...versionInput,
+      effectiveFrom: "2026-07-01",
+    })).rejects.toMatchObject({
+      code: "SALARY_PROFILE_VERSION_DATE_INVALID", status: 409,
+    });
+    expect(tx.salaryProfile.create).not.toHaveBeenCalled();
+    expect(tx.employeeSalaryAssignment.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects assignment overlap before profile or assignment writes", async () => {
+    tx.salaryProfile.findFirst.mockResolvedValueOnce(existingProfile);
+    tx.employeeSalaryAssignment.findMany.mockResolvedValueOnce([{
+      id: "assignment-old",
+      employeeId: "employee-active",
+      effectiveFrom: new Date("2026-07-01T00:00:00.000Z"),
+      effectiveTo: null,
+    }]);
+    tx.employeeSalaryAssignment.findFirst.mockResolvedValueOnce({ id: "conflict" });
+    await expect(createSalaryProfileVersion(context, "profile-1", versionInput))
+      .rejects.toMatchObject({ code: "SALARY_ASSIGNMENT_OVERLAP", status: 409 });
+    expect(tx.salaryProfile.create).not.toHaveBeenCalled();
+    expect(tx.employeeSalaryAssignment.update).not.toHaveBeenCalled();
+  });
+
+  it("uses one serializable transaction so a failed write rolls back the operation", async () => {
+    tx.salaryProfile.findFirst.mockResolvedValueOnce(existingProfile);
+    tx.employeeSalaryAssignment.findMany.mockResolvedValueOnce([]);
+    tx.salaryProfile.create.mockResolvedValueOnce({
+      id: "profile-2", code: profileInput.code, version: 2,
+      division: "DRIVER",
+    });
+    tx.salaryProfileSetting.create.mockRejectedValueOnce(new Error("write failed"));
+    await expect(createSalaryProfileVersion(context, "profile-1", versionInput))
+      .rejects.toMatchObject({ code: "SALARY_SAVE_FAILED", status: 500 });
+    expect(db.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+    expect(tx.salaryProfile.update).not.toHaveBeenCalled();
   });
 });
 

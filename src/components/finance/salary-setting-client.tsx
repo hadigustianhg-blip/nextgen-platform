@@ -135,12 +135,13 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
   const [team, setTeam] = useState<Employee[]>([]);
   const [search, setSearch] = useState("");
   const [division, setDivision] = useState("");
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState("ACTIVE");
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [editingProfileId, setEditingProfileId] = useState("");
+  const [versionSourceId, setVersionSourceId] = useState("");
   const [profileForm, setProfileForm] = useState(emptyProfile());
   const [profileSaving, setProfileSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
@@ -198,9 +199,12 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
       profileForm[key] === "" ? null : Number(profileForm[key]),
     ]));
     const isEditing = Boolean(editingProfileId);
+    const isVersioning = Boolean(versionSourceId);
     try {
       const response = await fetch(
-        editingProfileId
+        versionSourceId
+          ? `/api/finance/salary/profiles/${versionSourceId}/versions`
+          : editingProfileId
           ? `/api/finance/salary/profiles/${editingProfileId}`
           : "/api/finance/salary/profiles",
         {
@@ -224,8 +228,11 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
       }
       setProfileOpen(false);
       setEditingProfileId("");
+      setVersionSourceId("");
       setProfileForm(emptyProfile());
-      setNotice(isEditing
+      setNotice(isVersioning
+        ? "Versi Salary Profile baru berhasil dibuat dan assignment aktif sudah dipindahkan."
+        : isEditing
         ? "Salary profile berhasil diperbarui."
         : "Salary profile berhasil disimpan.");
       await loadData();
@@ -237,6 +244,7 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
   }
 
   function editProfile(profile: Profile) {
+    setVersionSourceId("");
     setEditingProfileId(profile.id);
     setProfileForm({
       code: profile.code,
@@ -251,6 +259,26 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
         profile.setting?.[key] == null ? "" : String(profile.setting[key]),
       ])),
     } as ProfileForm);
+    setProfileOpen(true);
+  }
+
+  function createProfileVersion(profile: Profile) {
+    setEditingProfileId("");
+    setVersionSourceId(profile.id);
+    setProfileForm({
+      code: profile.code,
+      name: profile.name,
+      division: profile.division,
+      description: profile.description || "",
+      effectiveFrom: jakartaOperationalDate(),
+      effectiveTo: "",
+      version: String(profile.version + 1),
+      ...Object.fromEntries(numericFields.map(([key]) => [
+        key,
+        profile.setting?.[key] == null ? "" : String(profile.setting[key]),
+      ])),
+    } as ProfileForm);
+    setFieldErrors({});
     setProfileOpen(true);
   }
 
@@ -434,9 +462,9 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
           <select aria-label="Filter status" value={status}
             onChange={(event) => setStatus(event.target.value)}
             className={nextgenControlClass}>
-            <option value="">Semua status</option>
             <option value="ACTIVE">Aktif</option>
             <option value="INACTIVE">Tidak Aktif</option>
+            <option value="">Semua Status</option>
           </select>
           <button type="button" disabled={loading} onClick={() => void loadData()}
             className={nextgenNeutralButtonClass}>
@@ -487,15 +515,16 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
                 <td className="px-3 py-3">{canManage && <div className="flex gap-2">
                   <button type="button" onClick={() => openEditTeam(employee)}
                     className={nextgenNeutralButtonClass}>Edit</button>
-                  <button type="button" onClick={() => {
+                  {employee.status === "ACTIVE" && <button type="button" onClick={() => {
                     setAssignmentEmployee(employee);
                     setAssignmentProfileId("");
                   }} className={nextgenNeutralButtonClass}>Assign Profile</button>
+                  }
                   <button type="button" disabled={deleteSaving}
                     onClick={() => setDeleteTarget({
                       kind: "team", id: employee.id, name: employee.name,
                     })} className={nextgenNeutralButtonClass}>
-                    <Trash2 size={16}/>Hapus
+                    <Trash2 size={16}/>Nonaktifkan
                   </button>
                 </div>}</td>
               </tr>;
@@ -528,6 +557,9 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
               <div className="flex gap-2">
                 <button type="button" onClick={() => editProfile(profile)}
                   className={nextgenNeutralButtonClass}>Edit</button>
+                {profile.status === "ACTIVE" && <button type="button"
+                  onClick={() => createProfileVersion(profile)}
+                  className={nextgenNeutralButtonClass}>Buat Versi Baru</button>}
                 {profile.status === "DRAFT" && <button type="button"
                   onClick={() => setActivationTarget(profile)}
                   className={nextgenNeutralButtonClass}><Check size={16}/>Aktifkan</button>}
@@ -548,17 +580,24 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
         <div className="flex shrink-0 items-center justify-between border-b p-5">
           <div><p className="text-sm text-slate-500">Salary Setting</p>
             <h2 className="text-xl font-bold">
-              {editingProfileId ? "Edit Salary Profile" : "Tambah Salary Profile"}
+              {versionSourceId ? "Buat Versi Salary Profile Baru"
+                : editingProfileId ? "Edit Salary Profile" : "Tambah Salary Profile"}
             </h2></div>
           <button type="button" disabled={profileSaving}
             onClick={() => {
               setProfileOpen(false);
               setEditingProfileId("");
+              setVersionSourceId("");
               setProfileForm(emptyProfile());
             }}><X/></button>
         </div>
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
           <AppCard className="p-4">
+            {(editingProfileId || versionSourceId) && <p className="mb-4 rounded-lg bg-sky-50 p-3 text-sm text-sky-900">
+              {versionSourceId
+                ? "Gunakan versi baru jika perubahan gaji mulai berlaku pada tanggal tertentu. Profile dan assignment lama akan ditutup sehari sebelumnya."
+                : "Perubahan berlaku pada Salary Closing yang belum mengambil snapshot."}
+            </p>}
             <h3 className="mb-4 font-bold">Informasi Dasar</h3>
             <div className="grid gap-4 md:grid-cols-2">
             {[
@@ -582,6 +621,7 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
             </label>
             <label className="text-sm font-semibold text-slate-700">Version
               <input type="number" min="1" value={profileForm.version}
+                readOnly={Boolean(versionSourceId)}
                 onChange={(event) => setProfileForm((current) => ({
                   ...current, version: event.target.value,
                 }))} className={`${nextgenControlClass} mt-1`}/>
@@ -696,12 +736,15 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
             onClick={() => {
               setProfileOpen(false);
               setEditingProfileId("");
+              setVersionSourceId("");
               setProfileForm(emptyProfile());
             }} className={nextgenNeutralButtonClass}>Batal</button>
           <button type="button" disabled={profileSaving}
             onClick={() => void saveProfile()} className={nextgenButtonClass}>
             {profileSaving && <LoaderCircle className="animate-spin" size={17}/>}
-            {profileSaving ? "Menyimpan..." : editingProfileId
+            {profileSaving ? "Menyimpan..." : versionSourceId
+              ? "Buat Versi Baru"
+              : editingProfileId
               ? "Simpan Perubahan"
               : "Simpan Salary Profile"}
           </button>
@@ -810,11 +853,16 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
       <ModalCard className="max-w-lg">
         <div className="border-b p-5">
           <h2 className="text-xl font-bold">
-            Hapus {deleteTarget.kind === "team" ? "Team" : "Salary Profile"}
+            {deleteTarget.kind === "team" ? "Nonaktifkan Team" : "Hapus Salary Profile"}
           </h2>
           <p className="mt-2 text-sm text-slate-600">
-            Hapus <strong>{deleteTarget.name}</strong>? Data yang sudah memiliki histori
-            Salary akan dipertahankan dan hanya dinonaktifkan.
+            {deleteTarget.kind === "team" ? <>
+              <strong>{deleteTarget.name}</strong> akan dinonaktifkan. Riwayat salary,
+              absensi, kasbon, delivery dan data historis tetap tersimpan.
+            </> : <>
+              Hapus <strong>{deleteTarget.name}</strong>? Data yang sudah memiliki histori
+              Salary akan dipertahankan dan hanya dinonaktifkan.
+            </>}
           </p>
         </div>
         <div className="flex justify-end gap-3 p-4">
@@ -825,7 +873,9 @@ export function SalarySettingClient({ canManage }: { canManage: boolean }) {
           <button type="button" disabled={deleteSaving}
             onClick={() => void removeSettingData()} className={nextgenButtonClass}>
             {deleteSaving && <LoaderCircle className="animate-spin" size={17}/>}
-            {deleteSaving ? "Memproses..." : "Hapus"}
+            {deleteSaving ? "Memproses..." : deleteTarget.kind === "team"
+              ? "Nonaktifkan"
+              : "Hapus"}
           </button>
         </div>
       </ModalCard>

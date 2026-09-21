@@ -15,9 +15,13 @@ const messages: Record<string, string> = {
   SALARY_PROFILE_CONFLICT: "Kode dan versi salary profile sudah digunakan.",
   SALARY_PROFILE_FINALIZED:
     "Salary profile sudah digunakan pada closing dan tidak dapat diubah. Buat profile versi baru.",
+  SALARY_PROFILE_VERSION_DATE_INVALID:
+    "Tanggal mulai versi baru harus setelah tanggal mulai profile sebelumnya.",
   SALARY_EMPLOYEE_NOT_FOUND: "Team tidak ditemukan.",
   SALARY_EMPLOYEE_ASSIGNMENT_CONFLICT:
     "Divisi team tidak sesuai dengan salary profile aktif. Tutup atau ganti assignment terlebih dahulu.",
+  SALARY_EMPLOYEE_INACTIVE:
+    "Team nonaktif tidak dapat menerima Salary Profile baru.",
   SALARY_ALIAS_CONFLICT:
     "Nama operasional sudah digunakan oleh team lain pada sumber yang sama.",
   SALARY_ASSIGNMENT_OVERLAP: "Periode salary assignment bertumpang tindih.",

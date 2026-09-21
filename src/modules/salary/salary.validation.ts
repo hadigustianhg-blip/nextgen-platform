@@ -91,8 +91,13 @@ export const salaryProfileSchema = z.object({
 export const salaryTeamQuerySchema = z.object({
   search: z.string().trim().max(100).optional().default(""),
   division: division.or(z.literal("")).optional().default(""),
-  status: z.enum(["ACTIVE", "INACTIVE"]).or(z.literal("")).optional().default(""),
+  status: z.enum(["ACTIVE", "INACTIVE"]).or(z.literal("")).optional().default("ACTIVE"),
 });
+
+export const salaryProfileVersionSchema = salaryProfileSchema.refine(
+  (value) => Boolean(value.effectiveFrom),
+  { path: ["effectiveFrom"], message: "Tanggal mulai versi baru wajib diisi." },
+);
 
 export const salaryTeamSchema = z.object({
   name: z.string().trim().min(1).max(150),
