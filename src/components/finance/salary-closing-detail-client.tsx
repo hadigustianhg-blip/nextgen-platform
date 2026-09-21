@@ -17,6 +17,7 @@ import {
 } from "@/components/ui";
 import {
   applySelectedKasbon,
+  setAllKasbonSelection,
   selectedKasbonTotal,
   toggleKasbonSelection,
 } from "./salary-closing-kasbon-selection";
@@ -238,6 +239,9 @@ export function SalaryClosingDetailClient({
   );
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const allKasbonSelected = eligibleKasbon.length > 0 &&
+    selectedKasbonIds.length === eligibleKasbon.length;
+  const someKasbonSelected = selectedKasbonIds.length > 0 && !allKasbonSelected;
 
   async function loadClosing() {
     setLoading(true);
@@ -1032,6 +1036,20 @@ export function SalaryClosingDetailClient({
           <fieldset>
             <legend className="text-sm font-semibold">Kasbon</legend>
             <div className="mt-2 max-h-72 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-2">
+              {!!eligibleKasbon.length && <label
+                className="flex cursor-pointer items-center gap-3 rounded-lg border-b border-slate-200 px-3 py-2.5 text-sm font-semibold hover:bg-slate-50">
+                <input type="checkbox"
+                  checked={allKasbonSelected}
+                  aria-checked={someKasbonSelected ? "mixed" : allKasbonSelected}
+                  ref={(input) => {
+                    if (input) input.indeterminate = someKasbonSelected;
+                  }}
+                  onChange={(event) => setSelectedKasbonIds(
+                    setAllKasbonSelection(eligibleKasbon, event.target.checked)
+                  )}
+                  className="size-4 shrink-0 accent-blue-600"/>
+                <span>Pilih Semua</span>
+              </label>}
               {eligibleKasbon.map((row) => {
                 const checked = selectedKasbonIds.includes(row.id);
                 return <label key={row.id}
@@ -1046,7 +1064,7 @@ export function SalaryClosingDetailClient({
               })}
             </div>
           </fieldset>
-          {!!selectedKasbonIds.length && <p className="text-xs font-medium text-slate-600">
+          {!!eligibleKasbon.length && <p className="text-xs font-medium text-slate-600">
             {selectedKasbonIds.length} kasbon dipilih · Total dipilih {rupiah(
               selectedKasbonTotal(selectedKasbonIds, eligibleKasbon)
             )}

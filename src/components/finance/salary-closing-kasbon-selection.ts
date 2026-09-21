@@ -9,6 +9,13 @@ export function toggleKasbonSelection(selectedIds: string[], kasbonId: string) {
     : [...selectedIds, kasbonId];
 }
 
+export function setAllKasbonSelection(
+  eligibleKasbon: SelectableKasbon[],
+  selected: boolean,
+) {
+  return selected ? eligibleKasbon.map((row) => row.id) : [];
+}
+
 export function resolveSelectedKasbon(
   selectedIds: string[],
   eligibleKasbon: SelectableKasbon[],
