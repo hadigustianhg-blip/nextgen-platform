@@ -183,6 +183,20 @@ export const salaryClosingVoidSchema = z.object({
   reason: z.string().trim().min(5).max(500),
 });
 
+export const salarySourceIgnoreSchema = z.object({
+  sourceIds: z.array(z.string().uuid()).min(1).max(1000).superRefine(
+    (values, context) => {
+      if (new Set(values).size !== values.length) {
+        context.addIssue({
+          code: "custom",
+          message: "Data source yang dipilih tidak boleh duplikat.",
+        });
+      }
+    },
+  ),
+  reason: z.string().trim().min(5).max(500),
+});
+
 export const salaryRecapCancelSchema = z.object({
   reason: z.string().trim().min(5).max(500),
 });

@@ -21,6 +21,9 @@ const dateKey = (value: Date) => value.toISOString().slice(0, 10);
 const dateOnly = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const json = (value: unknown) =>
   JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+const manualIgnoreReason = (reason: string) => `MANUAL_IGNORE:${reason}`;
+const isManualIgnore = (reason: string | null) =>
+  reason?.startsWith("MANUAL_IGNORE:") ?? false;
 
 const exposeKasbonSnapshot = <T extends {
   operationalExpenseId: string;
@@ -191,8 +194,30 @@ export async function generateSalaryClosingInTransaction(
     const { pickups, dispatches, kasbons } =
       await loadSalaryOperationalSnapshots(tx, context, closing.id);
 
-    const pickupIds = pickups.map((row) => row.id);
-    const dispatchIds = dispatches.map((row) => row.id);
+    const ignoredSources = await tx.salaryClosingSourceRecord.findMany({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryClosingId: closing.id,
+        calculationStatus: "EXCLUDED",
+      },
+      select: { id: true, sourceType: true, sourceRecordId: true, exclusionReason: true },
+    });
+    const manualIgnoredSources = ignoredSources.filter((source) =>
+      isManualIgnore(source.exclusionReason)
+    );
+    const ignoredKeys = new Set(manualIgnoredSources.map((source) =>
+      `${source.sourceType}:${source.sourceRecordId}`
+    ));
+    const calculationPickups = pickups.filter((source) =>
+      !ignoredKeys.has(`PICKUP:${source.id}`)
+    );
+    const calculationDispatches = dispatches.filter((source) =>
+      !ignoredKeys.has(`DISPATCH:${source.id}`)
+    );
+
+    const pickupIds = calculationPickups.map((row) => row.id);
+    const dispatchIds = calculationDispatches.map((row) => row.id);
     const conflicts = pickupIds.length || dispatchIds.length
       ? await tx.salaryClosingSourceRecord.findMany({
         where: {
@@ -223,6 +248,9 @@ export async function generateSalaryClosingInTransaction(
         tenantId: context.tenantId,
         outletId: context.outletId,
         salaryClosingId: closing.id,
+        ...(manualIgnoredSources.length
+          ? { id: { notIn: manualIgnoredSources.map((source) => source.id) } }
+          : {}),
       },
     });
     await tx.salaryClosingComponent.deleteMany({
@@ -287,7 +315,7 @@ export async function generateSalaryClosingInTransaction(
       });
     };
 
-    for (const source of pickups) {
+    for (const source of calculationPickups) {
       const match = matchEmployee(source.staffName, "PICKUP");
       if (!match.employeeId) {
         addUnmatched(
@@ -330,7 +358,7 @@ export async function generateSalaryClosingInTransaction(
         },
       ]);
     }
-    for (const source of dispatches) {
+    for (const source of calculationDispatches) {
       const match = matchEmployee(source.courierName, "DISPATCH");
       if (!match.employeeId) {
         addUnmatched(
@@ -854,6 +882,105 @@ export async function getSalaryClosingEmployeeReview(
     ...employee,
     kasbonAllocations: employee.kasbonAllocations.map(exposeKasbonSnapshot),
   } : null;
+}
+
+export async function ignoreSalaryClosingSources(
+  context: SalaryContext,
+  closingId: string,
+  input: { sourceIds: string[]; reason: string },
+) {
+  return prisma.$transaction(async (tx) => {
+    const closing = await tx.salaryClosing.findFirst({
+      where: {
+        id: closingId,
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+      },
+      select: { id: true, status: true },
+    });
+    if (!closing) throw new SalaryError("SALARY_CLOSING_NOT_FOUND", 404);
+    if (closing.status !== "CLOSED") {
+      throw new SalaryError("SALARY_CLOSING_LOCKED", 409);
+    }
+    const sources = await tx.salaryClosingSourceRecord.findMany({
+      where: {
+        id: { in: input.sourceIds },
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryClosingId: closing.id,
+        isActive: true,
+        calculationStatus: "UNMATCHED",
+        salaryClosingEmployeeId: null,
+      },
+      select: { id: true, sourceType: true, sourceRecordId: true },
+    });
+    if (sources.length !== input.sourceIds.length) {
+      throw new SalaryError("SALARY_SOURCE_IGNORE_INVALID", 409);
+    }
+    const ignoredAt = new Date();
+    await tx.salaryClosingSourceRecord.updateMany({
+      where: {
+        id: { in: input.sourceIds },
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryClosingId: closing.id,
+        isActive: true,
+        calculationStatus: "UNMATCHED",
+      },
+      data: {
+        calculationStatus: "EXCLUDED",
+        exclusionReason: manualIgnoreReason(input.reason),
+        isActive: false,
+        metadata: {
+          manualIgnore: {
+            reason: input.reason,
+            actorId: context.actorId,
+            ignoredAt: ignoredAt.toISOString(),
+          },
+        },
+      },
+    });
+    const remaining = await tx.salaryClosingSourceRecord.count({
+      where: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryClosingId: closing.id,
+        isActive: true,
+        calculationStatus: "UNMATCHED",
+      },
+    });
+    await tx.salaryClosing.update({
+      where: { id: closing.id },
+      data: { calculationWarningCount: remaining },
+    });
+    await tx.salaryAudit.create({
+      data: {
+        tenantId: context.tenantId,
+        outletId: context.outletId,
+        salaryClosingId: closing.id,
+        actorId: context.actorId,
+        action: "UPDATE",
+        entityType: "SALARY_SOURCES_MANUALLY_IGNORED",
+        entityId: closing.id,
+        metadata: {
+          sourceIds: input.sourceIds,
+          sources: sources.map((source) => ({
+            id: source.id,
+            sourceType: source.sourceType,
+            sourceRecordId: source.sourceRecordId,
+          })),
+          reason: input.reason,
+          ignoredAt: ignoredAt.toISOString(),
+        },
+      },
+    });
+    return {
+      ignored: sources.length,
+      pickup: sources.filter((source) => source.sourceType === "PICKUP").length,
+      dispatch: sources.filter((source) => source.sourceType === "DISPATCH").length,
+      remaining,
+    };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 export async function processSalaryClosing(

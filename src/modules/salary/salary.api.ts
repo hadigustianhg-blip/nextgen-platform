@@ -46,6 +46,8 @@ const messages: Record<string, string> = {
     "Masih ada team yang belum memiliki Salary Profile pada periode ini. Perbaiki assignment lalu hitung ulang.",
   SALARY_SOURCE_ALREADY_USED:
     "Data operasional sudah digunakan pada salary closing lain.",
+  SALARY_SOURCE_IGNORE_INVALID:
+    "Satu atau lebih data source tidak dapat diabaikan dari closing ini.",
   SALARY_NEGATIVE_NET:
     "Total bersih salary tidak boleh negatif saat diproses.",
   SALARY_KASBON_NOT_FOUND: "Kasbon tidak tersedia untuk team dan periode ini.",

@@ -231,6 +231,11 @@ export function SalaryClosingDetailClient({
   const [recapCancelOpen, setRecapCancelOpen] = useState(false);
   const [recapCancelReason, setRecapCancelReason] = useState("");
   const [recapCancelled, setRecapCancelled] = useState(false);
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [ignoreSourcesOpen, setIgnoreSourcesOpen] = useState(false);
+  const [ignoreReason, setIgnoreReason] = useState(
+    "Part-time harian / Tidak masuk payroll",
+  );
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
@@ -244,6 +249,7 @@ export function SalaryClosingDetailClient({
       if (!response.ok) throw new Error();
       const data = (await response.json()).data as Closing;
       setClosing(data);
+      setSelectedSourceIds([]);
       if (selectedEmployee) {
         setSelectedEmployee(
           data.employees.find((row) => row.id === selectedEmployee.id) ?? null,
@@ -509,6 +515,36 @@ export function SalaryClosingDetailClient({
     }
   }
 
+  async function ignoreSelectedSources() {
+    if (!selectedSourceIds.length || actionLoading || ignoreReason.trim().length < 5) {
+      if (ignoreReason.trim().length < 5) setError("Alasan minimal 5 karakter.");
+      return;
+    }
+    setActionLoading(true);
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/finance/salary/closings/${closingId}/sources/ignore`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sourceIds: selectedSourceIds, reason: ignoreReason }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok) throw new Error(
+        result.error?.message || "Data source gagal diabaikan.",
+      );
+      setIgnoreSourcesOpen(false);
+      setNotice(`${result.data.ignored} data berhasil diabaikan dari Salary Closing.`);
+      await loadClosing();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Data source gagal diabaikan.");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function cancelRecap() {
     if (actionLoading || recapCancelReason.trim().length < 5) {
       if (recapCancelReason.trim().length < 5) {
@@ -698,11 +734,39 @@ export function SalaryClosingDetailClient({
         }} className={`${nextgenButtonClass} mt-3`}>
           Perbaiki Profile Team
         </button>}
+      {!finalReadOnly && canManage && closing.status === "CLOSED" && <div
+        className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
+          <input type="checkbox"
+            checked={selectedSourceIds.length === closing.sourceRecords.length}
+            onChange={(event) => setSelectedSourceIds(event.target.checked
+              ? closing.sourceRecords.map((source) => source.id)
+              : [])}/>
+          Pilih Semua
+        </label>
+        <button type="button" disabled={selectedSourceIds.length === 0 || actionLoading}
+          onClick={() => {
+            setIgnoreReason("Part-time harian / Tidak masuk payroll");
+            setIgnoreSourcesOpen(true);
+          }} className={nextgenNeutralButtonClass}>
+          Abaikan Terpilih ({selectedSourceIds.length})
+        </button>
+      </div>}
       <TableCard className="mt-3"><div className="overflow-x-auto">
         <table className="w-full min-w-[700px] text-left text-sm">
-          <thead><tr>{["Tanggal", "Sumber", "Nama Sumber", "Waybill", "Alasan"]
+          <thead><tr>{[
+            ...(!finalReadOnly && canManage && closing.status === "CLOSED" ? ["Pilih"] : []),
+            "Tanggal", "Sumber", "Nama Sumber", "Waybill", "Alasan",
+          ]
             .map((label) => <th key={label} className="px-3 py-3">{label}</th>)}</tr></thead>
           <tbody>{closing.sourceRecords.map((row) => <tr key={row.id}>
+            {!finalReadOnly && canManage && closing.status === "CLOSED" && <td className="px-3 py-3">
+              <input type="checkbox" aria-label={`Pilih ${row.sourceType} ${row.waybillNumber || row.id}`}
+                checked={selectedSourceIds.includes(row.id)}
+                onChange={(event) => setSelectedSourceIds((current) => event.target.checked
+                  ? [...current, row.id]
+                  : current.filter((id) => id !== row.id))}/>
+            </td>}
             <td className="px-3 py-3">{row.sourceDate.slice(0, 10)}</td>
             <td className="px-3 py-3">{row.sourceType === "PICKUP" ? "Pickup" : "Dispatch"}</td>
             <td className="px-3 py-3">{row.employeeNameRaw || "—"}</td>
@@ -715,6 +779,39 @@ export function SalaryClosingDetailClient({
         </table>
       </div></TableCard>
     </SectionCard>}
+    {ignoreSourcesOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4">
+      <ModalCard className="max-w-xl">
+        <div className="flex items-center justify-between border-b p-5">
+          <h2 className="text-xl font-bold">Abaikan Data dari Salary Closing?</h2>
+          <button type="button" disabled={actionLoading} aria-label="Tutup konfirmasi abaikan"
+            onClick={() => setIgnoreSourcesOpen(false)}><X/></button>
+        </div>
+        <div className="space-y-4 p-5">
+          <p className="text-sm text-slate-700">
+            {selectedSourceIds.length} data akan dikeluarkan dari perhitungan Salary Closing.
+          </p>
+          <p className="text-sm text-slate-600">
+            Data operasional asli tidak akan dihapus dan tetap tersimpan sebagai histori.
+          </p>
+          <label className="block text-sm font-semibold text-slate-700">Alasan
+            <textarea value={ignoreReason} disabled={actionLoading}
+              onChange={(event) => setIgnoreReason(event.target.value)}
+              className={`${nextgenControlClass} mt-1 min-h-24`}/>
+          </label>
+        </div>
+        <div className="flex justify-end gap-3 border-t p-4">
+          <button type="button" disabled={actionLoading}
+            onClick={() => setIgnoreSourcesOpen(false)}
+            className={nextgenNeutralButtonClass}>Batal</button>
+          <button type="button"
+            disabled={actionLoading || selectedSourceIds.length === 0 || ignoreReason.trim().length < 5}
+            onClick={() => void ignoreSelectedSources()} className={nextgenButtonClass}>
+            {actionLoading && <LoaderCircle className="animate-spin" size={17}/>}
+            {actionLoading ? "Mengabaikan..." : `Abaikan ${selectedSourceIds.length} Data`}
+          </button>
+        </div>
+      </ModalCard>
+    </div>}
     <SectionCard title="Team Salary">
       <div className={`mb-4 rounded-xl border p-4 text-sm ${allTeamsReviewed
         ? "border-emerald-200 bg-emerald-50 text-emerald-900"
