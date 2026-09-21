@@ -289,12 +289,29 @@ export async function createSalaryProfileVersion(
       }
       const start = calendarDate(input.effectiveFrom);
       const oldEnd = previousDay(input.effectiveFrom);
+      const requestedEnd = input.effectiveTo
+        ? calendarDate(input.effectiveTo)
+        : new Date("9999-12-31T00:00:00.000Z");
       if (
         start <= existing.effectiveFrom ||
         input.version <= existing.version ||
         (existing.effectiveTo && start > new Date(existing.effectiveTo.getTime() + 86_400_000))
       ) {
         throw new SalaryError("SALARY_PROFILE_VERSION_DATE_INVALID", 409);
+      }
+      const conflictingSibling = await tx.salaryProfile.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          outletId: context.outletId,
+          code: existing.code,
+          id: { not: existing.id },
+          effectiveFrom: { lte: requestedEnd },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: start } }],
+        },
+        select: { id: true },
+      });
+      if (conflictingSibling) {
+        throw new SalaryError("SALARY_PROFILE_CONFLICT", 409);
       }
 
       const assignments = await tx.employeeSalaryAssignment.findMany({
@@ -686,12 +703,12 @@ async function deactivateSalaryEmployee(
     data: { status: "INACTIVE", effectiveUntil: new Date() },
   });
   for (const assignment of activeAssignments) {
-    const boundedCutoff = cutoff < assignment.effectiveFrom
-      ? assignment.effectiveFrom
-      : cutoff;
-    const effectiveTo = assignment.effectiveTo && assignment.effectiveTo < boundedCutoff
-      ? assignment.effectiveTo
-      : boundedCutoff;
+    const hasStarted = assignment.effectiveFrom <= cutoff;
+    const effectiveTo = hasStarted
+      ? assignment.effectiveTo && assignment.effectiveTo < cutoff
+        ? assignment.effectiveTo
+        : cutoff
+      : null;
     await tx.employeeSalaryAssignment.update({
       where: { id: assignment.id },
       data: { status: "INACTIVE", effectiveTo },

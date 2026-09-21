@@ -321,6 +321,43 @@ describe("Salary snapshot architecture", () => {
     ]) expect(snapshots).toContain(model);
   });
 
+  it("excludes inactive employees from a new closing snapshot", async () => {
+    const employeeFindMany = vi.fn().mockResolvedValue([]);
+    const tx = {
+      salaryEmployee: { findMany: employeeFindMany },
+      masterPickup: { findMany: vi.fn().mockResolvedValue([]) },
+      rawDispatch: { findMany: vi.fn().mockResolvedValue([]) },
+      operationalExpense: { findMany: vi.fn().mockResolvedValue([]) },
+      salaryEmployeeSnapshot: { findMany: vi.fn().mockResolvedValue([]) },
+      salaryClosing: { update: vi.fn().mockResolvedValue({}) },
+      salaryAudit: { create: vi.fn().mockResolvedValue({}) },
+    } as unknown as Prisma.TransactionClient;
+
+    await captureSalaryClosingSnapshots(
+      tx,
+      {
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        outletId: "22222222-2222-4222-8222-222222222222",
+        actorId: "33333333-3333-4333-8333-333333333333",
+        outletCode: "SUM001A",
+      },
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        periodStart: new Date("2026-10-01T00:00:00.000Z"),
+        periodEnd: new Date("2026-10-31T00:00:00.000Z"),
+        snapshotCapturedAt: null,
+      },
+    );
+
+    expect(employeeFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        outletId: "22222222-2222-4222-8222-222222222222",
+        status: "ACTIVE",
+      },
+    }));
+  });
+
   it("reuses immutable snapshots without reading operational sources again", async () => {
     const findEmployees = vi.fn().mockResolvedValue([]);
     const masterPickupFindMany = vi.fn();

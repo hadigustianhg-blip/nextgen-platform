@@ -54,6 +54,7 @@ import {
   listSalaryTeam,
   removeSalaryEmployee,
   removeSalaryProfile,
+  resolveSalaryAssignmentOnDate,
   salaryAssignmentSchema,
   salaryAdjustmentSchema,
   salaryClosingSchema,
@@ -294,6 +295,26 @@ describe("Salary team and assignment", () => {
       where: { id: "assignment-1" },
       data: { status: "INACTIVE", effectiveTo: expect.any(Date) },
     });
+    const closedAt = tx.employeeSalaryAssignment.update.mock.calls.find(
+      ([call]) => call.where.id === "assignment-1",
+    )?.[0].data.effectiveTo as Date;
+    const afterResignation = new Date(closedAt);
+    afterResignation.setUTCDate(afterResignation.getUTCDate() + 1);
+    expect(resolveSalaryAssignmentOnDate([{
+      effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+      effectiveTo: closedAt,
+      status: "INACTIVE" as const,
+      salaryProfile: {
+        status: "ACTIVE" as const,
+        effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+        effectiveTo: null,
+        division: "DRIVER",
+        setting: {},
+      },
+    }], afterResignation, "DRIVER")).toEqual({
+      assignment: null,
+      reason: "PROFILE_NOT_ASSIGNED",
+    });
     expect(tx.salaryEmployeeAlias.updateMany).toHaveBeenCalled();
     expect(tx.teamMembership.updateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({
@@ -306,6 +327,38 @@ describe("Salary team and assignment", () => {
     expect(tx.salaryAudit.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ action: "TEAM_DEACTIVATED" }),
     });
+  });
+
+  it("cancels a future assignment without leaving a valid future day", async () => {
+    tx.salaryEmployee.findFirst.mockResolvedValueOnce({
+      id: "employee-1", name: "Future Team", status: "ACTIVE",
+    });
+    const futureStart = new Date("2099-10-01T00:00:00.000Z");
+    tx.employeeSalaryAssignment.findMany.mockResolvedValueOnce([{
+      id: "assignment-future",
+      effectiveFrom: futureStart,
+      effectiveTo: new Date("2099-12-31T00:00:00.000Z"),
+    }]);
+
+    await removeSalaryEmployee(context, "employee-1");
+
+    expect(tx.employeeSalaryAssignment.update).toHaveBeenCalledWith({
+      where: { id: "assignment-future" },
+      data: { status: "INACTIVE", effectiveTo: null },
+    });
+    const resolved = resolveSalaryAssignmentOnDate([{
+      effectiveFrom: futureStart,
+      effectiveTo: null,
+      status: "INACTIVE" as const,
+      salaryProfile: {
+        status: "ACTIVE" as const,
+        effectiveFrom: new Date("2099-10-01T00:00:00.000Z"),
+        effectiveTo: null,
+        division: "DRIVER",
+        setting: {},
+      },
+    }], futureStart, "DRIVER");
+    expect(resolved).toEqual({ assignment: null, reason: "PROFILE_NOT_ACTIVE" });
   });
 
   it("rejects deletion of a team outside the session scope", async () => {
@@ -679,6 +732,34 @@ describe("Salary profile versioning", () => {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
     expect(tx.salaryProfile.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a second sibling version with an overlapping effective range", async () => {
+    tx.salaryProfile.findFirst
+      .mockResolvedValueOnce(existingProfile)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        ...existingProfile,
+        effectiveTo: new Date("2026-09-14T00:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({ id: "profile-2" });
+    tx.employeeSalaryAssignment.findMany.mockResolvedValueOnce([]);
+    tx.salaryProfile.create.mockResolvedValueOnce({
+      id: "profile-2", code: profileInput.code, version: 2,
+      division: "DRIVER",
+    });
+    tx.salaryProfile.findUniqueOrThrow.mockResolvedValueOnce({
+      id: "profile-2", version: 2, setting: {},
+    });
+
+    await expect(createSalaryProfileVersion(context, "profile-1", versionInput))
+      .resolves.toMatchObject({ id: "profile-2" });
+    await expect(createSalaryProfileVersion(context, "profile-1", {
+      ...versionInput,
+      version: 3,
+    })).rejects.toMatchObject({ code: "SALARY_PROFILE_CONFLICT", status: 409 });
+    expect(tx.salaryProfile.create).toHaveBeenCalledTimes(1);
+    expect(tx.employeeSalaryAssignment.create).not.toHaveBeenCalled();
   });
 });
 

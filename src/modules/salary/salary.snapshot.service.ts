@@ -175,6 +175,7 @@ export async function captureSalaryClosingSnapshots(
       where: {
         tenantId: context.tenantId,
         outletId: context.outletId,
+        status: "ACTIVE",
       },
       include: {
         aliases: { where: { isActive: true } },
