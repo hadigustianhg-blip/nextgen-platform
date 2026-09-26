@@ -2,8 +2,8 @@ import "server-only";
 import type { EmployeeCodChecklistMethod, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type { TeamContext } from "@/lib/auth/session";
-import { selectLatestCodRecords } from "@/modules/delivery-settlement/cod-deduplication";
-import { canonicalDispatchText, canonicalWaybill, selectLatestDispatchRecords } from "@/modules/delivery-settlement/dispatch-deduplication";
+import { getActiveFinancialDispatchDataset, type ActiveFinancialDispatchRecord } from "@/modules/delivery-settlement/active-dispatch-dataset";
+import { canonicalDispatchText, canonicalWaybill } from "@/modules/delivery-settlement/dispatch-deduplication";
 import { canonicalCourierName } from "./team-courier";
 
 export type CodListPackage = {
@@ -27,21 +27,15 @@ export type CodListSummary = {
 };
 
 type Money = { toNumber(): number } | number | string;
-type DispatchRow = {
-  id: string; waybillNo: string; courierNameRaw: string | null;
+type CodListDeliveryRow = {
+  waybillNo: string; courierNameRaw: string | null;
   receiverName: string | null; receiverAddress: string | null;
-  settlementTypeRaw: string | null; freightAmount: Money;
-  sourceFetchedAt: Date; dispatchAt: Date | null; updatedAt: Date; createdAt: Date;
-};
-type CodRow = {
-  id: string; waybillNo: string; courierNameRaw: string | null; codAmount: Money;
-  sourceFetchedAt: Date; signedAt: Date | null; updatedAt: Date; createdAt: Date;
+  settlementTypeRaw: string | null; freightAmount: Money; codValue: Money;
 };
 type ChecklistRow = { waybill: string; method: EmployeeCodChecklistMethod | null; checked: boolean };
 
 export type CodListReader = {
-  rawDispatch: { findMany(args: Prisma.RawDispatchFindManyArgs): Promise<DispatchRow[]> };
-  rawCod: { findMany(args: Prisma.RawCodFindManyArgs): Promise<CodRow[]> };
+  rawDispatch: { findMany(args: Prisma.RawDispatchFindManyArgs): Promise<ActiveFinancialDispatchRecord[]> };
   employeeCodChecklist: {
     findMany(args: Prisma.EmployeeCodChecklistFindManyArgs): Promise<ChecklistRow[]>;
     upsert(args: Prisma.EmployeeCodChecklistUpsertArgs): Promise<ChecklistRow>;
@@ -86,45 +80,28 @@ export function summarizeCodList(packages: CodListPackage[]): CodListSummary {
 }
 
 export function mergeCodListSources(input: {
-  dispatches: DispatchRow[];
-  cods: CodRow[];
+  dispatches: CodListDeliveryRow[];
   checklists: ChecklistRow[];
   acceptedNames: Set<string>;
 }) {
-  const dispatches = selectLatestDispatchRecords(input.dispatches);
-  const cods = selectLatestCodRecords(input.cods);
-  const dispatchByWaybill = new Map(dispatches.map((row) => [canonicalWaybill(row.waybillNo), row]));
   const checklistByWaybill = new Map(input.checklists.map((row) => [canonicalWaybill(row.waybill), row]));
   const packages = new Map<string, CodListPackage>();
   const belongsToEmployee = (name: string | null) => !!name && input.acceptedNames.has(canonicalCourierName(name));
 
-  for (const row of cods) {
+  for (const row of input.dispatches) {
     if (!belongsToEmployee(row.courierNameRaw)) continue;
     const waybill = canonicalWaybill(row.waybillNo);
     if (!waybill) continue;
-    const dispatch = dispatchByWaybill.get(waybill);
-    const state = checklistByWaybill.get(waybill);
-    packages.set(waybill, {
-      waybill,
-      recipientName: dispatch?.receiverName ?? null,
-      address: dispatch?.receiverAddress ?? null,
-      type: "COD",
-      amount: number(row.codAmount),
-      method: state?.method ?? null,
-      checked: state?.checked === true && state.method !== null,
-    });
-  }
-  for (const row of dispatches) {
-    const waybill = canonicalWaybill(row.waybillNo);
-    if (!waybill || packages.has(waybill) || !belongsToEmployee(row.courierNameRaw)) continue;
-    if (canonicalDispatchText(row.settlementTypeRaw) !== "DFOD") continue;
+    const codAmount = number(row.codValue);
+    const dfodAmount = canonicalDispatchText(row.settlementTypeRaw) === "DFOD" ? number(row.freightAmount) : 0;
+    if (codAmount <= 0 && dfodAmount <= 0) continue;
     const state = checklistByWaybill.get(waybill);
     packages.set(waybill, {
       waybill,
       recipientName: row.receiverName,
       address: row.receiverAddress,
-      type: "DFOD",
-      amount: number(row.freightAmount),
+      type: codAmount > 0 ? "COD" : "DFOD",
+      amount: codAmount > 0 ? codAmount : dfodAmount,
       method: state?.method ?? null,
       checked: state?.checked === true && state.method !== null,
     });
@@ -139,21 +116,19 @@ async function loadRows(input: {
 }) {
   const operationalDate = parseOperationalDate(input.businessDate);
   const scope = { tenantId: input.context.tenantId, outletId: input.context.outletId, operationalDate };
-  const [dispatches, cods, checklists] = await Promise.all([
-    input.client.rawDispatch.findMany({
-      where: { ...scope, syncStatus: "NORMALIZED", isActive: true },
-      select: { id: true, waybillNo: true, courierNameRaw: true, receiverName: true, receiverAddress: true, settlementTypeRaw: true, freightAmount: true, sourceFetchedAt: true, dispatchAt: true, updatedAt: true, createdAt: true },
-    }),
-    input.client.rawCod.findMany({
-      where: { ...scope, syncStatus: "NORMALIZED" },
-      select: { id: true, waybillNo: true, courierNameRaw: true, codAmount: true, sourceFetchedAt: true, signedAt: true, updatedAt: true, createdAt: true },
+  const [dispatches, checklists] = await Promise.all([
+    getActiveFinancialDispatchDataset({
+      tenantId: input.context.tenantId,
+      outletId: input.context.outletId,
+      operationalDate,
+      client: input.client,
     }),
     input.client.employeeCodChecklist.findMany({
       where: { ...scope, employeeId: input.context.salaryEmployeeId },
       select: { waybill: true, method: true, checked: true },
     }),
   ]);
-  return mergeCodListSources({ dispatches, cods, checklists, acceptedNames: input.acceptedNames });
+  return mergeCodListSources({ dispatches, checklists, acceptedNames: input.acceptedNames });
 }
 
 export async function getTeamCodList(input: {

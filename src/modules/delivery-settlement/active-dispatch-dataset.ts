@@ -89,3 +89,46 @@ export async function getActiveDispatchRecords(input: {
 }
 
 export const getActiveDispatchDataset = getActiveDispatchRecords;
+
+const financialDispatchSelect = {
+  ...dispatchSelect,
+  settlementTypeRaw: true,
+  freightAmount: true,
+  codValue: true,
+} satisfies Prisma.RawDispatchSelect;
+
+export type ActiveFinancialDispatchRecord = Prisma.RawDispatchGetPayload<{
+  select: typeof financialDispatchSelect;
+}>;
+
+type FinancialDispatchReader = {
+  rawDispatch: {
+    findMany(args: Prisma.RawDispatchFindManyArgs): Promise<ActiveFinancialDispatchRecord[]>;
+  };
+};
+
+export async function getActiveFinancialDispatchDataset(input: {
+  tenantId: string;
+  outletId: string;
+  operationalDate: Date;
+  client?: FinancialDispatchReader;
+}) {
+  const records = await (input.client ?? prisma as FinancialDispatchReader).rawDispatch.findMany({
+    where: {
+      tenantId: input.tenantId,
+      outletId: input.outletId,
+      operationalDate: input.operationalDate,
+      syncStatus: "NORMALIZED",
+      isActive: true,
+    },
+    select: financialDispatchSelect,
+    orderBy: [
+      { sourceFetchedAt: "desc" },
+      { dispatchAt: "desc" },
+      { updatedAt: "desc" },
+    ],
+  });
+  return selectLatestDispatchRecords(records.filter((record) =>
+    record.isActive && record.syncStatus === "NORMALIZED"
+  ));
+}

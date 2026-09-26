@@ -11,18 +11,15 @@ import {
 } from "./team-cod-list.service";
 
 const instant = new Date("2026-09-26T01:00:00.000Z");
-const dispatch = (waybillNo: string, courierNameRaw = "Employee A", settlementTypeRaw = "DFOD", freightAmount = 25_000) => ({
+const dispatch = (waybillNo: string, courierNameRaw = "Employee A", settlementTypeRaw: string | null = "DFOD", freightAmount = 25_000, codValue = 0) => ({
   id: `d-${waybillNo}`, waybillNo, courierNameRaw, receiverName: `Receiver ${waybillNo}`,
-  receiverAddress: `Address ${waybillNo}`, settlementTypeRaw, freightAmount,
+  receiverAddress: `Address ${waybillNo}`, settlementTypeRaw, freightAmount, codValue,
+  syncStatus: "NORMALIZED" as const, isActive: true, sourceRecordKey: `v2:dispatch:${waybillNo}`,
   sourceFetchedAt: instant, dispatchAt: instant, updatedAt: instant, createdAt: instant,
-});
-const cod = (waybillNo: string, courierNameRaw = "Employee A", codAmount = 50_000) => ({
-  id: `c-${waybillNo}`, waybillNo, courierNameRaw, codAmount,
-  sourceFetchedAt: instant, signedAt: instant, updatedAt: instant, createdAt: instant,
 });
 const accepted = new Set(["EMPLOYEE A"]);
 const merge = (input: Partial<Parameters<typeof mergeCodListSources>[0]> = {}) => mergeCodListSources({
-  dispatches: [], cods: [], checklists: [], acceptedNames: accepted, ...input,
+  dispatches: [], checklists: [], acceptedNames: accepted, ...input,
 });
 const item = (overrides: Partial<CodListPackage> = {}): CodListPackage => ({
   waybill: "WB", recipientName: null, address: null, type: "COD", amount: 100,
@@ -33,12 +30,11 @@ const context: TeamContext = {
   membershipId: "membership-a", salaryEmployeeId: "employee-a", employeeName: "Employee A", employeeStatus: "ACTIVE",
 };
 
-function fakeClient(source = { dispatches: [dispatch("DFOD-1")], cods: [cod("COD-1")], checklists: [] as Array<{ waybill: string; method: "CASH" | "TRANSFER" | null; checked: boolean }> }) {
+function fakeClient(source = { dispatches: [dispatch("DFOD-1"), dispatch("COD-1", "Employee A", "TUNAI", 0, 50_000)], checklists: [] as Array<{ waybill: string; method: "CASH" | "TRANSFER" | null; checked: boolean }> }) {
   const state = [...source.checklists];
   const calls: unknown[] = [];
   const client = {
     rawDispatch: { findMany: vi.fn(async (args) => { calls.push(args); return source.dispatches; }) },
-    rawCod: { findMany: vi.fn(async (args) => { calls.push(args); return source.cods; }) },
     employeeCodChecklist: {
       findMany: vi.fn(async (args) => { calls.push(args); return state; }),
       upsert: vi.fn(async (args: any) => {
@@ -55,21 +51,25 @@ function fakeClient(source = { dispatches: [dispatch("DFOD-1")], cods: [cod("COD
 }
 
 describe("employee COD List", () => {
-  it("shows COD from canonical RawCod", () => expect(merge({ cods: [cod("COD-1")] })).toMatchObject([{ waybill: "COD-1", type: "COD", amount: 50_000 }]));
+  it("shows every COD from canonical employee Delivery", () => expect(merge({ dispatches: [dispatch("COD-1", "Employee A", "TUNAI", 0, 50_000), dispatch("COD-2", "Employee A", null, 0, 60_000)] })).toMatchObject([{ waybill: "COD-1", type: "COD", amount: 50_000 }, { waybill: "COD-2", type: "COD", amount: 60_000 }]));
   it("shows DFOD from canonical active dispatch", () => expect(merge({ dispatches: [dispatch("DFOD-1")] })).toMatchObject([{ waybill: "DFOD-1", type: "DFOD", amount: 25_000 }]));
-  it("excludes non-COD/DFOD dispatch", () => expect(merge({ dispatches: [dispatch("REG-1", "Employee A", "TUNAI")] })).toEqual([]));
-  it("employee A sees only matching courier packages", () => expect(merge({ cods: [cod("A"), cod("B", "Employee B")] }).map((row) => row.waybill)).toEqual(["A"]));
-  it("employee B cannot see employee A packages", () => expect(mergeCodListSources({ dispatches: [], cods: [cod("A")], checklists: [], acceptedNames: new Set(["EMPLOYEE B"]) })).toEqual([]));
-  it("canonical employee aliases are exact, not fuzzy", () => expect(mergeCodListSources({ dispatches: [], cods: [cod("A", " Employee   A ")], checklists: [], acceptedNames: accepted })).toHaveLength(1));
-  it("restores persisted checklist state after refresh", () => expect(merge({ cods: [cod("A")], checklists: [{ waybill: "A", method: "CASH", checked: true }] })[0]).toMatchObject({ method: "CASH", checked: true }));
-  it("does not count checked without a method as complete", () => expect(merge({ cods: [cod("A")], checklists: [{ waybill: "A", method: null, checked: true }] })[0].checked).toBe(false));
+  it("shows multiple DFOD waybills", () => expect(merge({ dispatches: [dispatch("D1"), dispatch("D2")] })).toHaveLength(2));
+  it("excludes non-COD/DFOD dispatch", () => expect(merge({ dispatches: [dispatch("REG-1", "Employee A", "TUNAI", 0, 0)] })).toEqual([]));
+  it("does not depend on the partial RawCod dataset", () => expect(merge({ dispatches: [dispatch("C1", "Employee A", null, 0, 10), dispatch("C2", "Employee A", null, 0, 20), dispatch("C3", "Employee A", null, 0, 30)] })).toHaveLength(3));
+  it("combines COD and DFOD without duplicate waybill", () => expect(merge({ dispatches: [dispatch("ONE", "Employee A", "DFOD", 25_000, 50_000)] })).toEqual([expect.objectContaining({ waybill: "ONE", type: "COD", amount: 50_000 })]));
+  it("employee A sees only matching courier packages", () => expect(merge({ dispatches: [dispatch("A"), dispatch("B", "Employee B")] }).map((row) => row.waybill)).toEqual(["A"]));
+  it("employee B cannot see employee A packages", () => expect(mergeCodListSources({ dispatches: [dispatch("A")], checklists: [], acceptedNames: new Set(["EMPLOYEE B"]) })).toEqual([]));
+  it("canonical employee aliases are exact, not fuzzy", () => expect(mergeCodListSources({ dispatches: [dispatch("A", " Employee   A ")], checklists: [], acceptedNames: accepted })).toHaveLength(1));
+  it("restores persisted checklist state after refresh", () => expect(merge({ dispatches: [dispatch("A")], checklists: [{ waybill: "A", method: "CASH", checked: true }] })[0]).toMatchObject({ method: "CASH", checked: true }));
+  it("defaults packages without checklist to unchecked", () => expect(merge({ dispatches: [dispatch("A")] })[0]).toMatchObject({ method: null, checked: false }));
+  it("does not count checked without a method as complete", () => expect(merge({ dispatches: [dispatch("A")], checklists: [{ waybill: "A", method: null, checked: true }] })[0].checked).toBe(false));
   it("counts CASH checked in cash", () => expect(summarizeCodList([item({ method: "CASH", checked: true })])).toMatchObject({ cash: 100, unfinished: 0 }));
   it("counts TRANSFER checked in transfer", () => expect(summarizeCodList([item({ method: "TRANSFER", checked: true })])).toMatchObject({ transfer: 100, unfinished: 0 }));
   it("counts unchecked in unfinished", () => expect(summarizeCodList([item()]).unfinished).toBe(100));
   it("keeps selected method but unchecked in unfinished", () => expect(summarizeCodList([item({ method: "CASH" })])).toMatchObject({ cash: 0, unfinished: 100 }));
   it("preserves total = cash + transfer + unfinished", () => { const s = summarizeCodList([item({ amount: 10, method: "CASH", checked: true }), item({ amount: 20, method: "TRANSFER", checked: true }), item({ amount: 30 })]); expect(s.total).toBe(s.cash + s.transfer + s.unfinished); });
-  it("sorts unfinished before completed", () => expect(merge({ cods: [cod("DONE"), cod("TODO")], checklists: [{ waybill: "DONE", method: "CASH", checked: true }] }).map((row) => row.waybill)).toEqual(["TODO", "DONE"]));
-  it("deduplicates source versions and prefers COD over same-waybill DFOD", () => expect(merge({ dispatches: [dispatch("ONE")], cods: [cod("ONE"), { ...cod("ONE"), id: "new", sourceFetchedAt: new Date(instant.getTime() + 1) }] })).toMatchObject([{ waybill: "ONE", type: "COD" }]));
+  it("sorts unfinished before completed", () => expect(merge({ dispatches: [dispatch("DONE"), dispatch("TODO")], checklists: [{ waybill: "DONE", method: "CASH", checked: true }] }).map((row) => row.waybill)).toEqual(["TODO", "DONE"]));
+  it("summary includes the entire eligible Delivery dataset", () => expect(summarizeCodList(merge({ dispatches: [dispatch("D", "Employee A", "DFOD", 25_000), dispatch("C1", "Employee A", null, 0, 50_000), dispatch("C2", "Employee A", null, 0, 75_000)] }))).toMatchObject({ total: 150_000, unfinished: 150_000, packageCount: 3 }));
   it("uses strict date-only semantics without UTC shift", () => expect(parseOperationalDate("2026-09-26").toISOString()).toBe("2026-09-26T00:00:00.000Z"));
   it("defaults today using Asia/Jakarta timezone", () => expect(todayInJakarta(new Date("2026-09-25T18:00:00Z"))).toBe("2026-09-26"));
 
