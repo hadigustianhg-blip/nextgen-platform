@@ -24,10 +24,13 @@ describe("SLA cron", () => {
       now: () => new Date("2026-07-29T16:40:00.000Z"),
     });
     expect(listOutlets).toHaveBeenCalledWith(["outlet-1"]);
-    expect(syncOutlet).toHaveBeenCalledWith(expect.objectContaining({
+    expect(syncOutlet).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      outletId: "outlet-1",
+      expectedNetworkName: "SUM001A",
       actor: { actorType: "SYSTEM" },
       requireCurrentJakartaDate: true,
-    }));
+    });
     expect(result.success).toBe(1);
     expect(disconnect).toHaveBeenCalledOnce();
   });

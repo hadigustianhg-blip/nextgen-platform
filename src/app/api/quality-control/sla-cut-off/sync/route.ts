@@ -23,20 +23,23 @@ export async function POST(request: Request) {
       outletId,
       expectedNetworkName: outlet.code,
       actor: { actorType: "USER", actorId: session.userId },
+      targetDate: parsed.data.businessDate,
       periodStart: parsed.data.periodStart,
       periodEnd: parsed.data.periodEnd,
     });
     if (
       result.reason === "NETWORK_MISMATCH" ||
+      result.reason === "TARGET_DATE_MISMATCH" ||
       result.reason === "STALE_SNAPSHOT"
     ) {
       return NextResponse.json(
         {
           error: {
             code: result.reason,
-            message:
-              result.reason === "NETWORK_MISMATCH"
-                ? "Network sumber tidak sesuai dengan outlet."
+            message: result.reason === "NETWORK_MISMATCH"
+              ? "Network sumber tidak sesuai dengan outlet."
+              : result.reason === "TARGET_DATE_MISMATCH"
+                ? "Snapshot sumber tidak sesuai tanggal yang diminta."
                 : "Snapshot sumber belum menggunakan tanggal hari ini.",
           },
         },
@@ -51,6 +54,7 @@ export async function POST(request: Request) {
       skippedOutsidePeriod: result.reason === "OUTSIDE_PERIOD" ? 1 : 0,
       snapshotOnly: true,
       period: { startDate: parsed.data.periodStart, endDate: parsed.data.periodEnd },
+      businessDate: parsed.data.businessDate,
     });
   } catch (error) {
     return NextResponse.json({ error: { code: "SYNC_FAILED", message: error instanceof Error ? error.message : "Sinkronisasi gagal." } }, { status: 502 });

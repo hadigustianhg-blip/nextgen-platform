@@ -36,7 +36,7 @@ export type SlaSyncResult = {
   result: "CREATED" | "UPDATED" | "SKIPPED";
   businessDate?: string;
   sourceRecordKey?: string;
-  reason?: "NETWORK_MISMATCH" | "OUTSIDE_PERIOD" | "STALE_SNAPSHOT";
+  reason?: "NETWORK_MISMATCH" | "OUTSIDE_PERIOD" | "STALE_SNAPSHOT" | "TARGET_DATE_MISMATCH";
   attempts: number;
 };
 
@@ -77,12 +77,16 @@ export async function fetchAgingSignSnapshot(
   wait: (milliseconds: number) => Promise<unknown> = sleep,
   maxAttempts = 3,
   scope?: SettingsScope,
+  targetDate?: string,
 ) {
   const isSum001a = !scope || scope.outletId === "SUM001A" || process.env.USE_MULTI_OUTLET_SUM001A !== "true";
 
   if (scope && !isSum001a) {
     try {
-      const payload = await executeTrustedMultiOutletScraper(scope, "AGING_SIGN", { fetcher });
+      const payload = await executeTrustedMultiOutletScraper(scope, "AGING_SIGN", {
+        fetcher,
+        ...(targetDate ? { date: targetDate } : {}),
+      });
       if (!payload.success || !Array.isArray(payload.data) || payload.data.length !== 1) {
         throw new SlaSyncError(
           "Respons jfs-aging-sign tidak valid.",
@@ -99,6 +103,7 @@ export async function fetchAgingSignSnapshot(
   }
 
   const sourceEndpoint = resolveSlaSourceEndpoint();
+  if (targetDate) sourceEndpoint.searchParams.set("date", targetDate);
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const response = await fetcher(sourceEndpoint, {
@@ -187,11 +192,12 @@ export async function runSlaSyncForOutlet(
     actor: SlaSyncActor;
     periodStart?: string;
     periodEnd?: string;
+    targetDate?: string;
     requireCurrentJakartaDate?: boolean;
   },
   dependencies: {
     store: SlaSyncStore;
-    fetchSnapshot: () => Promise<{ record: AgingSignRecord; attempts: number }>;
+    fetchSnapshot: (targetDate?: string) => Promise<{ record: AgingSignRecord; attempts: number }>;
     now: () => Date;
   },
 ): Promise<SlaSyncResult> {
@@ -208,7 +214,10 @@ export async function runSlaSyncForOutlet(
       select: { code: true },
     });
     if (!outlet) throw new SlaSyncError("Outlet tidak valid.", "INVALID_RESPONSE", false);
-    const { record, attempts } = await dependencies.fetchSnapshot();
+    if (input.targetDate && !validIsoDate(input.targetDate)) {
+      throw new SlaSyncError("Tanggal target tidak valid.", "INVALID_RESPONSE", false);
+    }
+    const { record, attempts } = await dependencies.fetchSnapshot(input.targetDate);
     if (!validIsoDate(record.queryTime)) {
       throw new SlaSyncError("queryTime sumber tidak valid.", "INVALID_RESPONSE", false);
     }
@@ -216,6 +225,7 @@ export async function runSlaSyncForOutlet(
     auditContext = { businessDate: record.queryTime, sourceRecordKey };
     let reason: SlaSyncResult["reason"];
     if (record.networkName !== input.expectedNetworkName) reason = "NETWORK_MISMATCH";
+    else if (input.targetDate && record.queryTime !== input.targetDate) reason = "TARGET_DATE_MISMATCH";
     else if (
       input.requireCurrentJakartaDate &&
       record.queryTime !== jakartaDate(dependencies.now())
@@ -290,11 +300,12 @@ export function syncSlaCutOffForOutlet(input: {
   actor: SlaSyncActor;
   periodStart?: string;
   periodEnd?: string;
+  targetDate?: string;
   requireCurrentJakartaDate?: boolean;
 }) {
   return runSlaSyncForOutlet(input, {
     store: prisma,
-    fetchSnapshot: () => fetchAgingSignSnapshot(),
+    fetchSnapshot: (targetDate) => fetchAgingSignSnapshot(fetch, sleep, 3, undefined, targetDate),
     now: () => new Date(),
   });
 }

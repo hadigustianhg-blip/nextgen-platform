@@ -23,6 +23,7 @@ export function SlaCutOffClient({ outlets, initialOutletId, businessDate, canSyn
   }), [active]);
   const [outletId, setOutletId] = useState(initialOutletId);
   const [periodStart, setPeriodStart] = useState(active.startDate);
+  const [syncDate, setSyncDate] = useState(businessDate);
   const periodEnd = cycles.find((cycle) => cycle.startDate === periodStart)?.endDate ?? active.endDate;
   const [result, setResult] = useState(empty);
   const [loading, setLoading] = useState(true);
@@ -46,7 +47,7 @@ export function SlaCutOffClient({ outlets, initialOutletId, businessDate, canSyn
   const sync = async () => {
     setSyncing(true); setNotice("");
     try {
-      const response = await fetch("/api/quality-control/sla-cut-off/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ outletId, periodStart, periodEnd }) });
+      const response = await fetch("/api/quality-control/sla-cut-off/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ outletId, periodStart, periodEnd, businessDate: syncDate }) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error?.message ?? "Sinkronisasi gagal.");
       setNotice(payload.skippedOutsidePeriod ? "Snapshot sumber berada di luar periode terpilih; tidak ada histori yang diubah." : "Snapshot SLA berhasil disinkronkan.");
@@ -68,6 +69,7 @@ export function SlaCutOffClient({ outlets, initialOutletId, businessDate, canSyn
     <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       <label className="text-xs font-semibold text-slate-600">Periode SLA<select aria-label="Periode SLA" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm">{cycles.map((cycle) => <option key={cycle.startDate} value={cycle.startDate}>{cycleLabel(cycle.startDate, cycle.endDate)}</option>)}</select></label>
       <label className="text-xs font-semibold text-slate-600">Outlet<select aria-label="Outlet" value={outletId} onChange={(e) => setOutletId(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm">{outlets.map((outlet) => <option key={outlet.id} value={outlet.id}>{outlet.code} — {outlet.name}</option>)}</select></label>
+      <label className="text-xs font-semibold text-slate-600">Tanggal Sinkronisasi<input aria-label="Tanggal Sinkronisasi" type="date" value={syncDate} min={periodStart} max={periodEnd} onChange={(e) => setSyncDate(e.target.value)} className="mt-1 h-11 w-full rounded-xl border border-slate-200 px-3 text-sm"/></label>
       <button disabled={loading || syncing} onClick={() => void load()} className="mt-auto flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 font-semibold text-slate-700 disabled:opacity-50"><RefreshCw size={17}/>Refresh</button>
       {canSync && <button disabled={loading || syncing} onClick={() => void sync()} className="mt-auto flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 font-semibold text-white disabled:opacity-50">{syncing && <LoaderCircle className="animate-spin" size={17}/>} {syncing ? "Menyinkronkan..." : "Sinkronkan Data"}</button>}
     </div><p className="mt-3 text-xs text-slate-500">Periode aktif: {cycleLabel(active.startDate, active.endDate)}. Sumber menyediakan snapshot per hari; histori terbentuk dari sinkronisasi harian.</p>{notice && <p role="status" className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-700">{notice}</p>}</section>

@@ -73,6 +73,63 @@ describe("shared SLA sync", () => {
     });
   });
 
+  it("uses the explicit target date for source query and persistence", async () => {
+    const state = createStore();
+    const fetchSnapshot = vi.fn(async () => ({
+      record: { ...record, queryTime: "2026-09-25" },
+      attempts: 1,
+    }));
+    const result = await runSlaSyncForOutlet(
+      { ...input, targetDate: "2026-09-25" },
+      {
+        store: state.store,
+        fetchSnapshot,
+        now: () => new Date("2026-09-26T17:30:00.000Z"),
+      },
+    );
+
+    expect(fetchSnapshot).toHaveBeenCalledWith("2026-09-25");
+    expect(result.businessDate).toBe("2026-09-25");
+    expect(state.upserts[0]).toMatchObject({
+      where: { tenantId_outletId_businessDate_sourceRecordKey: {
+        businessDate: new Date("2026-09-25T00:00:00.000Z"),
+        sourceRecordKey: "SUM001A:2026-09-25",
+      } },
+    });
+  });
+
+  it("does not replace an explicit target with the current Jakarta date", async () => {
+    const state = createStore();
+    const result = await runSlaSyncForOutlet(
+      { ...input, targetDate: "2026-09-25" },
+      {
+        store: state.store,
+        fetchSnapshot: async () => ({
+          record: { ...record, queryTime: "2026-09-26" },
+          attempts: 1,
+        }),
+        now: () => new Date("2026-09-25T17:30:00.000Z"),
+      },
+    );
+
+    expect(result).toMatchObject({ result: "SKIPPED", reason: "TARGET_DATE_MISMATCH" });
+    expect(state.upserts).toHaveLength(0);
+  });
+
+  it("passes an explicit date to the legacy JFS source query", async () => {
+    const fetcher = vi.fn(async () => new Response(
+      JSON.stringify({ success: true, data: [{ ...record, queryTime: "2026-09-25" }] }),
+      { status: 200 },
+    ));
+
+    await fetchAgingSignSnapshot(fetcher, vi.fn(async () => undefined), 1, undefined, "2026-09-25");
+
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL("https://middleware.example.test/jfs-aging-sign?date=2026-09-25"),
+      expect.any(Object),
+    );
+  });
+
   it("skips a network mismatch without writing RAW data", async () => {
     const state = createStore();
     const result = await runSlaSyncForOutlet(input, {
