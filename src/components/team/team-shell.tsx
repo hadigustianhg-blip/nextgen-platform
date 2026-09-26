@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarPlus, ClipboardList, Home, PackageCheck, UserRound } from "lucide-react";
+import { BadgeDollarSign, CalendarPlus, ClipboardList, Home, PackageCheck, UserRound } from "lucide-react";
 import { TeamPwaInstall } from "@/components/pwa/team-pwa-install";
 import { TeamServiceWorkerRegistration } from "@/components/pwa/team-service-worker-registration";
 
@@ -12,6 +12,7 @@ const navigation = [
   { href: "/team/attendance", label: "Absensi", icon: ClipboardList },
   { href: "/team/leave", label: "Pengajuan", icon: CalendarPlus },
   { href: "/team/delivery", label: "Operasional", icon: PackageCheck },
+  { href: "/team/cod-list", label: "COD List", icon: BadgeDollarSign },
   { href: "/team/profile", label: "Profil", icon: UserRound },
 ] as const;
 
@@ -51,7 +52,7 @@ export function TeamShell({ children, employeeName, outletCode, greeting }: {
       </main>
 
       <nav aria-label="Navigasi Team" className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/96 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur">
-        <div className="mx-auto grid max-w-3xl grid-cols-5 px-1.5 pt-1.5 sm:px-5">
+        <div className="mx-auto grid max-w-3xl grid-cols-6 px-1.5 pt-1.5 sm:px-5">
           {navigation.map((item) => {
             const active = isTeamNavActive(pathname, item.href);
             const Icon = item.icon;

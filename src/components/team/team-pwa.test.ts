@@ -10,7 +10,7 @@ const read = (file: string) => readFile(`${root}/${file}`, "utf8");
 describe("NEXTGEN Team PWA shell", () => {
   it("uses the canonical mobile navigation and exact active state", async () => {
     const source = await read("src/components/team/team-shell.tsx");
-    for (const route of ["/team", "/team/attendance", "/team/leave", "/team/delivery", "/team/profile"]) expect(source).toContain(route);
+    for (const route of ["/team", "/team/attendance", "/team/leave", "/team/delivery", "/team/cod-list", "/team/profile"]) expect(source).toContain(route);
     expect(isTeamNavActive("/team", "/team")).toBe(true);
     expect(isTeamNavActive("/team/attendance", "/team/attendance")).toBe(true);
     expect(isTeamNavActive("/team/profile", "/team/attendance")).toBe(false);
@@ -21,7 +21,7 @@ describe("NEXTGEN Team PWA shell", () => {
   it("keeps every Team route protected and unfinished placeholders non-mutating", async () => {
     for (const file of [
       "src/app/team/page.tsx", "src/app/team/attendance/page.tsx", "src/app/team/leave/page.tsx",
-      "src/app/team/delivery/page.tsx", "src/app/team/cash-advance/page.tsx", "src/app/team/profile/page.tsx", "src/app/team/offline/page.tsx",
+      "src/app/team/delivery/page.tsx", "src/app/team/cod-list/page.tsx", "src/app/team/cash-advance/page.tsx", "src/app/team/profile/page.tsx", "src/app/team/offline/page.tsx",
     ]) expect(await read(file), file).toContain("requireTeamContext()");
     const placeholders = await Promise.all(["src/app/team/delivery/page.tsx", "src/app/team/cash-advance/page.tsx"].map(read));
     expect(placeholders.join("\n")).not.toMatch(/fetch\(|POST|localStorage|RawDispatch/);

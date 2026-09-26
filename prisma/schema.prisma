@@ -254,6 +254,11 @@ enum SalaryKasbonAllocationStatus {
   VOID
 }
 
+enum EmployeeCodChecklistMethod {
+  CASH
+  TRANSFER
+}
+
 model Tenant {
   id                         String                         @id @default(uuid()) @db.Uuid
   name                       String
@@ -320,6 +325,7 @@ model Tenant {
   attendanceRecords          AttendanceRecord[]
   attendanceEvents           AttendanceEvent[]
   leaveRequests              LeaveRequest[]
+  employeeCodChecklists      EmployeeCodChecklist[]
 }
 
 model Outlet {
@@ -374,6 +380,7 @@ model Outlet {
   salaryClosingSources       SalaryClosingSourceRecord[]
   salaryKasbonAllocations    SalaryKasbonAllocation[]
   salaryPublicationShares    SalaryPublicationShare[]
+  employeeCodChecklists      EmployeeCodChecklist[]
   jfsCashflowRecords         JfsCashflowRecord[]
   jfsCashflowSyncRuns        JfsCashflowSyncRun[]
   jfsCashflowSyncLocks       JfsCashflowSyncLock[]
@@ -1499,9 +1506,29 @@ model SalaryEmployee {
   attendanceRecords AttendanceRecord[]
   attendanceEvents  AttendanceEvent[]
   leaveRequests     LeaveRequest[]
+  codChecklists     EmployeeCodChecklist[]
 
   @@unique([tenantId, outletId, name])
   @@index([tenantId, outletId, division, status])
+}
+
+model EmployeeCodChecklist {
+  id              String                      @id @default(uuid()) @db.Uuid
+  tenantId        String                      @db.Uuid
+  outletId        String                      @db.Uuid
+  employeeId      String                      @db.Uuid
+  waybill         String
+  operationalDate DateTime                    @db.Date
+  method          EmployeeCodChecklistMethod?
+  checked         Boolean                     @default(false)
+  createdAt       DateTime                    @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime                    @updatedAt @db.Timestamptz(3)
+  tenant          Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  outlet          Outlet                      @relation(fields: [outletId], references: [id], onDelete: Restrict)
+  employee        SalaryEmployee              @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, outletId, employeeId, waybill, operationalDate])
+  @@index([tenantId, outletId, employeeId, operationalDate])
 }
 
 model TeamMembership {
