@@ -32,8 +32,16 @@ type PdfInvoice = {
     freightAmount: { toString(): string };
     discountAmount: { toString(): string };
     finalAmount: { toString(): string };
+    masterPickup?: {
+      rawPickup: {
+        receiverName: string | null;
+        receiverAddress: string | null;
+      };
+    } | null;
   }>;
 };
+
+type PdfInvoiceItem = PdfInvoice["items"][number];
 
 type BankAccount = {
   bankName: string;
@@ -58,7 +66,7 @@ type PdfOptions = {
   timeoutMs?: number;
 };
 
-const PAGE = { width: 595.28, height: 841.89, margin: 36, footerTop: 760 };
+const PAGE = { width: 841.89, height: 595.28, margin: 36, footerTop: 514 };
 const CONTENT_WIDTH = PAGE.width - (PAGE.margin * 2);
 const PRIMARY = "#14532D";
 const DARK = "#172033";
@@ -154,22 +162,40 @@ function drawSummaryBox(
     });
 }
 
-const tableColumns = [
-  { label: "No", width: 22, align: "center" as const },
-  { label: "Tanggal", width: 48, align: "center" as const },
-  { label: "No Resi", width: 77, align: "center" as const },
-  { label: "Staff Pickup", width: 61, align: "left" as const },
-  { label: "Pengirim", width: 85, align: "left" as const },
+export const invoicePdfTableColumns = [
+  { label: "No", width: 20, align: "center" as const },
+  { label: "Tanggal", width: 44, align: "center" as const },
+  { label: "No Resi", width: 70, align: "center" as const },
+  { label: "Staff Pickup", width: 58, align: "left" as const },
+  { label: "Pengirim", width: 72, align: "left" as const },
+  { label: "Penerima", width: 72, align: "left" as const },
+  { label: "Alamat Penerima", width: 155, align: "left" as const },
   { label: "Berat", width: 36, align: "right" as const },
-  { label: "Ongkir", width: 62, align: "right" as const },
-  { label: "Diskon", width: 58, align: "right" as const },
-  { label: "Final Ongkir", width: 74, align: "right" as const },
+  { label: "Jumlah Ongkir", width: 76, align: "right" as const },
+  { label: "Diskon", width: 68, align: "right" as const },
+  { label: "Final Ongkir", width: 98, align: "right" as const },
 ];
+
+export function invoicePdfTableValues(item: PdfInvoiceItem, index: number) {
+  return [
+    String(index + 1),
+    dateText(item.transactionDate),
+    cleanText(item.waybillNumber),
+    cleanText(item.pickupStaff),
+    cleanText(item.sellerNameSnapshot),
+    cleanText(item.masterPickup?.rawPickup.receiverName),
+    cleanText(item.masterPickup?.rawPickup.receiverAddress),
+    item.weight.toString(),
+    rupiah(item.freightAmount),
+    rupiah(item.discountAmount),
+    rupiah(item.finalAmount),
+  ];
+}
 
 function drawTableHeader(doc: PDFKit.PDFDocument, y: number) {
   doc.rect(PAGE.margin, y, CONTENT_WIDTH, 25).fill(PRIMARY);
   let x = PAGE.margin;
-  for (const column of tableColumns) {
+  for (const column of invoicePdfTableColumns) {
     doc.font("Helvetica-Bold").fontSize(6.5).fillColor(WHITE)
       .text(column.label, x + 3, y + 8, {
         width: column.width - 6,
@@ -189,11 +215,10 @@ function tableRowHeight(
   doc.font("Helvetica").fontSize(7);
   const contentHeights = values.map((value, index) =>
     doc.heightOfString(value, {
-      width: tableColumns[index].width - 6,
-      height: 20,
+      width: invoicePdfTableColumns[index].width - 6,
       lineGap: 0,
     }));
-  return Math.max(25, Math.min(34, Math.max(...contentHeights) + 10));
+  return Math.max(25, Math.min(62, Math.max(...contentHeights) + 10));
 }
 
 function drawTableRow(
@@ -207,7 +232,7 @@ function drawTableRow(
     .fill(rowIndex % 2 ? PALE : WHITE)
     .strokeColor(BORDER).lineWidth(0.35).stroke();
   let x = PAGE.margin;
-  for (const [index, column] of tableColumns.entries()) {
+  for (const [index, column] of invoicePdfTableColumns.entries()) {
     if (index) {
       doc.moveTo(x, y).lineTo(x, y + height)
         .strokeColor(BORDER).lineWidth(0.25).stroke();
@@ -233,7 +258,7 @@ function drawWatermark(doc: PDFKit.PDFDocument, status: string) {
   doc.save().fillColor("#94A3B8").fillOpacity(0.09)
     .font("Helvetica-Bold").fontSize(78)
     .rotate(-32, { origin: [PAGE.width / 2, PAGE.height / 2] })
-    .text(label, 90, 375, { width: 415, align: "center" })
+    .text(label, 175, 255, { width: 490, align: "center" })
     .restore();
 }
 
@@ -313,6 +338,7 @@ function drawPaymentAccounts(
       { width: CONTENT_WIDTH },
     );
   }
+  doc.y += 12;
 }
 
 function drawFooter(
@@ -357,17 +383,17 @@ function drawInvoiceHeader(doc: PDFKit.PDFDocument, invoice: PdfInvoice) {
     .text("Dokumen tagihan elektronik", PAGE.margin, top + 34, { width: 225 });
 
   doc.font("Helvetica-Bold").fontSize(13).fillColor(DARK)
-    .text(outletIdentity(invoice), 318, top, {
+    .text(outletIdentity(invoice), PAGE.width - PAGE.margin - 241, top, {
       width: 241, align: "right",
     });
   doc.font("Helvetica-Bold").fontSize(9).fillColor(PRIMARY)
-    .text(cleanText(invoice.outlet.code), 318, doc.y + 2, {
+    .text(cleanText(invoice.outlet.code), PAGE.width - PAGE.margin - 241, doc.y + 2, {
       width: 241, align: "right",
     });
   const tenantName = tenantIdentity(invoice.tenant.name);
   if (tenantName) {
     doc.font("Helvetica").fontSize(8).fillColor(MUTED)
-      .text(tenantName, 318, doc.y + 2, {
+      .text(tenantName, PAGE.width - PAGE.margin - 241, doc.y + 2, {
         width: 241, align: "right",
       });
   }
@@ -400,11 +426,11 @@ function drawInvoiceHeader(doc: PDFKit.PDFDocument, invoice: PdfInvoice) {
       width: 245, height: 54, ellipsis: true,
     });
 
-  const detailX = 318;
+  const detailX = PAGE.width - PAGE.margin - 241;
   drawKeyValue(doc, "Nomor Invoice", invoice.invoiceNumber || "DRAFT", detailX, customerY, 115);
-  drawKeyValue(doc, "Status", invoice.status, 450, customerY, 109);
+  drawKeyValue(doc, "Status", invoice.status, detailX + 132, customerY, 109);
   drawKeyValue(doc, "Tanggal Invoice", dateText(invoice.invoiceDate), detailX, customerY + 34, 115);
-  drawKeyValue(doc, "Jatuh Tempo", dateText(invoice.dueDate), 450, customerY + 34, 109);
+  drawKeyValue(doc, "Jatuh Tempo", dateText(invoice.dueDate), detailX + 132, customerY + 34, 109);
   drawKeyValue(
     doc,
     "Periode Tagihan",
@@ -484,6 +510,7 @@ export async function createInvoicePdf(
     try {
       doc = new PDFDocument({
         size: "A4",
+        layout: "landscape",
         margin: PAGE.margin,
         bufferPages: true,
         autoFirstPage: false,
@@ -513,17 +540,7 @@ export async function createInvoicePdf(
 
       drawTableHeader(doc, doc.y);
       invoice.items.forEach((item, index) => {
-        const values = [
-          String(index + 1),
-          dateText(item.transactionDate),
-          cleanText(item.waybillNumber),
-          cleanText(item.pickupStaff),
-          cleanText(item.sellerNameSnapshot),
-          item.weight.toString(),
-          rupiah(item.freightAmount),
-          rupiah(item.discountAmount),
-          rupiah(item.finalAmount),
-        ];
+        const values = invoicePdfTableValues(item, index);
         const height = tableRowHeight(doc, values);
         ensurePageSpace(doc, invoice, height, true);
         drawTableRow(doc, values, doc.y, index);

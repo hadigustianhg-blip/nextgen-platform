@@ -62,7 +62,12 @@ import {
   invoiceDraftSchema, invoiceRangeSchema, invoiceVoidSchema,
   outletBankAccountSchema,
 } from "./invoice.validation";
-import { createInvoicePdf, invoicePdfFilename } from "./invoice.pdf";
+import {
+  createInvoicePdf,
+  invoicePdfFilename,
+  invoicePdfTableColumns,
+  invoicePdfTableValues,
+} from "./invoice.pdf";
 import {
   buildSenderDetailUrl,
   fetchInvoiceRecipientDetail,
@@ -1134,6 +1139,10 @@ describe("Invoice persistence and PDF contracts", () => {
         sellerNameSnapshot: "Seller", weight: decimal("2.5"),
         freightAmount: decimal(100000), discountAmount: decimal(10000),
         finalAmount: decimal(90000),
+        masterPickup: { rawPickup: {
+          receiverName: "Recipient Test",
+          receiverAddress: "Address Test",
+        } },
       }],
     };
     const pdf = await createInvoicePdf(invoice, [{
@@ -1144,6 +1153,75 @@ describe("Invoice persistence and PDF contracts", () => {
     expect(invoicePdfFilename(invoice)).toBe(
       "Invoice_INV-OUT001-2026-07-0001_Anggrek-Cibogo.pdf",
     );
+  });
+
+  it("maps recipient details per waybill without changing financial values", () => {
+    const first = invoicePdfTableValues({
+      transactionDate: new Date("2026-07-20T00:00:00.000Z"),
+      waybillNumber: "WB001",
+      pickupStaff: "Staff Alpha",
+      sellerNameSnapshot: "Sender Alpha",
+      weight: decimal("2.5"),
+      freightAmount: decimal(100000),
+      discountAmount: decimal(10000),
+      finalAmount: decimal(90000),
+      masterPickup: { rawPickup: {
+        receiverName: "Recipient Alpha",
+        receiverAddress: "Address Alpha",
+      } },
+    }, 0);
+    const second = invoicePdfTableValues({
+      transactionDate: new Date("2026-07-21T00:00:00.000Z"),
+      waybillNumber: "WB002",
+      pickupStaff: "Staff Beta",
+      sellerNameSnapshot: "Sender Beta",
+      weight: decimal("3"),
+      freightAmount: decimal(120000),
+      discountAmount: decimal(20000),
+      finalAmount: decimal(100000),
+      masterPickup: { rawPickup: {
+        receiverName: "Recipient Beta",
+        receiverAddress: "Address Beta",
+      } },
+    }, 1);
+
+    expect(invoicePdfTableColumns.map(({ label }) => label)).toEqual([
+      "No", "Tanggal", "No Resi", "Staff Pickup", "Pengirim", "Penerima",
+      "Alamat Penerima", "Berat", "Jumlah Ongkir", "Diskon", "Final Ongkir",
+    ]);
+    expect(first).toEqual([
+      "1", "20 Jul 2026", "WB001", "Staff Alpha", "Sender Alpha",
+      "Recipient Alpha", "Address Alpha", "2.5", "Rp 100.000", "Rp 10.000",
+      "Rp 90.000",
+    ]);
+    expect(second).toEqual([
+      "2", "21 Jul 2026", "WB002", "Staff Beta", "Sender Beta",
+      "Recipient Beta", "Address Beta", "3", "Rp 120.000", "Rp 20.000",
+      "Rp 100.000",
+    ]);
+    expect(second[5]).not.toBe(first[5]);
+    expect(second[6]).not.toBe(first[6]);
+  });
+
+  it("uses the existing PDF fallback for missing row recipient details", () => {
+    const values = invoicePdfTableValues({
+      transactionDate: new Date("2026-07-20T00:00:00.000Z"),
+      waybillNumber: "WB003",
+      pickupStaff: null,
+      sellerNameSnapshot: "Sender",
+      weight: decimal(1),
+      freightAmount: decimal(50000),
+      discountAmount: decimal(0),
+      finalAmount: decimal(50000),
+      masterPickup: { rawPickup: {
+        receiverName: null,
+        receiverAddress: "   ",
+      } },
+    }, 0);
+
+    expect(values[3]).toBe("—");
+    expect(values[5]).toBe("—");
+    expect(values[6]).toBe("—");
   });
 
   it("creates a draft PDF with null-safe fields and all stream phases", async () => {
